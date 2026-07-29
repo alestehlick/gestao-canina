@@ -1,181 +1,113 @@
-import { and, eq, or } from "drizzle-orm";
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { and, count, eq, gt, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
-import { appUsers } from "@/db/schema";
+import {
+  adminCredentials,
+  adminSessions,
+  appUsers,
+  establishments,
+} from "@/db/schema";
 import { HttpError } from "./http";
-import { runtimeValue } from "./runtime";
+import {
+  hashSessionToken,
+  readSessionToken,
+} from "./password-auth";
 
 export type AppRole = "owner" | "staff" | "finance" | "customer";
 
 export type Identity = {
-  provider: "sites" | "cloudflare-access" | "development";
+  provider: "password";
   subject: string;
   email: string;
   displayName: string;
   role: AppRole;
   userId: string | null;
   establishmentId: string | null;
+  sessionExpiresAt: string;
 };
 
-const trustedOwnerRoles: AppRole[] = ["owner"];
-
-function normalizedEmail(value: string) {
-  return value.trim().toLowerCase();
-}
-
-function configuredOwnerEmails() {
-  return new Set(
-    (runtimeValue("OWNER_EMAILS") ?? "")
-      .split(",")
-      .map(normalizedEmail)
-      .filter(Boolean),
-  );
-}
-
-async function verifyCloudflareIdentity(
-  request: Request,
-): Promise<{
-  subject: string;
-  email: string;
-  displayName: string;
-} | null> {
-  const emailHeader = request.headers.get(
-    "cf-access-authenticated-user-email",
-  );
-  const assertion = request.headers.get("cf-access-jwt-assertion");
-  if (!emailHeader || !assertion) return null;
-
-  const teamDomain = runtimeValue("CLOUDFLARE_ACCESS_TEAM_DOMAIN");
-  const audience = runtimeValue("CLOUDFLARE_ACCESS_AUD");
-  if (!teamDomain || !audience) {
-    throw new HttpError(
-      503,
-      "access_not_configured",
-      "A validação do Cloudflare Access ainda não foi configurada.",
-    );
-  }
-
-  const normalizedTeamDomain = teamDomain.replace(/^https?:\/\//, "").replace(
-    /\/+$/,
-    "",
-  );
-  const issuer = `https://${normalizedTeamDomain}`;
-  const jwks = createRemoteJWKSet(
-    new URL(`${issuer}/cdn-cgi/access/certs`),
-  );
-  const { payload } = await jwtVerify(assertion, jwks, {
-    issuer,
-    audience,
-  });
-  const tokenEmail =
-    typeof payload.email === "string"
-      ? payload.email
-      : typeof payload.sub === "string" && payload.sub.includes("@")
-        ? payload.sub
-        : null;
-  if (!tokenEmail || normalizedEmail(tokenEmail) !== normalizedEmail(emailHeader)) {
-    throw new HttpError(
-      401,
-      "invalid_identity",
-      "A identidade recebida não pôde ser confirmada.",
-    );
-  }
-
+export async function getAdminConfigurationState() {
+  const db = getDb();
+  const [[establishmentCount], [credentialCount], [activeOwnerCount]] =
+    await Promise.all([
+      db.select({ value: count() }).from(establishments),
+      db.select({ value: count() }).from(adminCredentials),
+      db
+        .select({ value: count() })
+        .from(adminCredentials)
+        .innerJoin(appUsers, eq(appUsers.id, adminCredentials.userId))
+        .where(
+          and(
+            eq(appUsers.role, "owner"),
+            eq(appUsers.status, "active"),
+          ),
+        ),
+    ]);
+  const establishmentsTotal = establishmentCount?.value ?? 0;
+  const credentialsTotal = credentialCount?.value ?? 0;
+  const activeOwnersTotal = activeOwnerCount?.value ?? 0;
   return {
-    subject: String(payload.sub ?? normalizedEmail(tokenEmail)),
-    email: normalizedEmail(tokenEmail),
-    displayName:
-      typeof payload.name === "string" ? payload.name : tokenEmail.split("@")[0],
+    setupRequired:
+      establishmentsTotal <= 1 &&
+      credentialsTotal === 0 &&
+      activeOwnersTotal === 0,
+    valid:
+      establishmentsTotal === 1 &&
+      credentialsTotal === 2 &&
+      activeOwnersTotal === 2,
+  };
+}
+
+async function getPasswordSessionIdentity(
+  request: Request,
+): Promise<Identity | null> {
+  const token = readSessionToken(request);
+  if (!token) return null;
+  const tokenHash = await hashSessionToken(token);
+  const db = getDb();
+  const [session] = await db
+    .select({
+      userId: appUsers.id,
+      establishmentId: appUsers.establishmentId,
+      externalSubject: appUsers.externalSubject,
+      email: appUsers.normalizedEmail,
+      displayName: appUsers.displayName,
+      role: appUsers.role,
+      expiresAt: adminSessions.expiresAt,
+    })
+    .from(adminSessions)
+    .innerJoin(appUsers, eq(appUsers.id, adminSessions.userId))
+    .innerJoin(
+      adminCredentials,
+      eq(adminCredentials.userId, appUsers.id),
+    )
+    .where(
+      and(
+        eq(adminSessions.tokenHash, tokenHash),
+        isNull(adminSessions.revokedAt),
+        gt(adminSessions.expiresAt, new Date().toISOString()),
+        eq(appUsers.status, "active"),
+      ),
+    )
+    .limit(1);
+  if (!session) return null;
+  const configuration = await getAdminConfigurationState();
+  if (!configuration.valid) return null;
+  return {
+    provider: "password",
+    subject: session.externalSubject,
+    email: session.email,
+    displayName: session.displayName,
+    role: session.role,
+    userId: session.userId,
+    establishmentId: session.establishmentId,
+    sessionExpiresAt: session.expiresAt,
   };
 }
 
 export async function getIdentity(
   request: Request,
-  options: { allowUnprovisionedOwner?: boolean } = {},
 ): Promise<Identity | null> {
-  const sitesEmail = request.headers.get("oai-authenticated-user-email");
-  if (sitesEmail) {
-    const encodedFullName = request.headers.get(
-      "oai-authenticated-user-full-name",
-    );
-    const fullName =
-      encodedFullName &&
-      request.headers.get("oai-authenticated-user-full-name-encoding") ===
-        "percent-encoded-utf-8"
-        ? safeDecodeURIComponent(encodedFullName)
-        : null;
-    return {
-      provider: "sites",
-      subject: `sites:${normalizedEmail(sitesEmail)}`,
-      email: normalizedEmail(sitesEmail),
-      displayName: fullName ?? sitesEmail.split("@")[0],
-      role: "owner",
-      userId: null,
-      establishmentId: runtimeValue("DEFAULT_ESTABLISHMENT_ID") ?? null,
-    };
-  }
-
-  const cloudflareIdentity = await verifyCloudflareIdentity(request);
-  if (cloudflareIdentity) {
-    const ownerEmails = configuredOwnerEmails();
-    if (
-      options.allowUnprovisionedOwner &&
-      ownerEmails.has(cloudflareIdentity.email)
-    ) {
-      return {
-        provider: "cloudflare-access",
-        ...cloudflareIdentity,
-        role: "owner",
-        userId: null,
-        establishmentId: runtimeValue("DEFAULT_ESTABLISHMENT_ID") ?? null,
-      };
-    }
-
-    const db = getDb();
-    const [user] = await db
-      .select()
-      .from(appUsers)
-      .where(
-        and(
-          eq(appUsers.status, "active"),
-          or(
-            eq(appUsers.externalSubject, cloudflareIdentity.subject),
-            eq(appUsers.normalizedEmail, cloudflareIdentity.email),
-          ),
-        ),
-      )
-      .limit(1);
-    if (!user) return null;
-    return {
-      provider: "cloudflare-access",
-      ...cloudflareIdentity,
-      role: user.role,
-      userId: user.id,
-      establishmentId: user.establishmentId,
-    };
-  }
-
-  if (process.env.NODE_ENV !== "production") {
-    return {
-      provider: "development",
-      subject: "development:local-admin",
-      email: "admin.local@example.com",
-      displayName: "Administração local",
-      role: "owner",
-      userId: null,
-      establishmentId: runtimeValue("DEFAULT_ESTABLISHMENT_ID") ?? "demo-local",
-    };
-  }
-
-  return null;
-}
-
-function safeDecodeURIComponent(value: string): string | null {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return null;
-  }
+  return getPasswordSessionIdentity(request);
 }
 
 export async function requireIdentity(
@@ -198,20 +130,6 @@ export async function requireIdentity(
       503,
       "establishment_not_configured",
       "O ambiente ainda precisa ser inicializado.",
-    );
-  }
-  return identity;
-}
-
-export async function requireBootstrapOwner(request: Request) {
-  const identity = await getIdentity(request, {
-    allowUnprovisionedOwner: true,
-  });
-  if (!identity || !trustedOwnerRoles.includes(identity.role)) {
-    throw new HttpError(
-      403,
-      "bootstrap_denied",
-      "Somente o proprietário autenticado pode iniciar o ambiente.",
     );
   }
   return identity;

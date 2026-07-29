@@ -37,6 +37,7 @@ export async function GET(request: Request) {
         db
           .select({
             id: appointments.id,
+            itemId: appointmentItems.id,
             startTime: appointments.startTime,
             endTime: appointments.endTime,
             status: appointments.status,
@@ -45,7 +46,10 @@ export async function GET(request: Request) {
             accountId: customerAccounts.id,
             customerName: customerAccounts.displayName,
             serviceName: appointmentItems.serviceNameSnapshot,
+            serviceCatalogId: appointmentItems.serviceCatalogId,
             priceCents: appointmentItems.totalCents,
+            paymentPreference: appointmentItems.paymentPreference,
+            settlementMethod: appointmentItems.settlementMethod,
           })
           .from(appointments)
           .innerJoin(dogs, eq(dogs.id, appointments.dogId))

@@ -114,6 +114,95 @@ export const appUsers = sqliteTable(
   ],
 );
 
+export const adminCredentials = sqliteTable(
+  "admin_credentials",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    passwordAlgorithm: text("password_algorithm")
+      .notNull()
+      .default("pbkdf2-sha256"),
+    passwordHash: text("password_hash").notNull(),
+    passwordSalt: text("password_salt").notNull(),
+    passwordIterations: integer("password_iterations")
+      .notNull()
+      .default(310_000),
+    failedLoginAttempts: integer("failed_login_attempts")
+      .notNull()
+      .default(0),
+    lockedUntil: text("locked_until"),
+    lastFailedAt: text("last_failed_at"),
+    lastLoginAt: text("last_login_at"),
+    passwordChangedAt: text("password_changed_at").notNull().default(now),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (table) => [
+    check(
+      "admin_credentials_algorithm_valid",
+      sql`${table.passwordAlgorithm} = 'pbkdf2-sha256'`,
+    ),
+    check(
+      "admin_credentials_iterations_secure",
+      sql`${table.passwordIterations} >= 210000`,
+    ),
+    check(
+      "admin_credentials_failures_nonnegative",
+      sql`${table.failedLoginAttempts} >= 0`,
+    ),
+  ],
+);
+
+export const authLoginRateLimits = sqliteTable(
+  "auth_login_rate_limits",
+  {
+    keyHash: text("key_hash").primaryKey(),
+    scope: text("scope", { enum: ["ip", "ip_email"] }).notNull(),
+    windowStartedAt: text("window_started_at").notNull(),
+    attemptCount: integer("attempt_count").notNull().default(1),
+    expiresAt: text("expires_at").notNull(),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (table) => [
+    index("auth_login_rate_limits_expiry_idx").on(table.expiresAt),
+    check(
+      "auth_login_rate_limits_scope_valid",
+      sql`${table.scope} in ('ip', 'ip_email')`,
+    ),
+    check(
+      "auth_login_rate_limits_attempts_positive",
+      sql`${table.attemptCount} > 0`,
+    ),
+  ],
+);
+
+export const adminSessions = sqliteTable(
+  "admin_sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    establishmentId: text("establishment_id")
+      .notNull()
+      .references(() => establishments.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    revokedAt: text("revoked_at"),
+    lastSeenAt: text("last_seen_at").notNull().default(now),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("admin_sessions_token_hash_unique").on(table.tokenHash),
+    index("admin_sessions_user_expiry_idx").on(
+      table.userId,
+      table.expiresAt,
+    ),
+    index("admin_sessions_expiry_idx").on(table.expiresAt),
+  ],
+);
+
 export const dogs = sqliteTable(
   "dogs",
   {
@@ -352,6 +441,18 @@ export const appointmentItems = sqliteTable(
       .default("scheduled"),
     detailsJson: text("details_json"),
     activeInvoiceId: text("active_invoice_id"),
+    paymentPreference: text("payment_preference", {
+      enum: ["pix", "credit"],
+    })
+      .notNull()
+      .default("pix"),
+    settlementMethod: text("settlement_method", {
+      enum: ["unsettled", "pix", "credit"],
+    })
+      .notNull()
+      .default("unsettled"),
+    creditMovementId: text("credit_movement_id"),
+    settledAt: text("settled_at"),
     createdAt: text("created_at").notNull().default(now),
     updatedAt: text("updated_at").notNull().default(now),
   },
@@ -361,9 +462,17 @@ export const appointmentItems = sqliteTable(
       table.status,
     ),
     index("appointment_items_active_invoice_idx").on(table.activeInvoiceId),
+    uniqueIndex("appointment_items_credit_movement_unique").on(
+      table.creditMovementId,
+    ),
+    index("appointment_items_settlement_idx").on(table.settlementMethod),
     check(
       "appointment_items_values_nonnegative",
       sql`${table.unitPriceCents} >= 0 and ${table.quantity} > 0 and ${table.totalCents} >= 0`,
+    ),
+    check(
+      "appointment_items_credit_settlement_valid",
+      sql`(${table.settlementMethod} = 'credit' and ${table.creditMovementId} is not null and ${table.settledAt} is not null) or (${table.settlementMethod} <> 'credit' and ${table.creditMovementId} is null)`,
     ),
   ],
 );
@@ -408,50 +517,6 @@ export const tasks = sqliteTable(
   ],
 );
 
-export const creditMovements = sqliteTable(
-  "credit_movements",
-  {
-    id: text("id").primaryKey(),
-    establishmentId: text("establishment_id")
-      .notNull()
-      .references(() => establishments.id, { onDelete: "restrict" }),
-    accountId: text("account_id")
-      .notNull()
-      .references(() => customerAccounts.id, { onDelete: "restrict" }),
-    dogId: text("dog_id").references(() => dogs.id, { onDelete: "set null" }),
-    serviceCatalogId: text("service_catalog_id")
-      .notNull()
-      .references(() => serviceCatalog.id, { onDelete: "restrict" }),
-    appointmentItemId: text("appointment_item_id").references(
-      () => appointmentItems.id,
-      { onDelete: "set null" },
-    ),
-    reversedMovementId: text("reversed_movement_id"),
-    movementType: text("movement_type", {
-      enum: ["grant", "consume", "refund", "adjust"],
-    }).notNull(),
-    deltaUnits: integer("delta_units").notNull(),
-    reason: text("reason").notNull(),
-    idempotencyKey: text("idempotency_key").notNull(),
-    actorUserId: text("actor_user_id").references(() => appUsers.id, {
-      onDelete: "set null",
-    }),
-    occurredAt: text("occurred_at").notNull().default(now),
-  },
-  (table) => [
-    uniqueIndex("credit_movements_idempotency_unique").on(
-      table.idempotencyKey,
-    ),
-    index("credit_movements_balance_idx").on(
-      table.accountId,
-      table.serviceCatalogId,
-      table.dogId,
-      table.occurredAt,
-    ),
-    check("credit_movements_nonzero", sql`${table.deltaUnits} <> 0`),
-  ],
-);
-
 export const invoices = sqliteTable(
   "invoices",
   {
@@ -473,6 +538,12 @@ export const invoices = sqliteTable(
     issuedAt: text("issued_at"),
     dueDate: text("due_date").notNull(),
     totalCents: integer("total_cents").notNull(),
+    sourceType: text("source_type", {
+      enum: ["services", "credit_package"],
+    })
+      .notNull()
+      .default("services"),
+    sourceId: text("source_id"),
     voidedAt: text("voided_at"),
     voidReason: text("void_reason"),
     createdByUserId: text("created_by_user_id").references(() => appUsers.id, {
@@ -491,7 +562,216 @@ export const invoices = sqliteTable(
       table.status,
       table.dueDate,
     ),
+    uniqueIndex("invoices_establishment_source_unique").on(
+      table.establishmentId,
+      table.sourceType,
+      table.sourceId,
+    ),
     check("invoices_total_nonnegative", sql`${table.totalCents} >= 0`),
+    check(
+      "invoices_credit_package_source_valid",
+      sql`${table.sourceType} <> 'credit_package' or ${table.sourceId} is not null`,
+    ),
+  ],
+);
+
+export const creditPackages = sqliteTable(
+  "credit_packages",
+  {
+    id: text("id").primaryKey(),
+    establishmentId: text("establishment_id")
+      .notNull()
+      .references(() => establishments.id, { onDelete: "restrict" }),
+    serviceCatalogId: text("service_catalog_id")
+      .notNull()
+      .references(() => serviceCatalog.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+    creditUnits: integer("credit_units").notNull(),
+    packagePriceCents: integer("package_price_cents").notNull(),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    createdByUserId: text("created_by_user_id").references(() => appUsers.id, {
+      onDelete: "set null",
+    }),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (table) => [
+    index("credit_packages_establishment_active_idx").on(
+      table.establishmentId,
+      table.active,
+    ),
+    index("credit_packages_service_idx").on(table.serviceCatalogId),
+    check("credit_packages_units_positive", sql`${table.creditUnits} > 0`),
+    check(
+      "credit_packages_price_positive",
+      sql`${table.packagePriceCents} > 0`,
+    ),
+  ],
+);
+
+export const creditPurchases = sqliteTable(
+  "credit_purchases",
+  {
+    id: text("id").primaryKey(),
+    establishmentId: text("establishment_id")
+      .notNull()
+      .references(() => establishments.id, { onDelete: "restrict" }),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => customerAccounts.id, { onDelete: "restrict" }),
+    packageId: text("package_id").references(() => creditPackages.id, {
+      onDelete: "set null",
+    }),
+    serviceCatalogId: text("service_catalog_id")
+      .notNull()
+      .references(() => serviceCatalog.id, { onDelete: "restrict" }),
+    invoiceId: text("invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "restrict" }),
+    packageNameSnapshot: text("package_name_snapshot").notNull(),
+    creditUnits: integer("credit_units").notNull(),
+    standardValueCents: integer("standard_value_cents").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    status: text("status", {
+      enum: ["awaiting_payment", "paid", "cancelled", "refunded"],
+    })
+      .notNull()
+      .default("awaiting_payment"),
+    grantMovementId: text("grant_movement_id"),
+    createdByUserId: text("created_by_user_id").references(() => appUsers.id, {
+      onDelete: "set null",
+    }),
+    paidAt: text("paid_at"),
+    cancelledAt: text("cancelled_at"),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("credit_purchases_invoice_unique").on(table.invoiceId),
+    uniqueIndex("credit_purchases_grant_movement_unique").on(
+      table.grantMovementId,
+    ),
+    index("credit_purchases_account_status_idx").on(
+      table.accountId,
+      table.status,
+      table.createdAt,
+    ),
+    index("credit_purchases_service_idx").on(table.serviceCatalogId),
+    check("credit_purchases_units_positive", sql`${table.creditUnits} > 0`),
+    check(
+      "credit_purchases_values_positive",
+      sql`${table.standardValueCents} > 0 and ${table.amountCents} > 0`,
+    ),
+    check(
+      "credit_purchases_grant_valid",
+      sql`(${table.status} = 'paid' and ${table.grantMovementId} is not null and ${table.paidAt} is not null) or (${table.status} <> 'paid' and ${table.grantMovementId} is null)`,
+    ),
+  ],
+);
+
+export const creditMovements = sqliteTable(
+  "credit_movements",
+  {
+    id: text("id").primaryKey(),
+    establishmentId: text("establishment_id")
+      .notNull()
+      .references(() => establishments.id, { onDelete: "restrict" }),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => customerAccounts.id, { onDelete: "restrict" }),
+    dogId: text("dog_id").references(() => dogs.id, { onDelete: "set null" }),
+    serviceCatalogId: text("service_catalog_id")
+      .notNull()
+      .references(() => serviceCatalog.id, { onDelete: "restrict" }),
+    appointmentItemId: text("appointment_item_id").references(
+      () => appointmentItems.id,
+      { onDelete: "set null" },
+    ),
+    creditPurchaseId: text("credit_purchase_id").references(
+      () => creditPurchases.id,
+      { onDelete: "set null" },
+    ),
+    reversedMovementId: text("reversed_movement_id"),
+    movementType: text("movement_type", {
+      enum: ["grant", "consume", "refund", "adjust"],
+    }).notNull(),
+    deltaUnits: integer("delta_units").notNull(),
+    reason: text("reason").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    actorUserId: text("actor_user_id").references(() => appUsers.id, {
+      onDelete: "set null",
+    }),
+    occurredAt: text("occurred_at").notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("credit_movements_idempotency_unique").on(
+      table.idempotencyKey,
+    ),
+    uniqueIndex("credit_movements_purchase_grant_unique").on(
+      table.creditPurchaseId,
+    ),
+    uniqueIndex("credit_movements_item_consume_unique").on(
+      table.appointmentItemId,
+    ),
+    index("credit_movements_balance_idx").on(
+      table.accountId,
+      table.serviceCatalogId,
+      table.occurredAt,
+    ),
+    check("credit_movements_nonzero", sql`${table.deltaUnits} <> 0`),
+    check(
+      "credit_movements_sign_valid",
+      sql`(${table.movementType} in ('grant', 'refund') and ${table.deltaUnits} > 0) or (${table.movementType} = 'consume' and ${table.deltaUnits} < 0) or ${table.movementType} = 'adjust'`,
+    ),
+  ],
+);
+
+export const creditReceipts = sqliteTable(
+  "credit_receipts",
+  {
+    id: text("id").primaryKey(),
+    establishmentId: text("establishment_id")
+      .notNull()
+      .references(() => establishments.id, { onDelete: "restrict" }),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => customerAccounts.id, { onDelete: "restrict" }),
+    dogId: text("dog_id").references(() => dogs.id, { onDelete: "set null" }),
+    appointmentItemId: text("appointment_item_id")
+      .notNull()
+      .references(() => appointmentItems.id, { onDelete: "restrict" }),
+    creditMovementId: text("credit_movement_id")
+      .notNull()
+      .references(() => creditMovements.id, { onDelete: "restrict" }),
+    receiptNumber: text("receipt_number").notNull(),
+    customerNameSnapshot: text("customer_name_snapshot").notNull(),
+    dogNameSnapshot: text("dog_name_snapshot").notNull(),
+    serviceNameSnapshot: text("service_name_snapshot").notNull(),
+    serviceDateSnapshot: text("service_date_snapshot").notNull(),
+    creditUnits: integer("credit_units").notNull().default(1),
+    deliveryStatus: text("delivery_status", {
+      enum: ["pending", "sent", "failed"],
+    })
+      .notNull()
+      .default("pending"),
+    deliveryChannelsJson: text("delivery_channels_json").notNull(),
+    issuedAt: text("issued_at").notNull().default(now),
+    sentAt: text("sent_at"),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("credit_receipts_establishment_number_unique").on(
+      table.establishmentId,
+      table.receiptNumber,
+    ),
+    uniqueIndex("credit_receipts_item_unique").on(table.appointmentItemId),
+    uniqueIndex("credit_receipts_movement_unique").on(table.creditMovementId),
+    index("credit_receipts_account_date_idx").on(
+      table.accountId,
+      table.issuedAt,
+    ),
+    check("credit_receipts_units_positive", sql`${table.creditUnits} > 0`),
   ],
 );
 

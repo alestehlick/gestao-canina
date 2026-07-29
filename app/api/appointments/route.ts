@@ -32,6 +32,33 @@ export async function POST(request: Request) {
     const startTime = optionalString(body, "startTime", 5);
     const endTime = optionalString(body, "endTime", 5);
     const internalNotes = optionalString(body, "internalNotes", 2_000);
+    const paymentPreference =
+      body.paymentPreference === undefined ? "pix" : body.paymentPreference;
+    if (
+      paymentPreference !== "pix" &&
+      paymentPreference !== "credit"
+    ) {
+      throw new HttpError(
+        400,
+        "invalid_payment_preference",
+        "Escolha Pix ou crédito para o pagamento.",
+      );
+    }
+    const customPriceCents =
+      body.priceCents === undefined ? null : body.priceCents;
+    if (
+      customPriceCents !== null &&
+      (typeof customPriceCents !== "number" ||
+        !Number.isSafeInteger(customPriceCents) ||
+        customPriceCents < 0 ||
+        customPriceCents > 100_000_000)
+    ) {
+      throw new HttpError(
+        400,
+        "invalid_price",
+        "O valor do serviço é inválido.",
+      );
+    }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
       throw new HttpError(400, "invalid_date", "A data informada é inválida.");
@@ -83,10 +110,21 @@ export async function POST(request: Request) {
         "Cão ou serviço não encontrado.",
       );
     }
+    if (
+      paymentPreference === "credit" &&
+      !["daycare", "bath", "hygienic_grooming"].includes(service.code)
+    ) {
+      throw new HttpError(
+        400,
+        "service_not_credit_eligible",
+        "Este serviço não pode ser pago com créditos.",
+      );
+    }
 
     const appointmentId = crypto.randomUUID();
     const itemId = crypto.randomUUID();
     const auditId = crypto.randomUUID();
+    const priceCents = customPriceCents ?? service.basePriceCents;
     await db.batch([
       db.insert(appointments).values({
         id: appointmentId,
@@ -105,9 +143,10 @@ export async function POST(request: Request) {
         appointmentId,
         serviceCatalogId: service.id,
         serviceNameSnapshot: service.name,
-        unitPriceCents: service.basePriceCents,
+        unitPriceCents: priceCents,
         quantity: 1,
-        totalCents: service.basePriceCents,
+        totalCents: priceCents,
+        paymentPreference,
       }),
       db.insert(auditEvents).values({
         id: auditId,
@@ -121,6 +160,7 @@ export async function POST(request: Request) {
         metadataJson: JSON.stringify({
           dogId: dog.id,
           serviceCatalogId: service.id,
+          paymentPreference,
         }),
       }),
     ]);
@@ -129,15 +169,18 @@ export async function POST(request: Request) {
       {
         appointment: {
           id: appointmentId,
+          itemId,
           dogId: dog.id,
           dogName: dog.name,
           serviceName: service.name,
-          priceCents: service.basePriceCents,
+          priceCents,
           startDate,
           endDate,
           startTime,
           endTime,
           status: "scheduled",
+          paymentPreference,
+          settlementMethod: "unsettled",
         },
       },
       { status: 201 },

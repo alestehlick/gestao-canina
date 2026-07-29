@@ -16,6 +16,9 @@ export async function POST(request: Request) {
 
     // Cada provedor possui um mecanismo próprio (assinatura ou mTLS).
     // O corpo não é lido até o adaptador oficial validar a autenticidade.
+    // Depois da validação, o adaptador deve normalizar o evento e chamar
+    // settleVerifiedPixPayment() de lib/server/pix-settlement.ts. Essa função
+    // baixa a fatura e concede os créditos no mesmo lote atômico do D1.
     void request;
     throw new HttpError(
       501,

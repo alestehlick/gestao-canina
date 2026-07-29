@@ -9,15 +9,22 @@ uso diário por uma equipe pequena.
 Este repositório entrega:
 
 - painel responsivo com agenda, presença, alertas e tarefas;
-- cadastros e perfis de cães e clientes;
-- visão financeira, créditos e seleção de serviços para cobrança;
-- fluxo Pix demonstrativo, claramente não pagável;
+- consulta de datas futuras diretamente na tela principal;
+- cadastros e perfis editáveis de cães e clientes;
+- preços padrão administráveis para hospedagem, creche, banho e tosa
+  higiênica;
+- venda de pacotes, saldos de créditos por serviço e recibos sem nova cobrança;
+- visão financeira e seleção de serviços concluídos para cobrança Pix;
+- ambiente operacional conectado ao D1 privado, com demonstração fictícia
+  apenas como apoio no desenvolvimento local;
+- configuração inicial protegida para exatamente dois administradores e login
+  obrigatório nas visitas seguintes;
 - prévia separada do portal do cliente;
 - modelo D1 para agenda, recorrências, créditos, faturas, Pix, pagamentos,
   auditoria e metadados de arquivos privados;
 - APIs iniciais com autorização no servidor, proteção de origem, limites de
   payload e respostas sem cache;
-- arquitetura preparada para Cloudflare Workers, D1 e R2.
+- arquitetura implantável em Cloudflare Workers, D1 e R2.
 
 Todos os dados visíveis na demonstração são sintéticos. Eles ficam no código
 apenas para mostrar a experiência e nunca devem ser substituídos por dados
@@ -28,9 +35,11 @@ reais.
 O produto aceita **somente Pix**. Não há cartão de crédito, parcelamento nem
 outra escolha de meio de pagamento.
 
-O código Pix exibido no protótipo não é válido. Cobranças reais só poderão ser
-ativadas depois da escolha de um banco ou provedor Pix e da configuração segura
-das credenciais e do webhook oficial.
+O sistema registra a fatura e mantém o pacote aguardando pagamento, mas não
+inventa um código. Cobranças reais são liberadas somente depois da escolha de
+um banco ou provedor Pix e da configuração segura das credenciais e do webhook
+oficial. Até lá, nenhuma cobrança bancária é criada e nenhum crédito é
+concedido.
 
 ## Onde cada informação fica
 
@@ -54,8 +63,9 @@ pnpm install
 pnpm dev:next
 ```
 
-Abra `http://localhost:3000`. O comando `dev:next` mostra a demonstração sem
-persistência. Para testar o runtime Cloudflare em um sistema compatível:
+Abra `http://localhost:3000`. Sem um binding D1 local, o comando `dev:next`
+mostra automaticamente a demonstração sem persistência. Para testar o runtime
+Cloudflare em um sistema compatível:
 
 ```bash
 pnpm dev
@@ -82,38 +92,37 @@ nunca em arquivos versionados:
 
 | Variável | Finalidade |
 |---|---|
-| `DEFAULT_ESTABLISHMENT_ID` | Unidade usada pelo ambiente |
-| `CLOUDFLARE_ACCESS_TEAM_DOMAIN` | Domínio da equipe no Cloudflare Access |
-| `CLOUDFLARE_ACCESS_AUD` | Audience da aplicação Access |
-| `OWNER_EMAILS` | E-mails autorizados a iniciar o ambiente |
+| `INITIAL_SETUP_KEY` | Chave secreta usada uma única vez no primeiro acesso |
+| `AUTH_PASSWORD_PEPPER` | Segredo adicional da derivação das senhas |
 | `PIX_PROVIDER` | Adaptador Pix escolhido |
 | `PIX_WEBHOOK_SECRET` | Segredo ou referência de validação do webhook |
 
-O painel deve permanecer atrás do Cloudflare Access. Para a equipe, a
-recomendação é OTP por e-mail com lista explícita de endereços permitidos. Não
-use uma política que aceite qualquer e-mail.
+O endereço do site pode ser público porque as páginas de gestão exigem a sessão
+própria. Cabeçalhos externos de identidade não são aceitos nesta versão: o
+acesso fica restrito às duas contas cadastradas na configuração inicial.
 
 ## Inicialização do banco
 
 O esquema fica em `db/schema.ts` e as migrações em `drizzle/`.
 
-Depois de aplicar as migrações ao D1, o proprietário autenticado pode chamar
-`POST /api/bootstrap` uma única vez:
+Depois de aplicar as migrações ao D1, o primeiro acesso mostra uma configuração
+única. A pessoa informa a chave secreta de ativação, o nome do estabelecimento
+e os dados de exatamente dois administradores. A operação cria a unidade, as
+duas contas e o catálogo básico de serviços em um único lote. Ela não insere
+clientes ou cães fictícios.
 
-```json
-{
-  "establishmentName": "Nome do estabelecimento"
-}
-```
-
-Essa operação cria a unidade, o primeiro proprietário e o catálogo básico de
-serviços. Ela não insere clientes ou cães fictícios.
+Depois dessa configuração, o cadastro inicial é encerrado e todo acesso exige
+e-mail e senha de um dos dois administradores. As senhas usam PBKDF2-SHA256,
+salt individual, pepper externo e 310 mil iterações. As sessões duram 12 horas,
+usam cookie `HttpOnly`, `Secure` e `SameSite=Lax`, e somente o hash do token é
+armazenado no D1. Tentativas de login são limitadas por IP e por combinação de
+IP/e-mail; os identificadores desses contadores ficam protegidos por HMAC.
 
 ## Segurança e privacidade
 
-Antes de usar dados reais:
+Antes de usar dados reais, confirme no ambiente implantado:
 
-1. proteger domínio e rotas do Worker com Cloudflare Access;
+1. configurar `INITIAL_SETUP_KEY` e `AUTH_PASSWORD_PEPPER` como secrets;
 2. manter ambientes de produção, prévia e desenvolvimento separados;
 3. aplicar as migrações ao D1 e testar restauração;
 4. configurar R2 privado e validação de upload;

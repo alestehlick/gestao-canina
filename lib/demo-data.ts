@@ -6,6 +6,8 @@ export type ServiceType =
   | "hotel"
   | "other";
 
+export type CreditServiceType = "daycare" | "bath" | "grooming";
+
 export type BookingStatus =
   | "scheduled"
   | "confirmed"
@@ -21,6 +23,7 @@ export type Dog = {
   initials: string;
   breed: string;
   age: string;
+  birthDate?: string;
   customerId: string;
   customerName: string;
   color: string;
@@ -45,6 +48,9 @@ export type Customer = {
 
 export type Booking = {
   id: string;
+  itemId?: string;
+  serviceCatalogId?: string;
+  date: string;
   time: string;
   endTime?: string;
   dogId: string;
@@ -55,6 +61,9 @@ export type Booking = {
   serviceType: ServiceType;
   status: BookingStatus;
   priceCents: number;
+  paymentPreference: "pix" | "credit";
+  settlementStatus?: "pending" | "pix_pending" | "credit_used";
+  receiptNumber?: string;
   note?: string;
 };
 
@@ -87,6 +96,41 @@ export type BillableService = {
   amountCents: number;
 };
 
+export type CreditBalances = Record<
+  string,
+  Record<CreditServiceType, number>
+>;
+
+export type CreditPurchase = {
+  id: string;
+  customerId: string;
+  customerName: string;
+  serviceType: CreditServiceType;
+  units: number;
+  amountCents: number;
+  standardValueCents: number;
+  status: "awaiting_pix" | "paid" | "cancelled";
+  createdAt: string;
+  invoiceId?: string;
+};
+
+export type ServiceReceipt = {
+  id: string;
+  number: string;
+  customerId: string;
+  customerName: string;
+  dogName: string;
+  serviceType: CreditServiceType;
+  service: string;
+  date: string;
+  creditUnits: number;
+  remainingBalance?: number;
+  deliveryStatus: "ready" | "sent";
+  sentBy?: "whatsapp" | "email";
+};
+
+export const demoToday = "2026-07-30";
+
 export const serviceLabels: Record<ServiceType, string> = {
   daycare: "Creche",
   bath: "Banho",
@@ -106,6 +150,15 @@ export const statusLabels: Record<BookingStatus, string> = {
   cancelled: "Cancelado",
 };
 
+export const defaultServicePrices: Record<ServiceType, number> = {
+  daycare: 7000,
+  bath: 9500,
+  grooming: 5500,
+  transport: 3500,
+  hotel: 18000,
+  other: 5000,
+};
+
 export const demoDogs: Dog[] = [
   {
     id: "dog-bento",
@@ -121,7 +174,7 @@ export const demoDogs: Dog[] = [
     nextService: "Creche · hoje, 08:30",
     credits: [
       { label: "Creche", value: 4 },
-      { label: "Transporte", value: 6 },
+      { label: "Banho", value: 1 },
     ],
   },
   {
@@ -136,7 +189,7 @@ export const demoDogs: Dog[] = [
     vaccinesCurrent: true,
     today: "Tosa às 10:00",
     nextService: "Tosa higiênica · hoje, 10:00",
-    credits: [{ label: "Banho", value: 1 }],
+    credits: [{ label: "Tosa higiênica", value: 2 }],
   },
   {
     id: "dog-nina",
@@ -179,7 +232,7 @@ export const demoDogs: Dog[] = [
     vaccinesCurrent: true,
     today: "Transporte às 16:30",
     nextService: "Transporte · hoje, 16:30",
-    credits: [{ label: "Transporte", value: 3 }],
+    credits: [],
   },
   {
     id: "dog-mel",
@@ -207,7 +260,7 @@ export const demoCustomers: Customer[] = [
     email: "marina.costa@example.com",
     dogIds: ["dog-bento", "dog-lola"],
     balanceCents: 21500,
-    creditsLabel: "11 créditos disponíveis",
+    creditsLabel: "7 créditos disponíveis",
     status: "pending",
   },
   {
@@ -240,7 +293,7 @@ export const demoCustomers: Customer[] = [
     email: "paulo.mendes@example.com",
     dogIds: ["dog-chico"],
     balanceCents: 0,
-    creditsLabel: "3 créditos disponíveis",
+    creditsLabel: "Sem créditos",
     status: "current",
   },
   {
@@ -259,6 +312,7 @@ export const demoCustomers: Customer[] = [
 export const demoBookings: Booking[] = [
   {
     id: "booking-bento",
+    date: "2026-07-30",
     time: "08:00",
     endTime: "08:45",
     dogId: "dog-bento",
@@ -269,10 +323,12 @@ export const demoBookings: Booking[] = [
     serviceType: "transport",
     status: "in_transit",
     priceCents: 6500,
+    paymentPreference: "pix",
     note: "Buscar na portaria.",
   },
   {
     id: "booking-nina",
+    date: "2026-07-30",
     time: "08:30",
     endTime: "17:30",
     dogId: "dog-nina",
@@ -283,9 +339,11 @@ export const demoBookings: Booking[] = [
     serviceType: "daycare",
     status: "present",
     priceCents: 7000,
+    paymentPreference: "credit",
   },
   {
     id: "booking-theo",
+    date: "2026-07-30",
     time: "09:15",
     endTime: "10:15",
     dogId: "dog-theo",
@@ -296,10 +354,12 @@ export const demoBookings: Booking[] = [
     serviceType: "bath",
     status: "confirmed",
     priceCents: 9500,
+    paymentPreference: "pix",
     note: "Usar shampoo hipoalergênico.",
   },
   {
     id: "booking-lola",
+    date: "2026-07-30",
     time: "10:00",
     endTime: "10:40",
     dogId: "dog-lola",
@@ -310,9 +370,11 @@ export const demoBookings: Booking[] = [
     serviceType: "grooming",
     status: "scheduled",
     priceCents: 5500,
+    paymentPreference: "credit",
   },
   {
     id: "booking-mel",
+    date: "2026-07-30",
     time: "14:00",
     endTime: "18:00",
     dogId: "dog-mel",
@@ -323,10 +385,12 @@ export const demoBookings: Booking[] = [
     serviceType: "hotel",
     status: "scheduled",
     priceCents: 18000,
+    paymentPreference: "pix",
     note: "Confirmar entrega da ração.",
   },
   {
     id: "booking-chico",
+    date: "2026-07-30",
     time: "16:30",
     endTime: "17:10",
     dogId: "dog-chico",
@@ -337,9 +401,11 @@ export const demoBookings: Booking[] = [
     serviceType: "transport",
     status: "scheduled",
     priceCents: 3500,
+    paymentPreference: "pix",
   },
   {
     id: "booking-pingo",
+    date: "2026-07-30",
     time: "07:30",
     endTime: "08:20",
     dogId: "dog-nina",
@@ -350,6 +416,85 @@ export const demoBookings: Booking[] = [
     serviceType: "transport",
     status: "completed",
     priceCents: 3500,
+    paymentPreference: "pix",
+    settlementStatus: "pix_pending",
+  },
+  {
+    id: "booking-bento-future",
+    date: "2026-07-31",
+    time: "08:30",
+    endTime: "17:30",
+    dogId: "dog-bento",
+    dogName: "Bento",
+    customerId: "customer-marina",
+    customerName: "Marina Costa",
+    service: "Creche",
+    serviceType: "daycare",
+    status: "confirmed",
+    priceCents: 7000,
+    paymentPreference: "credit",
+  },
+  {
+    id: "booking-theo-future",
+    date: "2026-07-31",
+    time: "10:30",
+    endTime: "11:30",
+    dogId: "dog-theo",
+    dogName: "Theo",
+    customerId: "customer-rafael",
+    customerName: "Rafael Nunes",
+    service: "Banho",
+    serviceType: "bath",
+    status: "scheduled",
+    priceCents: 9500,
+    paymentPreference: "pix",
+    note: "Confirmar shampoo na chegada.",
+  },
+  {
+    id: "booking-mel-future",
+    date: "2026-08-01",
+    time: "09:00",
+    endTime: "09:30",
+    dogId: "dog-mel",
+    dogName: "Mel",
+    customerId: "customer-ana",
+    customerName: "Ana Ribeiro",
+    service: "Diária de hospedagem",
+    serviceType: "hotel",
+    status: "confirmed",
+    priceCents: 18000,
+    paymentPreference: "pix",
+    note: "Separar alimentação própria.",
+  },
+  {
+    id: "booking-nina-future",
+    date: "2026-08-03",
+    time: "08:30",
+    endTime: "17:30",
+    dogId: "dog-nina",
+    dogName: "Nina",
+    customerId: "customer-camila",
+    customerName: "Camila Moreira",
+    service: "Creche",
+    serviceType: "daycare",
+    status: "scheduled",
+    priceCents: 7000,
+    paymentPreference: "credit",
+  },
+  {
+    id: "booking-lola-future",
+    date: "2026-08-04",
+    time: "14:00",
+    endTime: "14:45",
+    dogId: "dog-lola",
+    dogName: "Lola",
+    customerId: "customer-marina",
+    customerName: "Marina Costa",
+    service: "Tosa higiênica",
+    serviceType: "grooming",
+    status: "scheduled",
+    priceCents: 5500,
+    paymentPreference: "credit",
   },
 ];
 
@@ -449,32 +594,92 @@ export const demoBillableServices: BillableService[] = [
   },
 ];
 
-export const auditFixtures = [
+export const demoCreditBalances: CreditBalances = {
+  "customer-marina": { daycare: 4, bath: 1, grooming: 2 },
+  "customer-camila": { daycare: 8, bath: 0, grooming: 0 },
+  "customer-rafael": { daycare: 0, bath: 0, grooming: 0 },
+  "customer-paulo": { daycare: 0, bath: 0, grooming: 0 },
+  "customer-ana": { daycare: 0, bath: 0, grooming: 0 },
+};
+
+export const demoCreditPurchases: CreditPurchase[] = [
+  {
+    id: "credit-purchase-marina",
+    customerId: "customer-marina",
+    customerName: "Marina Costa",
+    serviceType: "daycare",
+    units: 5,
+    amountCents: 31500,
+    standardValueCents: 35000,
+    status: "paid",
+    createdAt: "29/07/2026",
+    invoiceId: "invoice-credit-179",
+  },
+  {
+    id: "credit-purchase-camila",
+    customerId: "customer-camila",
+    customerName: "Camila Moreira",
+    serviceType: "daycare",
+    units: 10,
+    amountCents: 63000,
+    standardValueCents: 70000,
+    status: "paid",
+    createdAt: "22/07/2026",
+    invoiceId: "invoice-credit-166",
+  },
+];
+
+export const demoReceipts: ServiceReceipt[] = [
+  {
+    id: "receipt-credit-1",
+    number: "REC-00031",
+    customerId: "customer-camila",
+    customerName: "Camila Moreira",
+    dogName: "Nina",
+    serviceType: "daycare",
+    service: "Creche",
+    date: "28/07/2026",
+    creditUnits: 1,
+    remainingBalance: 8,
+    deliveryStatus: "sent",
+    sentBy: "whatsapp",
+  },
+];
+
+export type AuditActivity = {
+  id: string;
+  time: string;
+  actor: string;
+  action: string;
+  detail: string;
+};
+
+export const auditFixtures: AuditActivity[] = [
   {
     id: "audit-1",
     time: "10:42",
-    actor: "Alex · Administrador",
+    actor: "Administrador fictício",
     action: "Pagamento Pix confirmado",
     detail: "Cobrança 000183 · R$ 180,00",
   },
   {
     id: "audit-2",
     time: "09:56",
-    actor: "Alex · Administrador",
+    actor: "Administrador fictício",
     action: "Atendimento concluído",
     detail: "Nina · Transporte de ida",
   },
   {
     id: "audit-3",
     time: "09:18",
-    actor: "Alex · Administrador",
+    actor: "Administrador fictício",
     action: "Chegada registrada",
     detail: "Nina · Creche",
   },
   {
     id: "audit-4",
     time: "08:03",
-    actor: "Alex · Administrador",
+    actor: "Administrador fictício",
     action: "Rota iniciada",
     detail: "Bento · Transporte de ida",
   },

@@ -122,3 +122,22 @@ export function optionalString(
   }
   return value.trim();
 }
+
+export function requiredInteger(
+  body: Record<string, unknown>,
+  key: string,
+  options: { min?: number; max?: number } = {},
+) {
+  const value = body[key];
+  const min = options.min ?? Number.MIN_SAFE_INTEGER;
+  const max = options.max ?? Number.MAX_SAFE_INTEGER;
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < min ||
+    value > max
+  ) {
+    throw new HttpError(400, "invalid_field", `O campo ${key} é inválido.`);
+  }
+  return value;
+}

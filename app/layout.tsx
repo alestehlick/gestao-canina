@@ -37,6 +37,9 @@ export async function generateMetadata(): Promise<Metadata> {
     description:
       "Agenda, cuidados, clientes e cobranças Pix para uma operação canina organizada.",
     applicationName: "Gestão Canina",
+    icons: {
+      icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+    },
     robots: { index: false, follow: false },
     openGraph: {
       title: "Gestão Canina",

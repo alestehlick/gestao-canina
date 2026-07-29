@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("mantém a experiência em português, privada e com demonstração segura", async () => {
-  const [layout, page, app, data] = await Promise.all([
+  const [layout, page, app, data, styles] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(
@@ -11,10 +11,12 @@ test("mantém a experiência em português, privada e com demonstração segura"
       "utf8",
     ),
     readFile(new URL("../lib/demo-data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
   assert.match(layout, /lang="pt-BR"/);
   assert.match(layout, /Gestão Canina/);
+  assert.match(layout, /\/favicon\.svg/);
   assert.match(page, /<ManagementApp \/>/);
   assert.match(app, /Ambiente privado/);
   assert.match(app, /Demonstração segura/);
@@ -27,6 +29,8 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.match(app, /código não é válido para pagamento/);
   assert.match(data, /@example\.com/);
   assert.doesNotMatch(app, /Mastercard|VISA|cart[aã]o de cr[eé]dito/);
+  assert.match(styles, /\.billing-page\s*\{[^}]*min-width:\s*0;/s);
+  assert.match(styles, /\.billing-page\s*>\s*\*\s*\{[^}]*min-width:\s*0;/s);
 });
 
 test("mantém dados operacionais fora do repositório público", async () => {

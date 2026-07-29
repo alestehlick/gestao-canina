@@ -2177,7 +2177,12 @@ h3 {
 
 .billing-page {
   display: grid;
+  min-width: 0;
   gap: 14px;
+}
+
+.billing-page > * {
+  min-width: 0;
 }
 
 .billing-tabs {
@@ -3986,6 +3991,21 @@ h3 {
   .text-button,
   .row-link {
     min-height: 44px;
+  }
+
+  .icon-text-button,
+  .compact-button,
+  .date-nav-controls input,
+  .date-arrow,
+  .action-button,
+  .receipt-button,
+  .more-button,
+  .menu-popover button {
+    min-height: 44px;
+  }
+
+  .date-arrow {
+    width: 44px;
   }
 
   .pix-body {

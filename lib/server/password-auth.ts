@@ -5,6 +5,11 @@ export const AUTH_SESSION_COOKIE = "__Host-gestao_session";
 export const PASSWORD_ITERATIONS = 310_000;
 export const SESSION_DURATION_SECONDS = 12 * 60 * 60;
 
+// O Web Crypto do Cloudflare Workers aceita, no máximo, 100 mil iterações
+// por chamada. Encadeamos chamadas para preservar o custo total configurado
+// sem impedir o primeiro cadastro em produção.
+const PBKDF2_MAX_ITERATIONS_PER_DERIVATION = 100_000;
+
 const encoder = new TextEncoder();
 
 function encodeBase64Url(bytes: Uint8Array) {
@@ -151,24 +156,37 @@ async function derivePassword(
       "A credencial armazenada precisa ser atualizada.",
     );
   }
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(`${password}\u0000${passwordPepper()}`),
-    "PBKDF2",
-    false,
-    ["deriveBits"],
-  );
-  const result = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      hash: "SHA-256",
-      salt: Uint8Array.from(salt).buffer,
-      iterations,
-    },
-    key,
-    256,
-  );
-  return new Uint8Array(result);
+
+  let remainingIterations = iterations;
+  let material = encoder.encode(`${password}\u0000${passwordPepper()}`);
+
+  while (remainingIterations > 0) {
+    const roundIterations = Math.min(
+      remainingIterations,
+      PBKDF2_MAX_ITERATIONS_PER_DERIVATION,
+    );
+    const key = await crypto.subtle.importKey(
+      "raw",
+      material,
+      "PBKDF2",
+      false,
+      ["deriveBits"],
+    );
+    const result = await crypto.subtle.deriveBits(
+      {
+        name: "PBKDF2",
+        hash: "SHA-256",
+        salt: Uint8Array.from(salt).buffer,
+        iterations: roundIterations,
+      },
+      key,
+      256,
+    );
+    material = new Uint8Array(result);
+    remainingIterations -= roundIterations;
+  }
+
+  return material;
 }
 
 export async function createPasswordRecord(password: string) {

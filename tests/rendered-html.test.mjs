@@ -102,6 +102,14 @@ test("mantém o primeiro acesso e o login protegidos sem bloqueio global da cont
   assert.match(limiter, /cf-connecting-ip/);
   assert.match(passwordAuth, /HMAC/);
   assert.match(passwordAuth, /login-rate-limit/);
+  assert.match(
+    passwordAuth,
+    /PBKDF2_MAX_ITERATIONS_PER_DERIVATION = 100_000/,
+  );
+  assert.match(
+    passwordAuth,
+    /Math\.min\(\s*remainingIterations,\s*PBKDF2_MAX_ITERATIONS_PER_DERIVATION,/s,
+  );
   assert.match(schema, /sqliteTable\(\s*"auth_login_rate_limits"/);
 });
 

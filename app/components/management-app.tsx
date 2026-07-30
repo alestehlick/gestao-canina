@@ -12,6 +12,10 @@ import {
   type KeyboardEvent,
 } from "react";
 import {
+  BrazilianDateInput,
+  formatBrazilianDate,
+} from "@/app/components/brazilian-date-input";
+import {
   auditFixtures,
   defaultServicePrices,
   demoBillableServices,
@@ -271,14 +275,7 @@ function formatCurrency(cents: number) {
 }
 
 function formatToday() {
-  const value = new Intl.DateTimeFormat("pt-BR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    timeZone: "America/Sao_Paulo",
-  }).format(new Date());
-
-  return value.charAt(0).toUpperCase() + value.slice(1);
+  return formatBrazilianDate(operationalToday);
 }
 
 function dateFromIso(value: string) {
@@ -291,23 +288,28 @@ function shiftDate(value: string, days: number) {
   return next.toISOString().slice(0, 10);
 }
 
+function lodgingNightOptions(startDate: string, endDate: string) {
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(startDate) ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(endDate)
+  ) {
+    return [];
+  }
+  const calendarDays = Math.round(
+    (dateFromIso(endDate).valueOf() - dateFromIso(startDate).valueOf()) /
+      86_400_000,
+  );
+  if (calendarDays < 1) return [];
+  return [calendarDays, calendarDays + 0.5];
+}
+
 function formatSelectedDate(value: string, compact = false) {
-  const formatted = new Intl.DateTimeFormat("pt-BR", {
-    weekday: compact ? undefined : "long",
-    day: "numeric",
-    month: compact ? "short" : "long",
-    timeZone: "America/Sao_Paulo",
-  }).format(dateFromIso(value));
-  return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+  void compact;
+  return formatBrazilianDate(value);
 }
 
 function formatShortDate(value: string) {
-  return new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    timeZone: "America/Sao_Paulo",
-  }).format(dateFromIso(value));
+  return formatBrazilianDate(value);
 }
 
 type InvoiceDeliveryChannel = "whatsapp" | "email" | "save";
@@ -380,10 +382,7 @@ async function createInvoicePdf(state: InvoiceState) {
   });
   const invoiceNumber = state.invoice?.number ?? "NOVA";
   const rows = invoiceDescriptionLines(state);
-  const issuedAt = new Intl.DateTimeFormat("pt-BR", {
-    dateStyle: "long",
-    timeZone: "America/Sao_Paulo",
-  }).format(new Date());
+  const issuedAt = formatBrazilianDate(operationalToday);
 
   document.setProperties({
     title: `Fatura ${invoiceNumber} · Hospet Quintal`,
@@ -659,6 +658,11 @@ export function ManagementApp() {
   const [editDraftTransportDirection, setEditDraftTransportDirection] =
     useState<"one_way" | "round_trip">("one_way");
   const [editDraftHasDeposit, setEditDraftHasDeposit] = useState(false);
+  const [editDraftDate, setEditDraftDate] = useState(operationalToday);
+  const [editDraftEndDate, setEditDraftEndDate] = useState(
+    shiftDate(operationalToday, 1),
+  );
+  const [editDraftLodgingNights, setEditDraftLodgingNights] = useState(1);
   const [dogToEdit, setDogToEdit] = useState<Dog | null>(null);
   const [customerToEdit, setCustomerToEdit] = useState<Customer | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -675,6 +679,11 @@ export function ManagementApp() {
   const [serviceDraftTransportDirection, setServiceDraftTransportDirection] =
     useState<"one_way" | "round_trip">("one_way");
   const [serviceDraftHasDeposit, setServiceDraftHasDeposit] = useState(false);
+  const [serviceDraftDate, setServiceDraftDate] = useState(operationalToday);
+  const [serviceDraftEndDate, setServiceDraftEndDate] = useState(
+    shiftDate(operationalToday, 1),
+  );
+  const [serviceDraftLodgingNights, setServiceDraftLodgingNights] = useState(1);
   const [serviceDraftRecurrence, setServiceDraftRecurrence] = useState<
     "none" | "weekly"
   >("none");
@@ -1058,6 +1067,9 @@ export function ManagementApp() {
     setServiceDraftPayment("invoice");
     setServiceDraftHasDeposit(false);
     setServiceDraftRecurrence("none");
+    setServiceDraftDate(selectedDateRef.current);
+    setServiceDraftEndDate(shiftDate(selectedDateRef.current, 1));
+    setServiceDraftLodgingNights(1);
     setDialog("service");
   }
 
@@ -1394,6 +1406,11 @@ export function ManagementApp() {
       booking.transportDirection ?? "one_way",
     );
     setEditDraftHasDeposit(Boolean(booking.depositPercent));
+    setEditDraftDate(booking.date);
+    setEditDraftEndDate(
+      booking.endDate ?? shiftDate(booking.date, 1),
+    );
+    setEditDraftLodgingNights(booking.lodgingNights ?? 1);
     setDialog("editService");
     setOpenMenuId(null);
   }
@@ -3675,17 +3692,47 @@ export function ManagementApp() {
             </label>
             <label className="field">
               <span>{serviceDraftType === "hotel" ? "Entrada *" : "Data *"}</span>
-              <input name="date" type="date" defaultValue={selectedDate} required />
+              <BrazilianDateInput
+                name="date"
+                value={serviceDraftDate}
+                required
+                ariaLabel={
+                  serviceDraftType === "hotel"
+                    ? "Data de entrada"
+                    : "Data do serviço"
+                }
+                onChange={(nextDate) => {
+                  setServiceDraftDate(nextDate);
+                  if (
+                    serviceDraftType === "hotel" &&
+                    serviceDraftEndDate <= nextDate
+                  ) {
+                    const nextEndDate = shiftDate(nextDate, 1);
+                    setServiceDraftEndDate(nextEndDate);
+                    setServiceDraftLodgingNights(1);
+                  }
+                }}
+              />
             </label>
             {serviceDraftType === "hotel" && (
               <label className="field">
                 <span>Saída *</span>
-                <input
+                <BrazilianDateInput
                   name="endDate"
-                  type="date"
-                  min={shiftDate(selectedDate, 1)}
-                  defaultValue={shiftDate(selectedDate, 1)}
+                  value={serviceDraftEndDate}
+                  min={shiftDate(serviceDraftDate, 1)}
                   required
+                  ariaLabel="Data de saída"
+                  onChange={(nextEndDate) => {
+                    setServiceDraftEndDate(nextEndDate);
+                    const options = lodgingNightOptions(
+                      serviceDraftDate,
+                      nextEndDate,
+                    );
+                    if (options.length) {
+                      setServiceDraftLodgingNights(options[0]);
+                    }
+                  }}
                 />
               </label>
             )}
@@ -3703,6 +3750,18 @@ export function ManagementApp() {
                     setServiceDraftPayment("invoice");
                   }
                   if (next !== "hotel") setServiceDraftHasDeposit(false);
+                  if (next === "hotel") {
+                    const nextEndDate =
+                      serviceDraftEndDate > serviceDraftDate
+                        ? serviceDraftEndDate
+                        : shiftDate(serviceDraftDate, 1);
+                    const options = lodgingNightOptions(
+                      serviceDraftDate,
+                      nextEndDate,
+                    );
+                    setServiceDraftEndDate(nextEndDate);
+                    setServiceDraftLodgingNights(options[0] ?? 1);
+                  }
                 }}
               >
                 {Object.entries(serviceLabels).map(([key, label]) => (
@@ -3737,7 +3796,29 @@ export function ManagementApp() {
               <>
                 <label className="field">
                   <span>Número de diárias *</span>
-                  <input name="lodgingNights" type="number" min="1" step="0.5" defaultValue="1" required />
+                  <select
+                    name="lodgingNights"
+                    value={serviceDraftLodgingNights}
+                    onChange={(event) =>
+                      setServiceDraftLodgingNights(
+                        Number(event.target.value),
+                      )
+                    }
+                    required
+                  >
+                    {lodgingNightOptions(
+                      serviceDraftDate,
+                      serviceDraftEndDate,
+                    ).map((nights) => (
+                      <option key={nights} value={nights}>
+                        {String(nights).replace(".", ",")}{" "}
+                        {nights === 1 ? "diária" : "diárias"}
+                      </option>
+                    ))}
+                  </select>
+                  <small>
+                    Opções compatíveis com o período de entrada e saída.
+                  </small>
                 </label>
                 <label className="check-field">
                   <input
@@ -3768,12 +3849,22 @@ export function ManagementApp() {
             <label className="field">
               <span>Valor aplicado (R$) *</span>
               <input
-                key={`${serviceDraftType}-${serviceDraftTransportDirection}`}
+                key={`${serviceDraftType}-${serviceDraftTransportDirection}-${serviceDraftLodgingNights}`}
                 name="price"
                 type="number"
                 min="0"
                 step="0.01"
-                defaultValue={(serviceDraftType === "transport" ? (serviceDraftTransportDirection === "round_trip" ? 10 : 5) : servicePrices[serviceDraftType] / 100).toFixed(2)}
+                defaultValue={(
+                  serviceDraftType === "transport"
+                    ? serviceDraftTransportDirection === "round_trip"
+                      ? 10
+                      : 5
+                    : serviceDraftType === "hotel"
+                      ? (servicePrices.hotel *
+                          serviceDraftLodgingNights) /
+                        100
+                      : servicePrices[serviceDraftType] / 100
+                ).toFixed(2)}
                 readOnly={
                   serviceDraftType === "transport" || signedInRole !== "owner"
                 }
@@ -3880,25 +3971,48 @@ export function ManagementApp() {
               <span>
                 {editDraftType === "hotel" ? "Entrada *" : "Data *"}
               </span>
-              <input
+              <BrazilianDateInput
                 name="date"
-                type="date"
-                defaultValue={bookingToEdit.date}
+                value={editDraftDate}
                 autoFocus
                 required
+                ariaLabel={
+                  editDraftType === "hotel"
+                    ? "Data de entrada"
+                    : "Data do serviço"
+                }
+                onChange={(nextDate) => {
+                  setEditDraftDate(nextDate);
+                  if (
+                    editDraftType === "hotel" &&
+                    editDraftEndDate <= nextDate
+                  ) {
+                    const nextEndDate = shiftDate(nextDate, 1);
+                    setEditDraftEndDate(nextEndDate);
+                    setEditDraftLodgingNights(1);
+                  }
+                }}
               />
             </label>
             {editDraftType === "hotel" && (
               <label className="field">
                 <span>Saída *</span>
-                <input
+                <BrazilianDateInput
                   name="endDate"
-                  type="date"
-                  defaultValue={
-                    bookingToEdit.endDate ??
-                    shiftDate(bookingToEdit.date, 1)
-                  }
+                  value={editDraftEndDate}
+                  min={shiftDate(editDraftDate, 1)}
                   required
+                  ariaLabel="Data de saída"
+                  onChange={(nextEndDate) => {
+                    setEditDraftEndDate(nextEndDate);
+                    const options = lodgingNightOptions(
+                      editDraftDate,
+                      nextEndDate,
+                    );
+                    if (options.length) {
+                      setEditDraftLodgingNights(options[0]);
+                    }
+                  }}
                 />
               </label>
             )}
@@ -3911,6 +4025,18 @@ export function ManagementApp() {
                   const next = event.target.value as ServiceType;
                   setEditDraftType(next);
                   if (next !== "hotel") setEditDraftHasDeposit(false);
+                  if (next === "hotel") {
+                    const nextEndDate =
+                      editDraftEndDate > editDraftDate
+                        ? editDraftEndDate
+                        : shiftDate(editDraftDate, 1);
+                    const options = lodgingNightOptions(
+                      editDraftDate,
+                      nextEndDate,
+                    );
+                    setEditDraftEndDate(nextEndDate);
+                    setEditDraftLodgingNights(options[0] ?? 1);
+                  }
                   const form = event.currentTarget.form;
                   const price = form?.elements.namedItem("price") as
                     | HTMLInputElement
@@ -3985,14 +4111,29 @@ export function ManagementApp() {
               <>
                 <label className="field">
                   <span>Número de diárias *</span>
-                  <input
+                  <select
                     name="lodgingNights"
-                    type="number"
-                    min="1"
-                    step="0.5"
-                    defaultValue={bookingToEdit.lodgingNights ?? 1}
+                    value={editDraftLodgingNights}
+                    onChange={(event) =>
+                      setEditDraftLodgingNights(
+                        Number(event.target.value),
+                      )
+                    }
                     required
-                  />
+                  >
+                    {lodgingNightOptions(
+                      editDraftDate,
+                      editDraftEndDate,
+                    ).map((nights) => (
+                      <option key={nights} value={nights}>
+                        {String(nights).replace(".", ",")}{" "}
+                        {nights === 1 ? "diária" : "diárias"}
+                      </option>
+                    ))}
+                  </select>
+                  <small>
+                    Opções compatíveis com o período de entrada e saída.
+                  </small>
                 </label>
                 <label className="check-field">
                   <input
@@ -4023,7 +4164,7 @@ export function ManagementApp() {
             <label className="field">
               <span>Valor aplicado (R$) *</span>
               <input
-                key={`${editDraftType}-${editDraftTransportDirection}`}
+                key={`${editDraftType}-${editDraftTransportDirection}-${editDraftLodgingNights}`}
                 name="price"
                 type="number"
                 min="0"
@@ -4033,6 +4174,14 @@ export function ManagementApp() {
                     ? editDraftTransportDirection === "round_trip"
                       ? "10.00"
                       : "5.00"
+                    : editDraftType === "hotel" &&
+                        editDraftLodgingNights !==
+                          bookingToEdit.lodgingNights
+                      ? (
+                          (servicePrices.hotel *
+                            editDraftLodgingNights) /
+                          100
+                        ).toFixed(2)
                     : editDraftType === bookingToEdit.serviceType
                     ? (bookingToEdit.priceCents / 100).toFixed(2)
                     : (
@@ -4110,10 +4259,10 @@ export function ManagementApp() {
             {runtimeMode === "ready" ? (
               <label className="field">
                 <span>Data de nascimento</span>
-                <input
+                <BrazilianDateInput
                   name="birthDate"
-                  type="date"
                   defaultValue={dogToEdit.birthDate}
+                  ariaLabel="Data de nascimento do cão"
                 />
               </label>
             ) : (
@@ -4148,7 +4297,10 @@ export function ManagementApp() {
             </label>
             <label className="field">
               <span>Vencimento da vacina</span>
-              <input name="vaccineExpiresOn" type="date" />
+              <BrazilianDateInput
+                name="vaccineExpiresOn"
+                ariaLabel="Data de vencimento da vacina"
+              />
             </label>
             {dogToEdit.vaccines?.length ? <div className="field full"><small>Vacinas registradas: {dogToEdit.vaccines.map((vaccine) => `${vaccine.name} (${formatShortDate(vaccine.expiresOn)})`).join(" · ")}</small></div> : null}
             <label className="field full">
@@ -4237,7 +4389,11 @@ export function ManagementApp() {
             </label>
             <label className="field">
               <span>Data de nascimento</span>
-              <input name="birthDate" type="date" defaultValue={customerToEdit.birthDate} />
+              <BrazilianDateInput
+                name="birthDate"
+                defaultValue={customerToEdit.birthDate}
+                ariaLabel="Data de nascimento do cliente"
+              />
             </label>
             <div className="dialog-actions full">
               <button
@@ -4277,7 +4433,11 @@ export function ManagementApp() {
             </label>
             <label className="field">
               <span>Data</span>
-              <input name="date" type="date" defaultValue={selectedDate} />
+              <BrazilianDateInput
+                name="date"
+                defaultValue={selectedDate}
+                ariaLabel="Data da tarefa"
+              />
             </label>
             <label className="field">
               <span>Horário</span>
@@ -4366,7 +4526,13 @@ export function ManagementApp() {
               </label>
               <label className="field full"><span>Endereço</span><input name="address" placeholder="Rua, número, bairro e cidade" /></label>
               <label className="field"><span>CPF</span><input name="cpf" inputMode="numeric" /></label>
-              <label className="field"><span>Data de nascimento</span><input name="birthDate" type="date" /></label>
+              <label className="field">
+                <span>Data de nascimento</span>
+                <BrazilianDateInput
+                  name="birthDate"
+                  ariaLabel="Data de nascimento do cliente"
+                />
+              </label>
               <div className="dialog-actions full">
                 <button
                   className="secondary-button"
@@ -5212,10 +5378,10 @@ function DateNavigator({
           </button>
           <label>
             <span className="sr-only">Escolher uma data</span>
-            <input
-              type="date"
+            <BrazilianDateInput
               value={value}
-              onChange={(event) => onChange(event.target.value)}
+              onChange={onChange}
+              ariaLabel="Escolher uma data"
             />
           </label>
           <button
@@ -5229,12 +5395,11 @@ function DateNavigator({
       </div>
       <div className="date-quick-list">
         {dates.map((date, index) => {
-          const parsed = dateFromIso(date);
           const weekday = new Intl.DateTimeFormat("pt-BR", {
             weekday: "short",
             timeZone: "America/Sao_Paulo",
           })
-            .format(parsed)
+            .format(dateFromIso(date))
             .replace(".", "");
           return (
             <button
@@ -5244,15 +5409,7 @@ function DateNavigator({
               aria-pressed={value === date}
             >
               <span>{index === 0 ? "Hoje" : index === 1 ? "Amanhã" : weekday}</span>
-              <strong>{parsed.getDate()}</strong>
-              <small>
-                {new Intl.DateTimeFormat("pt-BR", {
-                  month: "short",
-                  timeZone: "America/Sao_Paulo",
-                })
-                  .format(parsed)
-                  .replace(".", "")}
-              </small>
+              <strong>{formatShortDate(date)}</strong>
             </button>
           );
         })}
@@ -8047,11 +8204,11 @@ function InvoiceDialog({
             <div className="invoice-payment-register">
               <label>
                 Data do pagamento
-                <input
-                  type="date"
+                <BrazilianDateInput
                   value={paidAt}
                   max={operationalToday}
-                  onChange={(event) => setPaidAt(event.target.value)}
+                  onChange={setPaidAt}
+                  ariaLabel="Data do pagamento"
                 />
               </label>
               <span>

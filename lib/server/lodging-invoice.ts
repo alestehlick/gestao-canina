@@ -29,6 +29,11 @@ function todayInSaoPaulo() {
   }).format(new Date());
 }
 
+function displayDate(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
+}
+
 export async function createLodgingInvoice(input: {
   appointmentId: string;
   kind: LodgingInvoiceKind;
@@ -145,7 +150,7 @@ export async function createLodgingInvoice(input: {
     }
     amountCents = Math.round((lodging.totalCents * percent) / 100);
     serviceName = "Sinal da hospedagem";
-    description = `Sinal de ${percent}% da hospedagem de ${lodging.dogName}, de ${lodging.startDate} a ${lodging.endDate}`;
+    description = `Sinal de ${percent}% da hospedagem de ${lodging.dogName}, de ${displayDate(lodging.startDate)} a ${displayDate(lodging.endDate)}`;
   } else {
     if (lodging.appointmentStatus !== "completed") {
       throw new HttpError(
@@ -190,7 +195,7 @@ export async function createLodgingInvoice(input: {
       );
     }
     serviceName = "Saldo da hospedagem";
-    description = `Saldo da hospedagem de ${lodging.dogName}, de ${lodging.startDate} a ${lodging.endDate}${
+    description = `Saldo da hospedagem de ${lodging.dogName}, de ${displayDate(lodging.startDate)} a ${displayDate(lodging.endDate)}${
       depositPaidCents > 0
         ? `, com sinal de R$ ${(depositPaidCents / 100).toFixed(2).replace(".", ",")} já abatido`
         : ""

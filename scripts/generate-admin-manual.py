@@ -231,7 +231,7 @@ sections = [
             (
                 "7. Hospedagem com sinal",
                 [
-                    "Informe entrada, saída e diárias em intervalos de meia diária: 1; 1,5; 2; 2,5 e assim por diante.",
+                    "Informe primeiro a entrada e a saída. Todas as datas aparecem como dia/mês/ano. O campo de diárias mostra somente o período em dias ou esse período acrescido de meia diária. Por exemplo, de 03/10/2026 a 04/10/2026, escolha 1 ou 1,5 diária.",
                     "Se houver sinal, marque <b>Cobrar sinal no check-in</b> e informe a porcentagem. O padrão é 50%.",
                 ],
             ),

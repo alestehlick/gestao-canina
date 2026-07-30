@@ -7,6 +7,10 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import {
+  BrazilianDateInput,
+  formatBrazilianDate,
+} from "@/app/components/brazilian-date-input";
 
 type PortalData = {
   identity: { email: string; displayName: string; role: "customer" };
@@ -123,12 +127,7 @@ function money(cents: number | null) {
 
 function shortDate(value: string | null) {
   if (!value) return "—";
-  return new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(`${value.slice(0, 10)}T12:00:00.000Z`));
+  return formatBrazilianDate(value);
 }
 
 function statusLabel(status: string) {
@@ -510,11 +509,11 @@ export default function CustomerPortal() {
                   </label>
                   <label className="field">
                     <span>Data desejada</span>
-                    <input
+                    <BrazilianDateInput
                       name="requestedDate"
-                      type="date"
                       min={today}
                       required
+                      ariaLabel="Data desejada para o serviço"
                     />
                   </label>
                   <label className="field">
@@ -826,8 +825,7 @@ function PortalAppointmentList({
       {appointments.map((appointment) => (
         <article key={appointment.id}>
           <time dateTime={appointment.startDate}>
-            <strong>{appointment.startDate.slice(8, 10)}</strong>
-            <span>{shortDate(appointment.startDate).split(" ")[1]}</span>
+            <strong>{shortDate(appointment.startDate)}</strong>
           </time>
           <div>
             <strong>

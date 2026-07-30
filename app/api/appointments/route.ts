@@ -181,8 +181,20 @@ export async function POST(request: Request) {
     const lodgingNights = typeof body.lodgingNights === "number" ? body.lodgingNights : null;
     const depositPercent = typeof body.depositPercent === "number" ? body.depositPercent : null;
     if (service.code === "hotel") {
-      if (lodgingNights === null || !Number.isFinite(lodgingNights) || lodgingNights < 0.5 || lodgingNights > 365 || Math.round(lodgingNights * 2) !== lodgingNights * 2) {
-        throw new HttpError(400, "invalid_lodging_nights", "Informe o número de diárias em múltiplos de meio dia.");
+      if (
+        lodgingNights === null ||
+        !Number.isFinite(lodgingNights) ||
+        durationDays < 1 ||
+        lodgingNights > 365 ||
+        Math.round(lodgingNights * 2) !== lodgingNights * 2 ||
+        (lodgingNights !== durationDays &&
+          lodgingNights !== durationDays + 0.5)
+      ) {
+        throw new HttpError(
+          400,
+          "invalid_lodging_nights",
+          "Escolha o período em dias ou o período acrescido de meia diária.",
+        );
       }
       if (depositPercent !== null && (!Number.isInteger(depositPercent) || depositPercent < 1 || depositPercent > 99)) {
         throw new HttpError(400, "invalid_deposit_percent", "Informe um sinal entre 1% e 99%.");

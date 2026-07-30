@@ -2735,6 +2735,53 @@ h3 {
   resize: vertical;
 }
 
+.brazilian-date-input {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffefa;
+  color: var(--ink);
+  padding: 10px 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.brazilian-date-input:focus-within {
+  outline: 2px solid color-mix(in srgb, var(--forest) 36%, transparent);
+  outline-offset: 1px;
+}
+
+.brazilian-date-input > span:first-child {
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 560;
+}
+
+.brazilian-date-input > span:first-child:empty {
+  color: var(--muted);
+}
+
+.date-calendar-mark {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.field .brazilian-date-input > input,
+.brazilian-date-input > input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  min-height: 44px;
+  cursor: pointer;
+  opacity: 0;
+}
+
 .dialog-actions {
   display: flex;
   align-items: center;

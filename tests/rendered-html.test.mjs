@@ -122,6 +122,48 @@ test("mantém ações completas nos perfis e recorrências semanais seguras", as
   assert.match(data, /Recorrência semanal cancelada/);
 });
 
+test("mostra datas brasileiras e limita as diárias ao período escolhido", async () => {
+  const [app, portal, dateInput, appointments, lodgingInvoice] =
+    await Promise.all([
+      readFile(
+        new URL("../app/components/management-app.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/components/customer-portal.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL(
+          "../app/components/brazilian-date-input.tsx",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/api/appointments/route.ts", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../lib/server/lodging-invoice.ts", import.meta.url),
+        "utf8",
+      ),
+    ]);
+
+  assert.match(dateInput, /dd\/mm\/aaaa/);
+  assert.match(dateInput, /type="date"/);
+  assert.doesNotMatch(app, /type="date"/);
+  assert.doesNotMatch(portal, /type="date"/);
+  assert.match(app, /function lodgingNightOptions/);
+  assert.match(app, /calendarDays \+ 0\.5/);
+  assert.match(app, /Opções compatíveis com o período/);
+  assert.match(
+    appointments,
+    /lodgingNights !== durationDays \+ 0\.5/,
+  );
+  assert.match(lodgingInvoice, /displayDate\(lodging\.startDate\)/);
+});
+
 test("mantém o primeiro acesso e o login protegidos sem bloqueio global da conta", async () => {
   const [setup, login, limiter, passwordAuth, schema] = await Promise.all([
     readFile(new URL("../app/api/auth/setup/route.ts", import.meta.url), "utf8"),

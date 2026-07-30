@@ -93,7 +93,11 @@ financeiro; resolva essa cobrança antes de tentar novamente.
 
 ### 7. Hospedagem com sinal
 
-Ao criar a hospedagem, informe as datas e o número de diárias em intervalos de meia diária: 1; 1,5; 2; 2,5 e assim por diante.
+Ao criar a hospedagem, informe primeiro a entrada e a saída. Todas as datas são
+mostradas no formato **dia/mês/ano**. O campo de diárias mostrará somente as
+duas opções compatíveis com o período: a quantidade de dias ou essa quantidade
+acrescida de meia diária. Por exemplo, de 03/10/2026 a 04/10/2026 será possível
+escolher 1 ou 1,5 diária.
 
 Se houver sinal, marque **Cobrar sinal no check-in** e informe a porcentagem. O padrão é 50%.
 

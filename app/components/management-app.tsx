@@ -841,7 +841,7 @@ export function ManagementApp() {
             result.receipt?.receiptNumber ?? "novo recibo";
           setOpenMenuId(null);
           setToast({
-            message: `Crédito utilizado. O ${receiptNumber} está pronto para envio, sem nova cobrança Pix.`,
+            message: `Crédito utilizado. O ${receiptNumber} está pronto para envio, sem nova fatura.`,
             actionLabel: "Ver recibos",
             action: () => {
               setBillingTab("receipts");
@@ -875,7 +875,7 @@ export function ManagementApp() {
           message:
             status === "completed"
               ? booking.paymentPreference === "pix"
-                ? `Atendimento de ${booking.dogName} concluído e pronto para cobrança Pix.`
+                ? `Atendimento de ${booking.dogName} concluído e pronto para faturamento.`
                 : `Atendimento de ${booking.dogName} concluído.`
               : status === "cancelled"
                 ? `Atendimento de ${booking.dogName} cancelado.`
@@ -891,7 +891,7 @@ export function ManagementApp() {
       if (!creditServiceTypes.includes(booking.serviceType as CreditServiceType)) {
         setToast({
           message:
-            "Créditos são válidos apenas para creche, banho e tosa higiênica.",
+            "Créditos são válidos para creche, banho, banho e tosa e taxi-dog.",
         });
         return;
       }
@@ -899,7 +899,7 @@ export function ManagementApp() {
       const available = creditBalances[booking.customerId]?.[serviceType] ?? 0;
       if (available < 1) {
         setToast({
-          message: `Não há crédito de ${serviceLabels[serviceType].toLowerCase()} disponível. Altere para cobrança Pix ou venda um pacote.`,
+          message: `Não há crédito de ${serviceLabels[serviceType].toLowerCase()} disponível. Gere uma fatura ou venda um pacote.`,
         });
         return;
       }
@@ -1921,7 +1921,7 @@ export function ManagementApp() {
         `${receipt.service} para ${receipt.dogName}`,
         `Data: ${receipt.date}`,
         `${receipt.creditUnits} crédito pré-pago utilizado.`,
-        "Nenhuma nova cobrança Pix foi gerada.",
+        "Nenhuma nova fatura foi gerada.",
       ].join("\n");
 
       if (channel === "whatsapp") {
@@ -1976,7 +1976,7 @@ export function ManagementApp() {
     setToast({
       message: `Recibo preparado para envio por ${
         channel === "whatsapp" ? "WhatsApp" : "e-mail"
-      }. Nenhuma cobrança Pix foi criada.`,
+      }. Nenhuma fatura foi criada.`,
     });
   }
 
@@ -2011,7 +2011,7 @@ export function ManagementApp() {
       amountCents: invoice.amountCents,
       providerMessage:
         runtimeMode === "ready" && view !== "portal"
-          ? "A fatura está registrada. Gere o código no provedor Pix para enviar ao cliente."
+          ? "A fatura está registrada e pronta para compartilhar com o cliente."
           : undefined,
       creditPurchase: creditPurchase
         ? {
@@ -2136,7 +2136,7 @@ export function ManagementApp() {
               }
             : current,
         );
-        setToast({ message: "Cobrança Pix criada." });
+        setToast({ message: "Fatura criada." });
       } catch (error) {
         if (isSessionError(error)) {
           endSession();
@@ -2207,7 +2207,7 @@ export function ManagementApp() {
     setToast({
       message:
         pixState.kind === "credit_package"
-          ? "Cobrança Pix do pacote criada. Os créditos serão liberados após o pagamento."
+          ? "Fatura do pacote criada. Libere os créditos após registrar o pagamento."
           : "Cobrança demonstrativa criada.",
     });
   }
@@ -4213,7 +4213,7 @@ function TodayView({
               <div className="panel-heading">
                 <div>
                   <p className="section-kicker">Financeiro</p>
-                  <h2>Pix aguardando</h2>
+                  <h2>Faturas pendentes</h2>
                 </div>
                 <span className="status-pill pending">Pendente</span>
               </div>
@@ -4542,12 +4542,12 @@ function AgendaCard({
           )}
         {booking.settlementStatus === "credit_used" && (
           <span className="settlement-note settled">
-            Quitado com 1 crédito · sem cobrança Pix
+            Quitado com 1 crédito · sem nova fatura
           </span>
         )}
         {booking.settlementStatus === "pix_pending" && (
           <span className="settlement-note pix">
-            Serviço pronto para cobrança Pix
+            Serviço pronto para faturamento
           </span>
         )}
         {booking.note && <span className="care-note">{booking.note}</span>}
@@ -4938,7 +4938,7 @@ function CustomerStatus({ customer }: { customer: Customer }) {
     return <span className="status-pill overdue">Vencido</span>;
   }
   if (customer.status === "pending") {
-    return <span className="status-pill pending">Aguardando Pix</span>;
+    return <span className="status-pill pending">Fatura pendente</span>;
   }
   return <span className="status-pill success">Em dia</span>;
 }
@@ -5105,7 +5105,7 @@ function CustomerProfile({
                           className="text-button"
                           onClick={() => onOpenPix(invoice)}
                         >
-                          Ver Pix
+                          Ver fatura
                         </button>
                       )}
                     </span>
@@ -5169,7 +5169,7 @@ function CustomerProfile({
                         {purchase.status === "paid"
                           ? "Créditos liberados"
                           : purchase.status === "awaiting_pix"
-                            ? "Aguardando Pix"
+                            ? "Fatura pendente"
                             : "Cancelado"}
                       </small>
                     </span>
@@ -5180,7 +5180,7 @@ function CustomerProfile({
             ) : (
               <EmptyState
                 title="Nenhum pacote vendido"
-                description="Use “Vender pacote” para preparar a cobrança Pix e liberar os créditos após o pagamento."
+                description="Use “Vender pacote” para preparar a fatura e liberar os créditos após registrar o pagamento."
               />
             )}
           </section>
@@ -5305,7 +5305,7 @@ function BillingView({
           <small>
             {paidInvoices.length}{" "}
             {paidInvoices.length === 1 ? "cobrança paga" : "cobranças pagas"} ·
-            somente Pix
+            por fatura
           </small>
         </div>
         <div>
@@ -5324,13 +5324,13 @@ function BillingView({
         <div>
           <span>Créditos disponíveis</span>
           <strong>{availableCredits}</strong>
-          <small>{awaitingPackages} pacotes aguardando Pix</small>
+          <small>{awaitingPackages} pacotes com fatura pendente</small>
         </div>
       </section>
 
       <div className="tabs billing-tabs" role="tablist" aria-label="Financeiro">
         {[
-          ["pix", "Cobranças Pix"],
+          ["pix", "Faturas"],
           ["credits", "Pacotes e créditos"],
           ["receipts", "Recibos"],
         ].map(([id, label]) => (
@@ -5355,7 +5355,7 @@ function BillingView({
                 <h2>Serviços concluídos</h2>
               </div>
               <span className="pix-only-badge">
-                Pagamento exclusivo por Pix
+                Faturas para compartilhamento
               </span>
             </div>
             {billableServices.length ? (
@@ -5441,7 +5441,7 @@ function BillingView({
                           className="row-link"
                           onClick={() => onOpenPix(invoice)}
                         >
-                          {invoice.status === "pending" ? "Ver Pix" : "Detalhes"}
+                          {invoice.status === "pending" ? "Ver fatura" : "Detalhes"}
                         </button>
                       </td>
                     </tr>
@@ -5458,9 +5458,9 @@ function BillingView({
           <section className="panel credit-flow-panel">
             <div>
               <p className="section-kicker">Pré-pagamento seguro</p>
-              <h2>Venda o pacote; libere só após o Pix</h2>
+              <h2>Venda o pacote; libere após registrar o pagamento</h2>
               <p>
-                Defina a quantidade e um valor especial. A emissão do Pix não
+                Defina a quantidade e um valor especial. A emissão da fatura não
                 muda o saldo: os créditos entram automaticamente apenas quando
                 o pagamento for confirmado.
               </p>
@@ -5556,7 +5556,7 @@ function BillingView({
                           {purchase.status === "paid"
                             ? "Liberado"
                             : purchase.status === "awaiting_pix"
-                              ? "Aguardando Pix"
+                              ? "Fatura pendente"
                               : "Cancelado"}
                         </span>
                       </td>
@@ -5619,7 +5619,7 @@ function BillingView({
             <small>{formatCurrency(selectedTotal)}</small>
           </span>
           <button className="primary-button" onClick={onCreatePix}>
-            Criar cobrança Pix
+            Criar fatura
           </button>
         </div>
       )}
@@ -5741,7 +5741,7 @@ function InvoiceStatus({ invoice }: { invoice: Invoice }) {
   if (invoice.status === "overdue") {
     return <span className="status-pill overdue">Vencido</span>;
   }
-  return <span className="status-pill pending">Aguardando Pix</span>;
+  return <span className="status-pill pending">Fatura pendente</span>;
 }
 
 function ActivityView({ activities }: { activities: AuditActivity[] }) {
@@ -6105,7 +6105,7 @@ function CreditPackageDialog({
   return (
     <Dialog
       title="Vender pacote de créditos"
-      description="Defina o pacote e o valor especial. Os créditos só serão liberados após a confirmação do Pix."
+      description="Defina o pacote e o valor especial. Os créditos são liberados após registrar o pagamento."
       onClose={onClose}
     >
       <form className="form-grid" onSubmit={onSubmit}>
@@ -6181,7 +6181,7 @@ function CreditPackageDialog({
             <strong>{formatCurrency(standardValueCents)}</strong>
           </div>
           <div>
-            <span>Valor que será cobrado por Pix</span>
+            <span>Valor da fatura</span>
             <strong>{formatCurrency(packageValueCents)}</strong>
           </div>
           <div className={differenceCents >= 0 ? "saving" : ""}>
@@ -6193,7 +6193,7 @@ function CreditPackageDialog({
           <strong>Regra de segurança</strong>
           <span>
             Criar a cobrança não adiciona créditos. O saldo muda somente quando
-            o Pix é confirmado.
+            o pagamento é registrado.
           </span>
         </div>
         <div className="dialog-actions full">
@@ -6201,7 +6201,7 @@ function CreditPackageDialog({
             Cancelar
           </button>
           <button className="primary-button" type="submit">
-            Revisar cobrança Pix
+            Revisar fatura
           </button>
         </div>
       </form>
@@ -6253,7 +6253,7 @@ function ReceiptDialog({
             </div>
           )}
           <div>
-            <span>Cobrança Pix</span>
+            <span>Nova fatura</span>
             <strong>Não gerada</strong>
           </div>
         </div>
@@ -6313,8 +6313,8 @@ function PixDialog({
         title="Revisar cobrança"
         description={
           state.kind === "credit_package"
-            ? "Confira o pacote e o valor especial antes de emitir o Pix."
-            : "Confira os serviços antes de emitir o Pix."
+            ? "Confira o pacote e o valor especial antes de criar a fatura."
+            : "Confira os serviços antes de criar a fatura."
         }
         onClose={onClose}
       >
@@ -6359,7 +6359,7 @@ function PixDialog({
           <div className="pix-notice">
             <span className="attention-mark">i</span>
             <p>
-              <strong>Pagamento exclusivo por Pix.</strong>
+              <strong>Fatura pronta para compartilhamento.</strong>
               {state.kind === "credit_package"
                 ? " Os créditos serão liberados somente depois da confirmação do pagamento."
                 : " Esta cobrança reúne o saldo integral dos itens selecionados."}
@@ -6375,7 +6375,7 @@ function PixDialog({
               autoFocus
               disabled={busy}
             >
-              {busy ? "Registrando…" : "Emitir cobrança Pix"}
+              {busy ? "Registrando…" : "Criar fatura"}
             </button>
           </div>
         </div>
@@ -6386,11 +6386,11 @@ function PixDialog({
   if (state.step === "paid") {
     return (
       <Dialog
-        title="Pagamento Pix confirmado"
+        title="Pagamento confirmado"
         description={
           liveMode
-            ? "O pagamento foi confirmado pelo provedor Pix."
-            : "Confirmação simulada somente para validar o fluxo."
+            ? "O pagamento foi confirmado."
+            : "Confirmação de demonstração." 
         }
         onClose={onClose}
         size="small"
@@ -6434,7 +6434,7 @@ function PixDialog({
               <small>Vencimento</small>
               <strong>Hoje</strong>
             </span>
-            <span className="status-pill pending">Aguardando Pix</span>
+            <span className="status-pill pending">Fatura pendente</span>
           </div>
 
           {state.copyPasteCode ? (
@@ -6534,7 +6534,7 @@ function PixDialog({
             <small>Vencimento</small>
             <strong>Hoje</strong>
           </span>
-          <span className="status-pill pending">Aguardando Pix</span>
+            <span className="status-pill pending">Fatura pendente</span>
         </div>
         <div className="demo-warning">
           Demonstração — este código não é válido para pagamento.

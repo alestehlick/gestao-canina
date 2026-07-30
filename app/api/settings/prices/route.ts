@@ -15,6 +15,7 @@ const editableServiceCodes = [
   "daycare",
   "bath",
   "hygienic_grooming",
+  "transport",
 ] as const;
 
 type EditableServiceCode = (typeof editableServiceCodes)[number];

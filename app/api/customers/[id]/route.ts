@@ -83,6 +83,15 @@ export async function PATCH(
       body.phone === undefined
         ? undefined
         : normalizeBrazilianPhone(optionalString(body, "phone", 40));
+    const addressLine = optionalString(body, "addressLine", 240);
+    const addressCity = optionalString(body, "addressCity", 120);
+    const addressRegion = optionalString(body, "addressRegion", 40);
+    const addressPostalCode = optionalString(body, "addressPostalCode", 24);
+    const cpf = optionalString(body, "cpf", 20);
+    const birthDate = optionalString(body, "birthDate", 10);
+    if (birthDate && !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) {
+      throw new HttpError(400, "invalid_birth_date", "A data de nascimento é inválida.");
+    }
     if (
       displayName === null &&
       fullName === null &&
@@ -196,6 +205,12 @@ export async function PATCH(
         .set({
           displayName: nextDisplayName,
           normalizedName: normalizeLookupText(nextDisplayName),
+          addressLine: body.addressLine === undefined ? account.addressLine : addressLine,
+          addressCity: body.addressCity === undefined ? account.addressCity : addressCity,
+          addressRegion: body.addressRegion === undefined ? account.addressRegion : addressRegion,
+          addressPostalCode: body.addressPostalCode === undefined ? account.addressPostalCode : addressPostalCode,
+          cpf: body.cpf === undefined ? account.cpf : cpf,
+          birthDate: body.birthDate === undefined ? account.birthDate : birthDate,
           updatedAt: now,
         })
         .where(eq(customerAccounts.id, id)),

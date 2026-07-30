@@ -41,7 +41,7 @@ export async function POST(request: Request) {
       throw new HttpError(
         400,
         "invalid_payment_preference",
-        "Escolha Pix ou crédito para o pagamento.",
+        "Escolha fatura ou crédito para o pagamento.",
       );
     }
     const customPriceCents =
@@ -112,7 +112,7 @@ export async function POST(request: Request) {
     }
     if (
       paymentPreference === "credit" &&
-      !["daycare", "bath", "hygienic_grooming"].includes(service.code)
+      !["daycare", "bath", "hygienic_grooming", "transport"].includes(service.code)
     ) {
       throw new HttpError(
         400,
@@ -121,10 +121,21 @@ export async function POST(request: Request) {
       );
     }
 
+    const lodgingNights = typeof body.lodgingNights === "number" ? body.lodgingNights : null;
+    const depositPercent = typeof body.depositPercent === "number" ? body.depositPercent : null;
+    if (service.code === "hotel") {
+      if (lodgingNights === null || !Number.isFinite(lodgingNights) || lodgingNights < 0.5 || lodgingNights > 365 || Math.round(lodgingNights * 2) !== lodgingNights * 2) {
+        throw new HttpError(400, "invalid_lodging_nights", "Informe o número de diárias em múltiplos de meio dia.");
+      }
+      if (depositPercent !== null && (!Number.isInteger(depositPercent) || depositPercent < 1 || depositPercent > 99)) {
+        throw new HttpError(400, "invalid_deposit_percent", "Informe um sinal entre 1% e 99%.");
+      }
+    }
+    const direction = body.transportDirection === "round_trip" ? "round_trip" : "one_way";
     const appointmentId = crypto.randomUUID();
     const itemId = crypto.randomUUID();
     const auditId = crypto.randomUUID();
-    const priceCents = customPriceCents ?? service.basePriceCents;
+    const priceCents = customPriceCents ?? (service.code === "transport" ? (direction === "round_trip" ? 1_000 : 500) : service.code === "hotel" ? service.basePriceCents * (lodgingNights ?? 1) : service.basePriceCents);
     await db.batch([
       db.insert(appointments).values({
         id: appointmentId,
@@ -135,6 +146,8 @@ export async function POST(request: Request) {
         endDate,
         startTime,
         endTime,
+        lodgingNights: service.code === "hotel" ? lodgingNights : null,
+        depositPercent: service.code === "hotel" ? depositPercent : null,
         internalNotes,
         createdByUserId: identity.userId,
       }),
@@ -146,6 +159,7 @@ export async function POST(request: Request) {
         unitPriceCents: priceCents,
         quantity: 1,
         totalCents: priceCents,
+        descriptionSnapshot: service.code === "transport" ? (direction === "round_trip" ? "Ida e volta" : "Ida") : service.code === "hotel" && depositPercent ? `Sinal de ${depositPercent}% no check-in; saldo no check-out.` : null,
         paymentPreference,
       }),
       db.insert(auditEvents).values({
@@ -161,6 +175,9 @@ export async function POST(request: Request) {
           dogId: dog.id,
           serviceCatalogId: service.id,
           paymentPreference,
+          transportDirection: service.code === "transport" ? direction : null,
+          lodgingNights: service.code === "hotel" ? lodgingNights : null,
+          depositPercent: service.code === "hotel" ? depositPercent : null,
         }),
       }),
     ]);

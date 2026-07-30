@@ -6,7 +6,7 @@ export type ServiceType =
   | "hotel"
   | "other";
 
-export type CreditServiceType = "daycare" | "bath" | "grooming";
+export type CreditServiceType = "daycare" | "bath" | "grooming" | "transport";
 
 export type BookingStatus =
   | "scheduled"
@@ -24,6 +24,11 @@ export type Dog = {
   breed: string;
   age: string;
   birthDate?: string;
+  feedingNotes?: string;
+  temperamentNotes?: string;
+  medicationNotes?: string;
+  vaccines?: { name: string; expiresOn: string }[];
+  photoUrl?: string;
   customerId: string;
   customerName: string;
   color: string;
@@ -40,6 +45,9 @@ export type Customer = {
   initials: string;
   phone: string;
   email: string;
+  address?: string;
+  cpf?: string;
+  birthDate?: string;
   dogIds: string[];
   balanceCents: number;
   creditsLabel: string;
@@ -53,6 +61,9 @@ export type Booking = {
   date: string;
   time: string;
   endTime?: string;
+  endDate?: string;
+  lodgingNights?: number;
+  depositPercent?: number;
   dogId: string;
   dogName: string;
   customerId: string;
@@ -134,8 +145,8 @@ export const demoToday = "2026-07-30";
 export const serviceLabels: Record<ServiceType, string> = {
   daycare: "Creche",
   bath: "Banho",
-  grooming: "Tosa higiênica",
-  transport: "Transporte",
+  grooming: "Banho e tosa",
+  transport: "Taxi-dog",
   hotel: "Hospedagem",
   other: "Outro",
 };
@@ -153,8 +164,8 @@ export const statusLabels: Record<BookingStatus, string> = {
 export const defaultServicePrices: Record<ServiceType, number> = {
   daycare: 7000,
   bath: 9500,
-  grooming: 5500,
-  transport: 3500,
+  grooming: 9000,
+  transport: 500,
   hotel: 18000,
   other: 5000,
 };
@@ -595,11 +606,11 @@ export const demoBillableServices: BillableService[] = [
 ];
 
 export const demoCreditBalances: CreditBalances = {
-  "customer-marina": { daycare: 4, bath: 1, grooming: 2 },
-  "customer-camila": { daycare: 8, bath: 0, grooming: 0 },
-  "customer-rafael": { daycare: 0, bath: 0, grooming: 0 },
-  "customer-paulo": { daycare: 0, bath: 0, grooming: 0 },
-  "customer-ana": { daycare: 0, bath: 0, grooming: 0 },
+  "customer-marina": { daycare: 4, bath: 1, grooming: 2, transport: 0 },
+  "customer-camila": { daycare: 8, bath: 0, grooming: 0, transport: 0 },
+  "customer-rafael": { daycare: 0, bath: 0, grooming: 0, transport: 0 },
+  "customer-paulo": { daycare: 0, bath: 0, grooming: 0, transport: 0 },
+  "customer-ana": { daycare: 0, bath: 0, grooming: 0, transport: 0 },
 };
 
 export const demoCreditPurchases: CreditPurchase[] = [

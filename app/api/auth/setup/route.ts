@@ -18,17 +18,17 @@ import {
 } from "@/lib/server/password-auth";
 
 const defaultServices = [
-  ["daycare", "Creche", "day", 7_000, "daycare"],
-  ["hotel", "Hospedagem", "night", 18_000, "hotel"],
-  ["bath", "Banho", "service", 9_500, "bath"],
+  ["daycare", "Creche", "day", 7_000, "#009CDE"],
+  ["hotel", "Hospedagem", "night", 18_000, "#FF8200"],
+  ["bath", "Banho", "service", 9_500, "#E31C79"],
   [
     "hygienic_grooming",
-    "Tosa higiênica",
+    "Banho e tosa",
     "service",
-    5_500,
-    "grooming",
+    9_000,
+    "#E31C79",
   ],
-  ["transport", "Transporte", "leg", 3_500, "transport"],
+  ["transport", "Taxi-dog", "leg", 500, "#FFA300"],
   ["other", "Outro", "service", 5_000, "other"],
 ] as const;
 

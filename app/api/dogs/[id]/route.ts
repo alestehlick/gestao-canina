@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditEvents, dogs } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
+import { getRuntimeBindings } from "@/lib/server/runtime";
 import {
   assertSameOrigin,
   errorResponse,
@@ -18,6 +19,43 @@ function normalizeLookupText(value: string) {
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();
+}
+
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  const requestId = crypto.randomUUID();
+  try {
+    const identity = await requireIdentity(request, ["owner", "staff", "finance"]);
+    const { id } = await context.params;
+    if (new URL(request.url).searchParams.get("photo") !== "1") {
+      throw new HttpError(404, "not_found", "Recurso não encontrado.");
+    }
+    const [dog] = await getDb().select().from(dogs).where(and(eq(dogs.id, id), eq(dogs.establishmentId, identity.establishmentId!))).limit(1);
+    if (!dog?.photoObjectKey) throw new HttpError(404, "photo_not_found", "A foto não foi encontrada.");
+    const object = await getRuntimeBindings().FILES?.get(dog.photoObjectKey);
+    if (!object) throw new HttpError(404, "photo_not_found", "A foto não foi encontrada.");
+    return new Response(object.body, { headers: { "content-type": object.httpMetadata?.contentType || "image/jpeg", "cache-control": "private, max-age=3600" } });
+  } catch (error) { return errorResponse(error, requestId); }
+}
+
+export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const requestId = crypto.randomUUID();
+  try {
+    assertSameOrigin(request);
+    const identity = await requireIdentity(request, ["owner", "staff"]);
+    const { id } = await context.params;
+    const photo = (await request.formData()).get("photo");
+    if (!(photo instanceof File) || !photo.size || photo.size > 5_000_000 || !/^image\/(jpeg|png|webp)$/i.test(photo.type)) {
+      throw new HttpError(400, "invalid_photo", "Envie uma foto JPG, PNG ou WebP de até 5 MB.");
+    }
+    const storage = getRuntimeBindings().FILES;
+    if (!storage) throw new HttpError(503, "photo_storage_unavailable", "O armazenamento de fotos não está disponível.");
+    const [dog] = await getDb().select({ id: dogs.id }).from(dogs).where(and(eq(dogs.id, id), eq(dogs.establishmentId, identity.establishmentId!))).limit(1);
+    if (!dog) throw new HttpError(404, "dog_not_found", "O cão não foi encontrado.");
+    const key = `dogs/${identity.establishmentId}/${id}/${crypto.randomUUID()}`;
+    await storage.put(key, photo.stream(), { httpMetadata: { contentType: photo.type } });
+    await getDb().update(dogs).set({ photoObjectKey: key }).where(eq(dogs.id, id));
+    return json({ photoUrl: `/api/dogs/${id}?photo=1` });
+  } catch (error) { return errorResponse(error, requestId); }
 }
 
 export async function PATCH(
@@ -64,6 +102,7 @@ export async function PATCH(
       ["feedingNotes", 2_000],
       ["temperamentNotes", 2_000],
       ["healthNotes", 2_000],
+      ["medicationNotes", 2_000],
       ["emergencyNotes", 2_000],
     ] as const) {
       if (body[key] !== undefined) {
@@ -97,6 +136,13 @@ export async function PATCH(
         );
       }
       updates.vaccinesCurrent = body.vaccinesCurrent;
+      changeCount += 1;
+    }
+    if (body.vaccines !== undefined) {
+      if (!Array.isArray(body.vaccines) || body.vaccines.length > 30 || body.vaccines.some((item) => !item || typeof item !== "object" || typeof (item as { name?: unknown }).name !== "string" || typeof (item as { expiresOn?: unknown }).expiresOn !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test((item as { expiresOn: string }).expiresOn))) {
+        throw new HttpError(400, "invalid_vaccines", "Informe nome e vencimento de cada vacina.");
+      }
+      updates.vaccinesJson = JSON.stringify(body.vaccines.map((item) => ({ name: (item as { name: string }).name.trim(), expiresOn: (item as { expiresOn: string }).expiresOn })));
       changeCount += 1;
     }
 

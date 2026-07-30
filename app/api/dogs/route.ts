@@ -126,6 +126,8 @@ export async function POST(request: Request) {
     );
     const healthNotes = optionalString(body, "healthNotes", 2_000);
     const emergencyNotes = optionalString(body, "emergencyNotes", 2_000);
+    const medicationNotes = optionalString(body, "medicationNotes", 2_000);
+    const vaccinesJson = JSON.stringify(readVaccines(body.vaccines));
     const requestedTutorId = optionalString(body, "primaryTutorId", 80);
 
     const establishmentId = identity.establishmentId!;
@@ -226,6 +228,8 @@ export async function POST(request: Request) {
       temperamentNotes,
       healthNotes,
       emergencyNotes,
+      medicationNotes,
+      vaccinesJson,
     });
     const auditInsert = db.insert(auditEvents).values({
       id: crypto.randomUUID(),
@@ -284,4 +288,15 @@ export async function POST(request: Request) {
   } catch (error) {
     return errorResponse(error, requestId);
   }
+}
+
+function readVaccines(value: unknown) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 30) throw new HttpError(400, "invalid_vaccines", "Informe as vacinas corretamente.");
+  return value.map((item) => {
+    if (!item || typeof item !== "object" || typeof (item as { name?: unknown }).name !== "string" || !String((item as { name: string }).name).trim() || typeof (item as { expiresOn?: unknown }).expiresOn !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test((item as { expiresOn: string }).expiresOn)) {
+      throw new HttpError(400, "invalid_vaccines", "Informe nome e vencimento de cada vacina.");
+    }
+    return { name: (item as { name: string }).name.trim(), expiresOn: (item as { expiresOn: string }).expiresOn };
+  });
 }

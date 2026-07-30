@@ -81,6 +81,8 @@ export type WorkspaceCustomer = {
   addressCity: string | null;
   addressRegion: string | null;
   addressPostalCode: string | null;
+  cpf: string | null;
+  birthDate: string | null;
   status: "active" | "archived";
   createdAt: string;
   updatedAt: string;
@@ -111,6 +113,8 @@ export type WorkspaceDog = {
   feedingNotes: string | null;
   temperamentNotes: string | null;
   healthNotes: string | null;
+  medicationNotes: string | null;
+  vaccinesJson: string;
   emergencyNotes: string | null;
   vaccinesCurrent: boolean | null;
   status: "active" | "archived" | "deceased";
@@ -142,6 +146,8 @@ export type WorkspaceAppointment = {
   endDate: string;
   startTime: string | null;
   endTime: string | null;
+  lodgingNights: number | null;
+  depositPercent: number | null;
   status: BookingStatus;
   source: "manual" | "recurring";
   internalNotes: string | null;
@@ -331,6 +337,7 @@ const creditServiceTypes: CreditServiceType[] = [
   "daycare",
   "bath",
   "grooming",
+  "transport",
 ];
 
 const dogColorTokens = ["clay", "plum", "forest", "sky", "gold", "rose"];
@@ -469,6 +476,14 @@ export function mapWorkspaceCustomers(
         initials: initialsFor(account.displayName),
         phone: formatPhoneForDisplay(contact?.phoneE164),
         email: contact?.email?.trim() || "Não informado",
+        address: [
+          account.addressLine,
+          account.addressCity,
+          account.addressRegion,
+          account.addressPostalCode,
+        ].filter(Boolean).join(" · ") || undefined,
+        cpf: account.cpf ?? undefined,
+        birthDate: account.birthDate ?? undefined,
         dogIds: activeDogIdsByAccount.get(account.id) ?? [],
         balanceCents,
         creditsLabel: creditLabel(availableCredits),
@@ -526,8 +541,11 @@ export function mapWorkspaceBookings(
       itemId: firstItem?.id,
       serviceCatalogId: firstItem?.serviceCatalogId,
       date: appointment.startDate,
+      endDate: appointment.endDate,
       time: appointment.startTime ?? "Sem horário",
       endTime: appointment.endTime ?? undefined,
+      lodgingNights: appointment.lodgingNights ?? undefined,
+      depositPercent: appointment.depositPercent ?? undefined,
       dogId: appointment.dogId,
       dogName: appointment.dogName,
       customerId: appointment.accountId,
@@ -764,6 +782,11 @@ export function mapWorkspaceDogs(
         breed: dog.breed?.trim() || "Raça não informada",
         age: ageLabel(dog.birthDate, referenceDate),
         birthDate: dog.birthDate ?? undefined,
+        feedingNotes: dog.feedingNotes ?? undefined,
+        temperamentNotes: dog.temperamentNotes ?? undefined,
+        medicationNotes: dog.medicationNotes ?? undefined,
+        vaccines: parseVaccines(dog.vaccinesJson),
+        photoUrl: dog.photoObjectKey ? `/api/dogs/${dog.id}?photo=1` : undefined,
         customerId: dog.accountId,
         customerName:
           customersById.get(dog.accountId)?.displayName ??
@@ -903,7 +926,7 @@ function entityTypeLabel(entityType: string) {
 }
 
 function emptyCreditBalance(): Record<CreditServiceType, number> {
-  return { daycare: 0, bath: 0, grooming: 0 };
+  return { daycare: 0, bath: 0, grooming: 0, transport: 0 };
 }
 
 function toCreditServiceType(
@@ -912,7 +935,7 @@ function toCreditServiceType(
   const serviceType = toUiServiceType(code);
   return serviceType === "daycare" ||
     serviceType === "bath" ||
-    serviceType === "grooming"
+    serviceType === "grooming" || serviceType === "transport"
     ? serviceType
     : null;
 }
@@ -1014,6 +1037,29 @@ function formatBrazilianDate(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
   if (!match) return value;
   return `${match[3]}/${match[2]}/${match[1]}`;
+}
+
+function parseVaccines(value: string | null | undefined) {
+  try {
+    const parsed = JSON.parse(value ?? "[]") as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item) => {
+      if (
+        item &&
+        typeof item === "object" &&
+        typeof (item as { name?: unknown }).name === "string" &&
+        typeof (item as { expiresOn?: unknown }).expiresOn === "string"
+      ) {
+        return [{
+          name: (item as { name: string }).name,
+          expiresOn: (item as { expiresOn: string }).expiresOn,
+        }];
+      }
+      return [];
+    });
+  } catch {
+    return [];
+  }
 }
 
 function ageLabel(birthDate: string | null, referenceDate: string) {

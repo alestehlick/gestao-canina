@@ -32,6 +32,8 @@ export const customerAccounts = sqliteTable(
     addressCity: text("address_city"),
     addressRegion: text("address_region").default("SP"),
     addressPostalCode: text("address_postal_code"),
+    cpf: text("cpf"),
+    birthDate: text("birth_date"),
     status: text("status", { enum: ["active", "archived"] })
       .notNull()
       .default("active"),
@@ -226,6 +228,8 @@ export const dogs = sqliteTable(
     feedingNotes: text("feeding_notes"),
     temperamentNotes: text("temperament_notes"),
     healthNotes: text("health_notes"),
+    medicationNotes: text("medication_notes"),
+    vaccinesJson: text("vaccines_json").notNull().default("[]"),
     emergencyNotes: text("emergency_notes"),
     vaccinesCurrent: integer("vaccines_current", { mode: "boolean" }),
     status: text("status", { enum: ["active", "archived", "deceased"] })
@@ -376,6 +380,8 @@ export const appointments = sqliteTable(
     endDate: text("end_date").notNull(),
     startTime: text("start_time"),
     endTime: text("end_time"),
+    lodgingNights: integer("lodging_nights"),
+    depositPercent: integer("deposit_percent"),
     status: text("status", {
       enum: [
         "scheduled",

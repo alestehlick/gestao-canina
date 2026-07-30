@@ -632,7 +632,7 @@ export async function PATCH(
       }
       if (
         paymentPreference === "credit" &&
-        !["daycare", "bath", "hygienic_grooming"].includes(service.code)
+        !["daycare", "bath", "hygienic_grooming", "transport"].includes(service.code)
       ) {
         throw new HttpError(
           400,

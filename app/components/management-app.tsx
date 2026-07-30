@@ -146,8 +146,8 @@ const pageCopy: Record<
   },
   billing: {
     eyebrow: "Financeiro",
-    title: "Cobranças Pix",
-    description: "Revise serviços concluídos e acompanhe pagamentos.",
+    title: "Faturas",
+    description: "Revise serviços concluídos e prepare as faturas para o cliente.",
   },
   activity: {
     eyebrow: "Rastreabilidade",
@@ -165,6 +165,7 @@ const creditServiceTypes: CreditServiceType[] = [
   "daycare",
   "bath",
   "grooming",
+  "transport",
 ];
 
 function todayInSaoPaulo() {
@@ -295,20 +296,13 @@ function formatShortDate(value: string) {
 
 function recurrenceDates(
   startDate: string,
-  recurrence: "none" | "weekly" | "weekdays",
+  recurrence: "none" | "weekly",
 ) {
   if (recurrence === "none") return [startDate];
   if (recurrence === "weekly") {
     return [0, 7, 14, 21].map((days) => shiftDate(startDate, days));
   }
-  const dates: string[] = [];
-  let cursor = startDate;
-  while (dates.length < 5) {
-    const weekday = dateFromIso(cursor).getUTCDay();
-    if (weekday !== 0 && weekday !== 6) dates.push(cursor);
-    cursor = shiftDate(cursor, 1);
-  }
-  return dates;
+  return [startDate];
 }
 
 function totalCredits(
@@ -362,7 +356,7 @@ export function ManagementApp() {
   const [onboardingPayload, setOnboardingPayload] =
     useState<WorkspaceOnboardingPayload | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [onboardingName, setOnboardingName] = useState("Gestão Canina");
+  const [onboardingName, setOnboardingName] = useState("Hospet Quintal");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [view, setView] = useState<View>("today");
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -410,6 +404,8 @@ export function ManagementApp() {
     useState<ServiceType>("daycare");
   const [serviceDraftPayment, setServiceDraftPayment] =
     useState<Booking["paymentPreference"]>("pix");
+  const [serviceDraftTransportDirection, setServiceDraftTransportDirection] =
+    useState<"one_way" | "round_trip">("one_way");
   const [portalTab, setPortalTab] = useState("Início");
   const [sessionExpiresAt, setSessionExpiresAt] = useState<string | null>(null);
 
@@ -1218,6 +1214,13 @@ export function ManagementApp() {
         dogToEdit.birthDate,
       alert: String(form.get("alert") ?? "").trim() || undefined,
       vaccinesCurrent: form.get("vaccinesCurrent") === "on",
+      feedingNotes: String(form.get("feedingNotes") ?? "").trim() || undefined,
+      temperamentNotes: String(form.get("temperamentNotes") ?? "").trim() || undefined,
+      medicationNotes: String(form.get("medicationNotes") ?? "").trim() || undefined,
+      vaccines: [
+        ...((dogToEdit.vaccines ?? []).filter((vaccine) => vaccine.name && vaccine.expiresOn)),
+        ...(String(form.get("vaccineName") ?? "").trim() && String(form.get("vaccineExpiresOn") ?? "") ? [{ name: String(form.get("vaccineName") ?? "").trim(), expiresOn: String(form.get("vaccineExpiresOn") ?? "") }] : []),
+      ],
     };
 
     if (runtimeMode === "ready") {
@@ -1237,6 +1240,10 @@ export function ManagementApp() {
                 emergencyNotes: updated.alert ?? null,
                 vaccinesCurrent: updated.vaccinesCurrent,
                 birthDate: updated.birthDate ?? null,
+                feedingNotes: updated.feedingNotes ?? null,
+                temperamentNotes: updated.temperamentNotes ?? null,
+                medicationNotes: updated.medicationNotes ?? null,
+                vaccines: updated.vaccines,
               }),
             },
           ),
@@ -1246,6 +1253,12 @@ export function ManagementApp() {
         },
       );
       if (result) {
+        const photo = form.get("photo");
+        if (photo instanceof File && photo.size) {
+          const upload = new FormData();
+          upload.set("photo", photo);
+          await fetch(`/api/dogs/${dogToEdit.id}`, { method: "POST", body: upload, credentials: "same-origin" });
+        }
         setDialog(null);
         setDogToEdit(null);
       }
@@ -1298,6 +1311,9 @@ export function ManagementApp() {
       initials: initials(name),
       phone: String(form.get("phone") ?? "").trim() || "Não informado",
       email: String(form.get("email") ?? "").trim() || "Não informado",
+      address: String(form.get("address") ?? "").trim() || undefined,
+      cpf: String(form.get("cpf") ?? "").trim() || undefined,
+      birthDate: String(form.get("birthDate") ?? "").trim() || undefined,
     };
 
     if (runtimeMode === "ready") {
@@ -1325,6 +1341,9 @@ export function ManagementApp() {
                 email,
                 whatsappEnabled: Boolean(phone),
                 isFinancialContact: true,
+                addressLine: updated.address ?? null,
+                cpf: updated.cpf ?? null,
+                birthDate: updated.birthDate ?? null,
               }),
             },
           ),
@@ -1418,14 +1437,21 @@ export function ManagementApp() {
     const date = String(form.get("date") ?? "");
     const time = String(form.get("time") ?? "");
     const endTime = String(form.get("endTime") ?? "");
+    const endDate = String(form.get("endDate") ?? date);
+    const lodgingNights = Number(form.get("lodgingNights") ?? 0);
+    const depositPercent = form.get("hasDeposit") === "on" ? Number(form.get("depositPercent") ?? 50) : null;
+    const transportDirection = String(form.get("transportDirection") ?? "one_way") === "round_trip" ? "round_trip" : "one_way";
     const price = Number(form.get("price") ?? 0);
     const recurrence = String(form.get("recurrence") ?? "none") as
       | "none"
-      | "weekly"
-      | "weekdays";
+      | "weekly";
 
-    if (!dog || !serviceType || !date || !time) {
+    if (!dog || !serviceType || !date || (serviceType !== "transport" && serviceType !== "hotel" && !time)) {
       setToast({ message: "Revise os campos obrigatórios." });
+      return;
+    }
+    if (serviceType === "hotel" && (!endDate || endDate < date || lodgingNights < 0.5 || Math.round(lodgingNights * 2) !== lodgingNights * 2)) {
+      setToast({ message: "Informe entrada, saída e diárias em múltiplos de 0,5." });
       return;
     }
     if (endTime && endTime <= time) {
@@ -1434,7 +1460,7 @@ export function ManagementApp() {
     }
 
     const scheduledDates = recurrenceDates(date, recurrence);
-    const priceCents = Math.max(0, Math.round(price * 100));
+    const priceCents = serviceType === "transport" ? (transportDirection === "round_trip" ? 1_000 : 500) : Math.max(0, Math.round(price * 100));
     const paymentPreference: Booking["paymentPreference"] =
       creditServiceTypes.includes(serviceType as CreditServiceType) &&
       String(form.get("paymentPreference") ?? "pix") === "credit"
@@ -1465,12 +1491,15 @@ export function ManagementApp() {
                       dogId: dog.id,
                       serviceCatalogId: service.id,
                       startDate: scheduledDate,
-                      endDate: scheduledDate,
-                      startTime: time,
-                      endTime: endTime || undefined,
+                      endDate: serviceType === "hotel" ? endDate : scheduledDate,
+                      startTime: serviceType === "transport" ? undefined : time || undefined,
+                      endTime: serviceType === "transport" ? undefined : endTime || undefined,
                       internalNotes: note,
                       paymentPreference,
                       priceCents,
+                      transportDirection,
+                      lodgingNights: serviceType === "hotel" ? lodgingNights : undefined,
+                      depositPercent: serviceType === "hotel" ? depositPercent : undefined,
                     }),
                   },
                 ),
@@ -1508,8 +1537,11 @@ export function ManagementApp() {
     const newBookings: Booking[] = scheduledDates.map((scheduledDate) => ({
         id: `booking-${crypto.randomUUID()}`,
         date: scheduledDate,
-        time,
+        time: serviceType === "transport" ? "Sem horário" : time || "Sem horário",
         endTime: endTime || undefined,
+        endDate: serviceType === "hotel" ? endDate : undefined,
+        lodgingNights: serviceType === "hotel" ? lodgingNights : undefined,
+        depositPercent: serviceType === "hotel" ? depositPercent ?? undefined : undefined,
         dogId: dog.id,
         dogName: dog.name,
         customerId: dog.customerId,
@@ -1595,6 +1627,9 @@ export function ManagementApp() {
     }
     const phone = String(form.get("phone") ?? "").trim();
     const email = String(form.get("email") ?? "").trim();
+    const address = String(form.get("address") ?? "").trim();
+    const cpf = String(form.get("cpf") ?? "").trim();
+    const birthDate = String(form.get("birthDate") ?? "").trim();
     if (runtimeMode === "ready") {
       if (!phone && !email) {
         setToast({
@@ -1614,6 +1649,9 @@ export function ManagementApp() {
               email: email || undefined,
               whatsappEnabled: Boolean(phone),
               isFinancialContact: true,
+              addressLine: address || undefined,
+              cpf: cpf || undefined,
+              birthDate: birthDate || undefined,
             }),
           }),
         {
@@ -1636,6 +1674,9 @@ export function ManagementApp() {
       initials: initials(name),
       phone: phone || "Não informado",
       email: email || "Não informado",
+      address: address || undefined,
+      cpf: cpf || undefined,
+      birthDate: birthDate || undefined,
       dogIds: [],
       balanceCents: 0,
       creditsLabel: "Sem créditos",
@@ -1644,7 +1685,7 @@ export function ManagementApp() {
     setCustomers((current) => [customer, ...current]);
     setCreditBalances((current) => ({
       ...current,
-      [customer.id]: { daycare: 0, bath: 0, grooming: 0 },
+      [customer.id]: { daycare: 0, bath: 0, grooming: 0, transport: 0 },
     }));
     setDialog(null);
     setRegistrationType("choice");
@@ -1818,7 +1859,7 @@ export function ManagementApp() {
     for (const serviceType of ["hotel", ...creditServiceTypes] as const) {
       const cents = Math.round(Number(form.get(serviceType) ?? 0) * 100);
       if (!Number.isFinite(cents) || cents < 1) {
-        setToast({ message: "Revise os quatro valores antes de salvar." });
+        setToast({ message: "Revise todos os valores antes de salvar." });
         return;
       }
       next[serviceType] = cents;
@@ -1836,6 +1877,7 @@ export function ManagementApp() {
                 daycare: next.daycare,
                 bath: next.bath,
                 hygienic_grooming: next.grooming,
+                transport: next.transport,
               },
             }),
           }),
@@ -2402,7 +2444,7 @@ export function ManagementApp() {
   if (runtimeMode === "loading") {
     return (
       <StartupScreen
-        title="Abrindo sua gestão canina"
+        title="Abrindo o Hospet Quintal"
         description="Conectando ao ambiente privado e carregando a agenda."
       />
     );
@@ -2515,7 +2557,7 @@ export function ManagementApp() {
             GC
           </span>
           <span>
-            <strong>Gestão Canina</strong>
+            <strong>Hospet Quintal <small>HQ</small></strong>
             <small>Operação e cuidados</small>
           </span>
         </button>
@@ -2574,7 +2616,7 @@ export function ManagementApp() {
       <div className="mobile-header">
         <button className="brand compact" onClick={() => navigate("today")}>
           <span className="brand-mark">GC</span>
-          <strong>Gestão Canina</strong>
+          <strong>Hospet Quintal <small>HQ</small></strong>
         </button>
         <div className="mobile-header-actions">
           <button
@@ -2719,6 +2761,7 @@ export function ManagementApp() {
             <TodayView
               bookings={bookings}
               dogs={dogs}
+              customers={customers}
               tasks={tasks}
               receipts={receipts}
               selectedDate={selectedDate}
@@ -2898,9 +2941,15 @@ export function ManagementApp() {
               </select>
             </label>
             <label className="field">
-              <span>Data *</span>
+              <span>{serviceDraftType === "hotel" ? "Entrada *" : "Data *"}</span>
               <input name="date" type="date" defaultValue={selectedDate} required />
             </label>
+            {serviceDraftType === "hotel" && (
+              <label className="field">
+                <span>Saída *</span>
+                <input name="endDate" type="date" defaultValue={selectedDate} required />
+              </label>
+            )}
             <label className="field">
               <span>Serviço *</span>
               <select
@@ -2923,25 +2972,53 @@ export function ManagementApp() {
                 ))}
               </select>
             </label>
-            <label className="field">
-              <span>Horário inicial *</span>
-              <input name="time" type="time" defaultValue="09:00" required />
-            </label>
-            <label className="field">
-              <span>Horário final</span>
-              <input name="endTime" type="time" defaultValue="17:00" />
-            </label>
+            {serviceDraftType !== "transport" && (
+              <>
+                <label className="field">
+                  <span>{serviceDraftType === "hotel" ? "Horário de entrada (opcional)" : "Horário inicial *"}</span>
+                  <input name="time" type="time" defaultValue={serviceDraftType === "daycare" ? "07:30" : "09:00"} required={serviceDraftType !== "hotel"} />
+                </label>
+                <label className="field">
+                  <span>{serviceDraftType === "hotel" ? "Horário de saída (opcional)" : "Horário final"}</span>
+                  <input name="endTime" type="time" defaultValue={serviceDraftType === "daycare" ? "19:30" : "17:00"} />
+                </label>
+              </>
+            )}
+            {serviceDraftType === "transport" && (
+              <label className="field">
+                <span>Trajeto *</span>
+                <select name="transportDirection" value={serviceDraftTransportDirection} onChange={(event) => setServiceDraftTransportDirection(event.target.value as "one_way" | "round_trip")}>
+                  <option value="one_way">Ida · R$ 5,00</option>
+                  <option value="round_trip">Ida e volta · R$ 10,00</option>
+                </select>
+              </label>
+            )}
+            {serviceDraftType === "hotel" && (
+              <>
+                <label className="field">
+                  <span>Número de diárias *</span>
+                  <input name="lodgingNights" type="number" min="0.5" step="0.5" defaultValue="1" required />
+                </label>
+                <label className="check-field">
+                  <input name="hasDeposit" type="checkbox" />
+                  <span>Cobrar sinal no check-in</span>
+                </label>
+                <label className="field">
+                  <span>Sinal (%)</span>
+                  <input name="depositPercent" type="number" min="1" max="99" defaultValue="50" />
+                </label>
+              </>
+            )}
             <label className="field">
               <span>Valor aplicado (R$) *</span>
               <input
-                key={serviceDraftType}
+                key={`${serviceDraftType}-${serviceDraftTransportDirection}`}
                 name="price"
                 type="number"
                 min="0"
                 step="0.01"
-                defaultValue={(servicePrices[serviceDraftType] / 100).toFixed(
-                  2,
-                )}
+                defaultValue={(serviceDraftType === "transport" ? (serviceDraftTransportDirection === "round_trip" ? 10 : 5) : servicePrices[serviceDraftType] / 100).toFixed(2)}
+                readOnly={serviceDraftType === "transport"}
                 required
               />
             </label>
@@ -2950,7 +3027,6 @@ export function ManagementApp() {
               <select name="recurrence" defaultValue="none">
                 <option value="none">Não repetir</option>
                 <option value="weekly">Toda semana</option>
-                <option value="weekdays">Dias úteis</option>
               </select>
             </label>
             <label className="field full">
@@ -2964,7 +3040,7 @@ export function ManagementApp() {
                   )
                 }
               >
-                <option value="pix">Cobrar por Pix</option>
+                <option value="pix">Gerar fatura</option>
                 <option
                   value="credit"
                   disabled={
@@ -2979,7 +3055,7 @@ export function ManagementApp() {
                 </option>
               </select>
               <small>
-                Crédito é aceito somente para creche, banho e tosa higiênica.
+                Crédito é aceito para creche, banho, banho e tosa e taxi-dog.
                 Sem saldo, a conclusão será interrompida para você revisar.
               </small>
             </label>
@@ -3085,7 +3161,7 @@ export function ManagementApp() {
                 name="paymentPreference"
                 defaultValue={bookingToEdit.paymentPreference}
               >
-                <option value="pix">Cobrar por Pix</option>
+                <option value="pix">Gerar fatura</option>
                 <option value="credit">Usar 1 crédito</option>
               </select>
             </label>
@@ -3163,6 +3239,32 @@ export function ManagementApp() {
                 defaultValue={dogToEdit.alert}
               />
             </label>
+            <label className="field full">
+              <span>Alimentação</span>
+              <textarea name="feedingNotes" rows={2} defaultValue={dogToEdit.feedingNotes} placeholder="Alimentos, porções e restrições" />
+            </label>
+            <label className="field full">
+              <span>Temperamento</span>
+              <textarea name="temperamentNotes" rows={2} defaultValue={dogToEdit.temperamentNotes} placeholder="Como o cão reage e prefere ser cuidado" />
+            </label>
+            <label className="field full">
+              <span>Medicação</span>
+              <textarea name="medicationNotes" rows={2} defaultValue={dogToEdit.medicationNotes} placeholder="Nome, dose e horários" />
+            </label>
+            <label className="field">
+              <span>Vacina</span>
+              <input name="vaccineName" placeholder="Nome da vacina" />
+            </label>
+            <label className="field">
+              <span>Vencimento da vacina</span>
+              <input name="vaccineExpiresOn" type="date" />
+            </label>
+            {dogToEdit.vaccines?.length ? <div className="field full"><small>Vacinas registradas: {dogToEdit.vaccines.map((vaccine) => `${vaccine.name} (${formatShortDate(vaccine.expiresOn)})`).join(" · ")}</small></div> : null}
+            <label className="field full">
+              <span>Foto do cão</span>
+              <input name="photo" type="file" accept="image/jpeg,image/png,image/webp" />
+              <small>JPG, PNG ou WebP de até 5 MB.</small>
+            </label>
             <label className="check-field full">
               <input
                 name="vaccinesCurrent"
@@ -3233,6 +3335,18 @@ export function ManagementApp() {
                     : customerToEdit.email
                 }
               />
+            </label>
+            <label className="field full">
+              <span>Endereço</span>
+              <input name="address" defaultValue={customerToEdit.address} placeholder="Rua, número, bairro e cidade" />
+            </label>
+            <label className="field">
+              <span>CPF</span>
+              <input name="cpf" defaultValue={customerToEdit.cpf} inputMode="numeric" />
+            </label>
+            <label className="field">
+              <span>Data de nascimento</span>
+              <input name="birthDate" type="date" defaultValue={customerToEdit.birthDate} />
             </label>
             <div className="dialog-actions full">
               <button
@@ -3359,6 +3473,9 @@ export function ManagementApp() {
                   placeholder="cliente@example.com"
                 />
               </label>
+              <label className="field full"><span>Endereço</span><input name="address" placeholder="Rua, número, bairro e cidade" /></label>
+              <label className="field"><span>CPF</span><input name="cpf" inputMode="numeric" /></label>
+              <label className="field"><span>Data de nascimento</span><input name="birthDate" type="date" /></label>
               <div className="dialog-actions full">
                 <button
                   className="secondary-button"
@@ -3546,7 +3663,7 @@ function StartupScreen({
         <span className="brand-mark startup-mark" aria-hidden="true">
           GC
         </span>
-        <p className="eyebrow">Gestão Canina</p>
+        <p className="eyebrow">Hospet Quintal · HQ</p>
         <h1>{title}</h1>
         <p>{description}</p>
         {actionLabel && onAction ? (
@@ -3669,7 +3786,7 @@ function InitialSetupScreen({
               <span>Nome do estabelecimento</span>
               <input
                 name="establishmentName"
-                defaultValue="Gestão Canina"
+                defaultValue="Hospet Quintal"
                 maxLength={120}
                 required
               />
@@ -3813,6 +3930,7 @@ function OnboardingScreen({
 function TodayView({
   bookings,
   dogs,
+  customers,
   tasks,
   receipts,
   selectedDate,
@@ -3833,6 +3951,7 @@ function TodayView({
 }: {
   bookings: Booking[];
   dogs: Dog[];
+  customers: Customer[];
   tasks: Task[];
   receipts: ServiceReceipt[];
   selectedDate: string;
@@ -3877,6 +3996,9 @@ function TodayView({
       )
       .map((booking) => booking.dogId),
   ).size;
+  const birthdays = customers.filter((customer) => customer.birthDate?.slice(5) === selectedDate.slice(5));
+  const dogBirthdays = dogs.filter((dog) => dog.birthDate?.slice(5) === selectedDate.slice(5));
+  const vaccineAlerts = dogs.flatMap((dog) => (dog.vaccines ?? []).filter((vaccine) => vaccine.expiresOn >= selectedDate && vaccine.expiresOn <= shiftDate(selectedDate, 30)).map((vaccine) => ({ dog, vaccine })));
 
   return (
     <>
@@ -3891,6 +4013,18 @@ function TodayView({
       </section>
 
       <DateNavigator value={selectedDate} onChange={onDateChange} />
+
+      {isToday && (birthdays.length || dogBirthdays.length || vaccineAlerts.length) ? (
+        <section className="panel attention-panel">
+          <p className="section-kicker">Alertas de hoje</p>
+          <h2>Datas e vacinas importantes</h2>
+          <div className="alert-list">
+            {birthdays.map((customer) => <p key={`customer-${customer.id}`}>🎂 Aniversário de {customer.name}</p>)}
+            {dogBirthdays.map((dog) => <p key={`dog-${dog.id}`}>🎈 Aniversário de {dog.name}</p>)}
+            {vaccineAlerts.map(({ dog, vaccine }) => <p key={`${dog.id}-${vaccine.name}-${vaccine.expiresOn}`}>💉 {vaccine.name} de {dog.name} vence em {formatShortDate(vaccine.expiresOn)}</p>)}
+          </div>
+        </section>
+      ) : null}
 
       <section
         className="summary-strip"
@@ -5526,9 +5660,15 @@ function SettingsView({
     },
     {
       serviceType: "grooming",
-      title: "Tosa higiênica",
-      description: "Valor sugerido ao criar uma nova tosa higiênica.",
+      title: "Banho e tosa",
+      description: "Valor sugerido ao criar um novo banho e tosa.",
       unit: "por serviço",
+    },
+    {
+      serviceType: "transport",
+      title: "Taxi-dog · ida",
+      description: "Valor padrão para uma ida (ida e volta: R$ 10,00).",
+      unit: "por ida",
     },
   ];
 
@@ -5546,6 +5686,7 @@ function SettingsView({
             ainda pode aplicar um valor diferente em um atendimento específico
             sem mudar o padrão.
           </p>
+          <p><strong>Creche:</strong> horário padrão de 07:30 às 19:30.</p>
         </div>
       </section>
 
@@ -5688,7 +5829,7 @@ function CustomerPortal({
         <div className="brand">
           <span className="brand-mark">GC</span>
           <span>
-            <strong>Gestão Canina</strong>
+            <strong>Hospet Quintal <small>HQ</small></strong>
             <small>Portal do cliente</small>
           </span>
         </div>
@@ -6558,6 +6699,9 @@ function DogAvatar({
   dog?: Dog;
   size?: "small" | "regular" | "large" | "xlarge";
 }) {
+  if (dog?.photoUrl) {
+    return <img className={`avatar dog-avatar avatar-${size}`} src={dog.photoUrl} alt="" />;
+  }
   return (
     <span
       className={`avatar dog-avatar avatar-${size} avatar-${

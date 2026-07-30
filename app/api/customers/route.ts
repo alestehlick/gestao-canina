@@ -110,6 +110,11 @@ export async function POST(request: Request) {
       "addressPostalCode",
       24,
     );
+    const cpf = optionalString(body, "cpf", 20);
+    const birthDate = optionalString(body, "birthDate", 10);
+    if (birthDate && !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) {
+      throw new HttpError(400, "invalid_birth_date", "Informe uma data de nascimento válida.");
+    }
     const whatsappEnabled = optionalBoolean(
       body,
       "whatsappEnabled",
@@ -168,6 +173,8 @@ export async function POST(request: Request) {
         addressCity,
         addressRegion,
         addressPostalCode,
+        cpf,
+        birthDate,
       }),
       db.insert(tutors).values({
         id: tutorId,

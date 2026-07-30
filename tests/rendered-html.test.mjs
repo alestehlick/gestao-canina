@@ -15,7 +15,7 @@ test("mantém a experiência em português, privada e com demonstração segura"
   ]);
 
   assert.match(layout, /lang="pt-BR"/);
-  assert.match(layout, /Gestão Canina/);
+  assert.match(layout, /Hospet Quintal/);
   assert.match(layout, /\/favicon\.svg/);
   assert.match(page, /<ManagementApp \/>/);
   assert.match(app, /Ambiente privado/);
@@ -23,10 +23,12 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.match(app, /\/api\/workspace/);
   assert.match(app, /Cloudflare/);
   assert.match(app, /Novo serviço/);
-  assert.match(app, /Cobranças Pix/);
+  assert.match(app, /Faturas/);
   assert.match(app, /Pacotes e créditos/);
-  assert.match(app, /Pagamento exclusivo por Pix/);
-  assert.match(app, /código não é válido para pagamento/);
+  assert.match(app, /invoice-delivery-button/);
+  assert.match(app, /navigator\.share/);
+  assert.match(app, /Salvar/);
+  assert.doesNotMatch(app, /\/api\/pix\/charges/);
   assert.match(data, /@example\.com/);
   assert.doesNotMatch(app, /Mastercard|VISA|cart[aã]o de cr[eé]dito/);
   assert.match(styles, /\.billing-page\s*\{[^}]*min-width:\s*0;/s);

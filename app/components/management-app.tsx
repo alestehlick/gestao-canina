@@ -10,6 +10,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
+import { jsPDF } from "jspdf";
 import {
   auditFixtures,
   defaultServicePrices,
@@ -82,6 +83,8 @@ type PixState = {
   invoice?: Invoice;
   selectedServices: BillableService[];
   customerName: string;
+  customerPhone?: string;
+  customerEmail?: string;
   amountCents: number;
   creditPurchase?: Omit<CreditPurchase, "id" | "status" | "createdAt">;
   copyPasteCode?: string;
@@ -292,6 +295,225 @@ function formatShortDate(value: string) {
     year: "numeric",
     timeZone: "America/Sao_Paulo",
   }).format(dateFromIso(value));
+}
+
+type InvoiceDeliveryChannel = "whatsapp" | "email" | "save";
+
+function invoiceFileName(state: PixState) {
+  const number = state.invoice?.number ?? "nova";
+  const customer = normalize(state.customerName)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return `fatura-${number}-${customer || "cliente"}.pdf`;
+}
+
+function invoiceDescriptionLines(state: PixState) {
+  if (state.kind === "credit_package" && state.creditPurchase) {
+    return [
+      {
+        title: `${state.creditPurchase.units} créditos de ${
+          serviceLabels[state.creditPurchase.serviceType]
+        }`,
+        detail: "Pacote de créditos pré-pagos",
+        amountCents: state.amountCents,
+      },
+    ];
+  }
+  if (state.selectedServices.length) {
+    return state.selectedServices.map((service) => ({
+      title: `${service.dogName} · ${service.service}`,
+      detail: service.date,
+      amountCents: service.amountCents,
+    }));
+  }
+  return [
+    {
+      title: state.invoice?.items ?? "Serviços selecionados",
+      detail: state.invoice?.due ?? "Vencimento conforme combinado",
+      amountCents: state.amountCents,
+    },
+  ];
+}
+
+function createInvoicePdf(state: PixState) {
+  const document = new jsPDF({
+    unit: "mm",
+    format: "a4",
+    orientation: "portrait",
+  });
+  const invoiceNumber = state.invoice?.number ?? "NOVA";
+  const rows = invoiceDescriptionLines(state);
+  const issuedAt = new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "long",
+    timeZone: "America/Sao_Paulo",
+  }).format(new Date());
+
+  document.setProperties({
+    title: `Fatura ${invoiceNumber} · Hospet Quintal`,
+    subject: `Fatura de serviços para ${state.customerName}`,
+    author: "Hospet Quintal",
+  });
+  document.setFillColor(24, 63, 49);
+  document.rect(0, 0, 210, 42, "F");
+  document.setTextColor(255, 255, 255);
+  document.setFont("helvetica", "bold");
+  document.setFontSize(22);
+  document.text("HOSPET QUINTAL", 18, 20);
+  document.setFontSize(9);
+  document.setFont("helvetica", "normal");
+  document.text("Cuidado, hospedagem e bem-estar canino", 18, 28);
+  document.setFont("helvetica", "bold");
+  document.setFontSize(17);
+  document.text("FATURA", 192, 19, { align: "right" });
+  document.setFontSize(9);
+  document.setFont("helvetica", "normal");
+  document.text(`No. ${invoiceNumber}`, 192, 27, { align: "right" });
+
+  document.setTextColor(38, 46, 41);
+  document.setFont("helvetica", "bold");
+  document.setFontSize(9);
+  document.text("CLIENTE", 18, 57);
+  document.text("EMISSÃO", 124, 57);
+  document.setFont("helvetica", "normal");
+  document.setFontSize(12);
+  document.text(state.customerName, 18, 65);
+  document.setFontSize(10);
+  document.text(issuedAt, 124, 65);
+  if (state.customerEmail) {
+    document.setTextColor(91, 99, 94);
+    document.setFontSize(8.5);
+    document.text(state.customerEmail, 18, 71);
+  }
+
+  let y = 88;
+  document.setFillColor(244, 241, 233);
+  document.rect(18, y - 7, 174, 10, "F");
+  document.setTextColor(62, 69, 64);
+  document.setFont("helvetica", "bold");
+  document.setFontSize(8);
+  document.text("DESCRIÇÃO", 22, y);
+  document.text("VALOR", 187, y, { align: "right" });
+  y += 12;
+
+  for (const row of rows) {
+    if (y > 246) {
+      document.addPage();
+      y = 24;
+    }
+    document.setTextColor(38, 46, 41);
+    document.setFont("helvetica", "bold");
+    document.setFontSize(10);
+    const titleLines = document.splitTextToSize(row.title, 125) as string[];
+    document.text(titleLines, 22, y);
+    document.setFont("helvetica", "normal");
+    document.text(formatCurrency(row.amountCents), 187, y, { align: "right" });
+    const detailY = y + titleLines.length * 5;
+    document.setTextColor(102, 108, 104);
+    document.setFontSize(8.5);
+    document.text(row.detail, 22, detailY);
+    document.setDrawColor(226, 222, 213);
+    document.line(18, detailY + 5, 192, detailY + 5);
+    y = detailY + 12;
+  }
+
+  y = Math.min(Math.max(y + 3, 118), 252);
+  document.setFillColor(24, 63, 49);
+  document.roundedRect(112, y, 80, 23, 2, 2, "F");
+  document.setTextColor(220, 232, 225);
+  document.setFont("helvetica", "normal");
+  document.setFontSize(8);
+  document.text("VALOR TOTAL", 119, y + 8);
+  document.setTextColor(255, 255, 255);
+  document.setFont("helvetica", "bold");
+  document.setFontSize(16);
+  document.text(formatCurrency(state.amountCents), 185, y + 16, {
+    align: "right",
+  });
+
+  document.setTextColor(91, 99, 94);
+  document.setFont("helvetica", "normal");
+  document.setFontSize(8.5);
+  document.text(
+    "Esta fatura registra os serviços selecionados. Forma e confirmação do pagamento são combinadas diretamente com o cliente.",
+    18,
+    278,
+    { maxWidth: 174 },
+  );
+  document.setFont("helvetica", "bold");
+  document.text("Hospet Quintal · hopetquintal.com.br", 18, 289);
+
+  const blob = document.output("blob");
+  const filename = invoiceFileName(state);
+  return {
+    blob,
+    file: new File([blob], filename, { type: "application/pdf" }),
+    filename,
+  };
+}
+
+function downloadInvoice(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+
+async function deliverInvoice(
+  state: PixState,
+  channel: InvoiceDeliveryChannel,
+) {
+  const generated = createInvoicePdf(state);
+  const title = `Fatura ${state.invoice?.number ?? ""} · Hospet Quintal`.trim();
+  const text = `Olá, ${state.customerName}. Segue a fatura do Hospet Quintal no valor de ${formatCurrency(
+    state.amountCents,
+  )}.`;
+  const shareData: ShareData = {
+    title,
+    text,
+    files: [generated.file],
+  };
+
+  if (
+    channel !== "save" &&
+    navigator.share &&
+    (!navigator.canShare || navigator.canShare(shareData))
+  ) {
+    await navigator.share(shareData);
+    return "shared";
+  }
+
+  downloadInvoice(generated.blob, generated.filename);
+  if (channel === "save") return "saved";
+
+  if (channel === "whatsapp") {
+    const phone = state.customerPhone?.replace(/\D/g, "") ?? "";
+    const normalizedPhone =
+      phone.length === 10 || phone.length === 11 ? `55${phone}` : phone;
+    window.open(
+      `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(
+        `${text}\n\nO PDF foi salvo neste aparelho; selecione-o para anexar se o menu de compartilhamento não aparecer.`,
+      )}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+    return "downloaded";
+  }
+
+  const email =
+    state.customerEmail && state.customerEmail !== "Não informado"
+      ? state.customerEmail
+      : "";
+  window.location.href = `mailto:${encodeURIComponent(
+    email,
+  )}?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(
+    `${text}\n\nO PDF foi salvo neste aparelho para ser anexado à mensagem.`,
+  )}`;
+  return "downloaded";
 }
 
 function recurrenceDates(
@@ -1839,6 +2061,8 @@ export function ManagementApp() {
       kind: "credit_package",
       selectedServices: [],
       customerName: customer.name,
+      customerPhone: customer.phone,
+      customerEmail: customer.email,
       amountCents,
       creditPurchase: {
         customerId,
@@ -1985,11 +2209,16 @@ export function ManagementApp() {
       selectedBillables.includes(item.id),
     );
     if (!selectedServices.length) return;
+    const customer = customers.find(
+      (item) => item.id === selectedServices[0].customerId,
+    );
     setPixState({
       step: "review",
       kind: "services",
       selectedServices,
       customerName: selectedServices[0].customerName,
+      customerPhone: customer?.phone,
+      customerEmail: customer?.email,
       amountCents: selectedServices.reduce(
         (total, item) => total + item.amountCents,
         0,
@@ -2002,12 +2231,17 @@ export function ManagementApp() {
     const creditPurchase = creditPurchases.find(
       (purchase) => purchase.invoiceId === invoice.id,
     );
+    const customer = customers.find(
+      (item) => item.id === invoice.customerId,
+    );
     setPixState({
       step: invoice.status === "paid" ? "paid" : "code",
       kind: creditPurchase ? "credit_package" : "services",
       invoice,
       selectedServices: [],
       customerName: invoice.customerName,
+      customerPhone: customer?.phone,
+      customerEmail: customer?.email,
       amountCents: invoice.amountCents,
       providerMessage:
         runtimeMode === "ready" && view !== "portal"
@@ -2102,26 +2336,6 @@ export function ManagementApp() {
         }
 
         setSelectedBillables([]);
-        setPixState((current) =>
-          current
-            ? {
-                ...current,
-                invoice: registeredInvoice,
-                step: "code",
-                providerMessage: "Gerando o Pix com o provedor configurado…",
-              }
-            : current,
-        );
-
-        const chargeResponse = await requestJson<{
-          charge?: {
-            copyPasteCode?: string;
-            qrCodeImageUrl?: string;
-          };
-        }>("/api/pix/charges", {
-          method: "POST",
-          body: JSON.stringify({ invoiceId: registeredInvoice.id }),
-        });
         await refreshWorkspace();
         setPixState((current) =>
           current
@@ -2129,10 +2343,9 @@ export function ManagementApp() {
                 ...current,
                 invoice: registeredInvoice,
                 step: "code",
-                copyPasteCode: chargeResponse.charge?.copyPasteCode,
-                providerMessage: chargeResponse.charge?.copyPasteCode
-                  ? undefined
-                  : "A cobrança foi registrada, mas o provedor não devolveu um código Pix.",
+                copyPasteCode: undefined,
+                providerMessage:
+                  "O PDF está pronto para compartilhar ou salvar no aparelho.",
               }
             : current,
         );
@@ -2153,7 +2366,7 @@ export function ManagementApp() {
                   providerMessage:
                     error instanceof Error
                       ? error.message
-                      : "O provedor Pix ainda não está disponível.",
+                      : "A fatura foi registrada, mas não foi possível atualizar a tela.",
                 }
               : current,
           );
@@ -2162,7 +2375,7 @@ export function ManagementApp() {
           message:
             error instanceof Error
               ? error.message
-              : "Não foi possível criar a cobrança Pix.",
+              : "Não foi possível criar a fatura.",
         });
       } finally {
         setBusyAction(null);
@@ -2208,7 +2421,7 @@ export function ManagementApp() {
       message:
         pixState.kind === "credit_package"
           ? "Fatura do pacote criada. Libere os créditos após registrar o pagamento."
-          : "Cobrança demonstrativa criada.",
+          : "Fatura demonstrativa criada.",
     });
   }
 
@@ -5778,7 +5991,7 @@ function ActivityView({ activities }: { activities: AuditActivity[] }) {
         <strong>Como a trilha funciona</strong>
         <p>
           Ações financeiras, cancelamentos, permissões e arquivos geram eventos
-          imutáveis. Conteúdo sensível e códigos Pix completos não entram nos
+          imutáveis. Conteúdo financeiro sensível não entra nos
           registros.
         </p>
       </div>
@@ -5863,7 +6076,7 @@ function CustomerPortal({
               <section className="portal-invoice">
                 <div>
                   <p className="section-kicker">Pagamento pendente</p>
-                  <strong>{formatCurrency(invoice.amountCents)} por Pix</strong>
+                  <strong>{formatCurrency(invoice.amountCents)} em fatura</strong>
                   <span>{invoice.due}</span>
                   <small>{invoice.items}</small>
                 </div>
@@ -6006,7 +6219,7 @@ function CustomerPortal({
             <div className="panel-heading">
               <div>
                 <p className="section-kicker">Cobranças</p>
-                <h2>Pagamentos por Pix</h2>
+                <h2>Faturas e pagamentos</h2>
               </div>
             </div>
             {invoice && (
@@ -6303,9 +6516,37 @@ function PixDialog({
   liveMode: boolean;
   busy: boolean;
 }) {
+  const [deliveryBusy, setDeliveryBusy] =
+    useState<InvoiceDeliveryChannel | null>(null);
   const demoCode = `DEMONSTRACAO-PIX-NAO-VALIDO-${
     state.invoice?.number ?? "NOVA-COBRANCA"
   }`;
+
+  async function handleDelivery(channel: InvoiceDeliveryChannel) {
+    if (deliveryBusy) return;
+    setDeliveryBusy(channel);
+    try {
+      const result = await deliverInvoice(state, channel);
+      if (result === "saved") {
+        onFeedback("Fatura salva nos arquivos ou downloads deste aparelho.");
+      } else if (result === "shared") {
+        onFeedback("Fatura entregue ao menu de compartilhamento.");
+      } else {
+        onFeedback(
+          "PDF salvo. O aplicativo foi aberto para você anexar e confirmar o envio.",
+        );
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      onFeedback(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível preparar o PDF desta fatura.",
+      );
+    } finally {
+      setDeliveryBusy(null);
+    }
+  }
 
   if (state.step === "review") {
     return (
@@ -6408,6 +6649,104 @@ function PixDialog({
           <button className="primary-button" onClick={onClose} autoFocus>
             Concluir
           </button>
+        </div>
+      </Dialog>
+    );
+  }
+
+  if (state.step === "code") {
+    const rows = invoiceDescriptionLines(state);
+    return (
+      <Dialog
+        title={`Fatura nº ${state.invoice?.number ?? "—"}`}
+        description="O PDF está pronto para salvar ou compartilhar."
+        onClose={onClose}
+      >
+        <div className="invoice-share-card">
+          <header>
+            <span className="invoice-document-mark" aria-hidden="true">
+              PDF
+            </span>
+            <span>
+              <small>Cliente</small>
+              <strong>{state.customerName}</strong>
+            </span>
+            <span className="status-pill pending">Fatura pendente</span>
+          </header>
+
+          <div className="invoice-share-items">
+            {rows.map((row, index) => (
+              <div key={`${row.title}-${index}`}>
+                <span>
+                  <strong>{row.title}</strong>
+                  <small>{row.detail}</small>
+                </span>
+                <strong>{formatCurrency(row.amountCents)}</strong>
+              </div>
+            ))}
+          </div>
+
+          <div className="invoice-share-total">
+            <span>Total da fatura</span>
+            <strong>{formatCurrency(state.amountCents)}</strong>
+          </div>
+
+          <div className="invoice-delivery-options">
+            <button
+              className="invoice-delivery-button whatsapp"
+              type="button"
+              disabled={Boolean(deliveryBusy)}
+              onClick={() => handleDelivery("whatsapp")}
+            >
+              <span aria-hidden="true">WA</span>
+              <strong>
+                {deliveryBusy === "whatsapp"
+                  ? "Preparando…"
+                  : "WhatsApp"}
+              </strong>
+              <small>Compartilhar o PDF</small>
+            </button>
+            <button
+              className="invoice-delivery-button email"
+              type="button"
+              disabled={Boolean(deliveryBusy)}
+              onClick={() => handleDelivery("email")}
+            >
+              <span aria-hidden="true">@</span>
+              <strong>
+                {deliveryBusy === "email" ? "Preparando…" : "E-mail"}
+              </strong>
+              <small>Enviar como anexo</small>
+            </button>
+            <button
+              className="invoice-delivery-button save"
+              type="button"
+              disabled={Boolean(deliveryBusy)}
+              onClick={() => handleDelivery("save")}
+            >
+              <span aria-hidden="true">↓</span>
+              <strong>
+                {deliveryBusy === "save" ? "Gerando…" : "Salvar"}
+              </strong>
+              <small>Arquivos ou downloads</small>
+            </button>
+          </div>
+
+          <div className="invoice-share-note">
+            <span className="attention-mark">i</span>
+            <p>
+              No iPhone e Android será aberto o menu normal de
+              compartilhamento com o PDF anexado. No computador, se o
+              aplicativo não aceitar anexos automáticos, o PDF será salvo
+              antes de abrir o WhatsApp ou o e-mail.
+            </p>
+          </div>
+
+          <div className="dialog-actions">
+            <button className="secondary-button" type="button" onClick={onClose}>
+              Fechar
+            </button>
+          </div>
         </div>
       </Dialog>
     );

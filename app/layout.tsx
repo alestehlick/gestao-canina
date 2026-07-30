@@ -31,29 +31,29 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     metadataBase: new URL(origin),
     title: {
-      default: "Gestão Canina",
-      template: "%s · Gestão Canina",
+      default: "Hospet Quintal",
+      template: "%s · Hospet Quintal",
     },
     description:
-      "Agenda, cuidados, clientes e cobranças Pix para uma operação canina organizada.",
-    applicationName: "Gestão Canina",
+      "Agenda, cuidados, clientes e faturas para uma operação canina organizada.",
+    applicationName: "Hospet Quintal",
     icons: {
       icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
     },
     robots: { index: false, follow: false },
     openGraph: {
-      title: "Gestão Canina",
+      title: "Hospet Quintal",
       description:
-        "Agenda, cuidados, clientes e cobranças Pix em um só lugar.",
+        "Agenda, cuidados, clientes e faturas em um só lugar.",
       locale: "pt_BR",
       type: "website",
       images: [{ url: socialImage, width: 1200, height: 630 }],
     },
     twitter: {
       card: "summary_large_image",
-      title: "Gestão Canina",
+      title: "Hospet Quintal",
       description:
-        "Agenda, cuidados, clientes e cobranças Pix em um só lugar.",
+        "Agenda, cuidados, clientes e faturas em um só lugar.",
       images: [socialImage],
     },
   };

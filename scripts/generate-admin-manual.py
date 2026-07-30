@@ -222,7 +222,7 @@ sections = [
                 [
                     "Use <b>Novo serviço</b>, escolha o cão e selecione Creche, Hospedagem, Banho, Banho e tosa ou Taxi-dog.",
                     "A Creche usa os horários padrão das configurações. O Taxi-dog pede ida ou ida e volta e não exige horário.",
-                    "O preço sugerido pode ser alterado em um atendimento sem mudar o padrão.",
+                    "O administrador pode alterar o preço de um atendimento sem mudar o padrão. Funcionários sempre usam o valor definido pela administração.",
                     "Escolha <b>Gerar fatura</b> ou <b>Usar 1 crédito</b>. Crédito está disponível para creche, banho, banho e tosa e Taxi-dog quando há saldo.",
                 ],
             ),
@@ -297,8 +297,37 @@ story.extend(
             "Ao criar ou editar o serviço, escolha <b>Usar 1 crédito</b>. Na conclusão, um crédito sai do saldo, nenhuma fatura é criada e um recibo fica disponível.",
             body,
         ),
+        Paragraph("Pessoas e acessos", h1),
+        Paragraph("13. Convidar um funcionário", h2),
+        Paragraph(
+            "Em <b>Acessos</b>, escolha Funcionário e informe o e-mail. O convite vale por 48 horas e pode ser usado uma única vez. Se o e-mail automático não estiver ativo, copie o link seguro e envie em particular.",
+            body,
+        ),
+        Paragraph(
+            "Funcionários usam Hoje, Agenda, Pedidos, Cães e Clientes. Eles não abrem cobranças, configurações, histórico global ou gestão de acessos.",
+            callout,
+        ),
+        Paragraph("14. Convidar um cliente", h2),
+        Paragraph(
+            "Em <b>Acessos</b>, escolha Cliente, informe o e-mail e selecione o cadastro correto. No portal, o cliente consulta seus cães, serviços, créditos, faturas e recibos, atualiza contato e envia pedidos.",
+            body,
+        ),
+        Paragraph(
+            "Cada cliente vê somente o próprio cadastro. Um pedido não reserva automaticamente uma data.",
+            body,
+        ),
+        Paragraph("15. Analisar pedidos", h2),
+        Paragraph(
+            "Abra <b>Pedidos</b>, confira disponibilidade e analise a solicitação. Crie o agendamento normalmente e só depois marque o pedido como aprovado. Essa confirmação separada evita mudanças erradas na agenda.",
+            body,
+        ),
+        Paragraph("16. Encerrar ou recuperar acesso", h2),
+        Paragraph(
+            "Em Acessos, use <b>Encerrar acesso</b> quando necessário. As sessões dessa conta são interrompidas. Na entrada, <b>Esqueci minha senha</b> envia um link de recuperação com validade curta.",
+            body,
+        ),
         Paragraph("Configurações e rotina", h1),
-        Paragraph("13. Preços e horários padrão", h2),
+        Paragraph("17. Preços e horários padrão", h2),
         Paragraph(
             "Em <b>Configurações</b>, defina diária da hospedagem, creche, banho, banho e tosa, Taxi-dog de ida e horários da creche.",
             body,
@@ -307,19 +336,21 @@ story.extend(
             "As mudanças valem para novos serviços. Atendimentos já salvos mantêm o valor original.",
             body,
         ),
-        Paragraph("14. Revisão diária recomendada", h2),
+        Paragraph("18. Revisão diária recomendada", h2),
         Paragraph("No início: confira alertas, agenda, chegadas e vacinas.", bullet, bulletText="•"),
         Paragraph("Durante o dia: registre chegadas, conclusões e sinais de hospedagem.", bullet, bulletText="•"),
         Paragraph("No fim: gere faturas, registre recebimentos e confira créditos e recibos.", bullet, bulletText="•"),
-        Paragraph("15. Se algo não funcionar", h2),
-        Paragraph("Atualize a página e tente novamente uma vez.", bullet, bulletText="•"),
-        Paragraph("Confira a internet e se a sessão continua aberta.", bullet, bulletText="•"),
-        Paragraph("Leia a mensagem exibida e revise o campo indicado.", bullet, bulletText="•"),
-        Paragraph("Não recrie uma fatura repetidamente; confira antes a lista do cliente.", bullet, bulletText="•"),
-        Paragraph(
-            "Ao pedir suporte, informe o que estava fazendo, o cliente ou cão e o horário aproximado. Nunca envie senhas.",
-            callout,
-        ),
+        KeepTogether([
+            Paragraph("19. Se algo não funcionar", h2),
+            Paragraph("Atualize a página e tente novamente uma vez.", bullet, bulletText="•"),
+            Paragraph("Confira a internet e se a sessão continua aberta.", bullet, bulletText="•"),
+            Paragraph("Leia a mensagem exibida e revise o campo indicado.", bullet, bulletText="•"),
+            Paragraph("Não recrie uma fatura repetidamente; confira antes a lista do cliente.", bullet, bulletText="•"),
+            Paragraph(
+                "Ao pedir suporte, informe o que estava fazendo, o cliente ou cão e o horário aproximado. Nunca envie senhas.",
+                callout,
+            ),
+        ]),
         Paragraph("Resumo rápido", h1),
         Paragraph("Use Hoje para comandar a operação.", bullet, bulletText="•"),
         Paragraph("Use a data para consultar dias futuros.", bullet, bulletText="•"),
@@ -328,6 +359,8 @@ story.extend(
         Paragraph("Compartilhe o PDF por WhatsApp, e-mail ou Arquivos.", bullet, bulletText="•"),
         Paragraph("Registre pagamento somente depois de receber.", bullet, bulletText="•"),
         Paragraph("Mantenha contatos, vacinas e cuidados atualizados.", bullet, bulletText="•"),
+        Paragraph("Use uma conta individual para cada pessoa.", bullet, bulletText="•"),
+        Paragraph("Confira Pedidos antes de alterar a agenda.", bullet, bulletText="•"),
     ]
 )
 

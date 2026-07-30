@@ -68,7 +68,7 @@ Use **Novo serviço**, selecione o cão e escolha o tipo:
 - **Banho e tosa**.
 - **Taxi-dog**: escolha ida ou ida e volta; não exige horário.
 
-O valor sugerido vem das configurações. Ele pode ser alterado para um atendimento específico sem mudar o preço padrão.
+O valor sugerido vem das configurações. Um administrador pode alterá-lo para um atendimento específico sem mudar o preço padrão. Funcionários sempre usam o valor definido pela administração.
 
 Na forma de quitação, escolha:
 
@@ -143,9 +143,46 @@ Ao criar ou editar um serviço, escolha **Usar 1 crédito**. Ao concluir o atend
 
 Se não houver saldo suficiente, o sistema interrompe a conclusão para evitar cobrança errada.
 
+## Pessoas e acessos
+
+### 13. Convidar um funcionário
+
+Abra **Acessos**, escolha **Funcionário**, informe o e-mail da pessoa e crie o convite. Se o envio automático estiver ativo, ela receberá o link por e-mail. Caso contrário, use **Copiar link** e envie por um canal particular.
+
+O link vale por 48 horas e pode ser usado uma única vez. O funcionário escolhe o próprio nome e senha. Sua conta mostra somente a operação: Hoje, Agenda, Pedidos, Cães e Clientes. Ela não abre cobranças, configurações, histórico global nem gestão de acessos.
+
+Cada pessoa deve usar sua própria conta. Assim, o histórico identifica quem realizou cada ação.
+
+### 14. Convidar um cliente
+
+Em **Acessos**, escolha **Cliente**, informe o e-mail e selecione o cadastro correto. O cliente usa o convite para criar a própria senha.
+
+No portal, o cliente pode:
+
+- consultar seus próximos serviços e o histórico;
+- ver os próprios cães e cuidados registrados;
+- consultar créditos, faturas e recibos;
+- baixar suas faturas em PDF;
+- pedir um serviço ou cancelamento;
+- atualizar telefone e endereço.
+
+O cliente vê somente os dados ligados ao próprio cadastro. Um pedido não reserva automaticamente uma data.
+
+### 15. Analisar pedidos dos clientes
+
+Abra **Pedidos**. Confira cliente, cão, serviço, datas e observações. Antes de aprovar um serviço, confirme a disponibilidade e crie o agendamento normalmente. Para cancelamentos, confira se já existe cobrança ou pagamento.
+
+Use **Aprovar** ou **Não aprovar** para devolver uma resposta ao portal do cliente. Essa separação evita mudanças automáticas erradas na agenda.
+
+### 16. Encerrar ou recuperar um acesso
+
+Em **Acessos**, use **Encerrar acesso** quando um funcionário sair ou um acesso de cliente não for mais necessário. As sessões abertas dessa conta são encerradas.
+
+Na tela de entrada, **Esqueci minha senha** envia um link de recuperação com validade curta. Nunca envie uma senha por mensagem.
+
 ## Configurações e rotina
 
-### 13. Preços e horários padrão
+### 17. Preços e horários padrão
 
 Em **Configurações**, o administrador define:
 
@@ -158,7 +195,7 @@ Em **Configurações**, o administrador define:
 
 As alterações valem para novos serviços. Atendimentos já salvos mantêm o valor original.
 
-### 14. Revisão diária recomendada
+### 18. Revisão diária recomendada
 
 No início do dia:
 
@@ -179,7 +216,7 @@ No fim do dia:
 3. Registre somente os pagamentos já recebidos.
 4. Confira saldos de créditos e recibos.
 
-### 15. Se algo não funcionar
+### 19. Se algo não funcionar
 
 - Atualize a página e tente novamente uma vez.
 - Confira se há internet.
@@ -199,3 +236,5 @@ Se o problema continuar, anote o que estava tentando fazer, o nome do cliente ou
 - Registre pagamento somente depois de receber.
 - Créditos entram no saldo somente após o pagamento da fatura do pacote.
 - Mantenha contatos, vacinas e cuidados do cão atualizados.
+- Use uma conta individual para cada pessoa e encerre acessos que não são mais necessários.
+- Confira **Pedidos** antes de alterar a agenda.

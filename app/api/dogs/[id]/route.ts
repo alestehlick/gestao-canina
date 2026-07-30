@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditEvents, dogs } from "@/db/schema";
+import { appUsers, auditEvents, dogs, tutors } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
 import { getRuntimeBindings } from "@/lib/server/runtime";
 import {
@@ -24,13 +24,30 @@ function normalizeLookupText(value: string) {
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const requestId = crypto.randomUUID();
   try {
-    const identity = await requireIdentity(request, ["owner", "staff", "finance"]);
+    const identity = await requireIdentity(request, ["owner", "staff", "finance", "customer"]);
     const { id } = await context.params;
     if (new URL(request.url).searchParams.get("photo") !== "1") {
       throw new HttpError(404, "not_found", "Recurso não encontrado.");
     }
     const [dog] = await getDb().select().from(dogs).where(and(eq(dogs.id, id), eq(dogs.establishmentId, identity.establishmentId!))).limit(1);
     if (!dog?.photoObjectKey) throw new HttpError(404, "photo_not_found", "A foto não foi encontrada.");
+    if (identity.role === "customer") {
+      const [customerContext] = await getDb()
+        .select({ accountId: tutors.accountId })
+        .from(appUsers)
+        .innerJoin(tutors, eq(tutors.id, appUsers.tutorId))
+        .where(
+          and(
+            eq(appUsers.id, identity.userId!),
+            eq(appUsers.establishmentId, identity.establishmentId!),
+            eq(appUsers.status, "active"),
+          ),
+        )
+        .limit(1);
+      if (!customerContext || customerContext.accountId !== dog.accountId) {
+        throw new HttpError(404, "photo_not_found", "A foto não foi encontrada.");
+      }
+    }
     const object = await getRuntimeBindings().FILES?.get(dog.photoObjectKey);
     if (!object) throw new HttpError(404, "photo_not_found", "A foto não foi encontrada.");
     return new Response(object.body, { headers: { "content-type": object.httpMetadata?.contentType || "image/jpeg", "cache-control": "private, max-age=3600" } });

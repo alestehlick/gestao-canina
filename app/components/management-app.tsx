@@ -51,11 +51,13 @@ import {
 type View =
   | "today"
   | "agenda"
+  | "requests"
   | "dogs"
   | "customers"
   | "billing"
   | "activity"
-  | "settings";
+  | "settings"
+  | "access";
 
 type DialogKind =
   | "service"
@@ -106,17 +108,19 @@ type AuthStatusPayload = {
   identity?: {
     email: string;
     displayName: string;
-    role: "owner";
+    role: "owner" | "staff" | "finance" | "customer";
   };
 };
 
 const navItems: { id: View; label: string; shortLabel: string }[] = [
   { id: "today", label: "Hoje", shortLabel: "Hoje" },
   { id: "agenda", label: "Agenda", shortLabel: "Agenda" },
+  { id: "requests", label: "Pedidos", shortLabel: "Pedidos" },
   { id: "dogs", label: "Cães", shortLabel: "Cães" },
   { id: "customers", label: "Clientes", shortLabel: "Clientes" },
   { id: "billing", label: "Cobranças", shortLabel: "Faturas" },
   { id: "activity", label: "Atividades", shortLabel: "Ativ." },
+  { id: "access", label: "Acessos", shortLabel: "Acessos" },
   { id: "settings", label: "Configurações", shortLabel: "Config." },
 ];
 
@@ -133,6 +137,12 @@ const pageCopy: Record<
     eyebrow: "Agenda operacional",
     title: "Todos os cuidados programados",
     description: "Acompanhe chegadas, atendimentos, hospedagens e rotas.",
+  },
+  requests: {
+    eyebrow: "Portal do cliente",
+    title: "Pedidos",
+    description:
+      "Analise solicitações de serviços e cancelamentos antes de alterar a agenda.",
   },
   dogs: {
     eyebrow: "Cadastro canino",
@@ -153,6 +163,12 @@ const pageCopy: Record<
     eyebrow: "Rastreabilidade",
     title: "Atividades",
     description: "Histórico de ações importantes da equipe e do financeiro.",
+  },
+  access: {
+    eyebrow: "Pessoas e segurança",
+    title: "Acessos",
+    description:
+      "Convide funcionários e clientes, e encerre acessos quando necessário.",
   },
   settings: {
     eyebrow: "Administração",
@@ -816,6 +832,10 @@ export function ManagementApp() {
         setRuntimeMode("login");
         return;
       }
+      if (status.identity?.role === "customer") {
+        window.location.assign("/portal");
+        return;
+      }
       setSessionExpiresAt(status.sessionExpiresAt ?? null);
       await refreshWorkspace();
     } catch (error) {
@@ -977,7 +997,10 @@ export function ManagementApp() {
     try {
       const result = await action();
       if (options.refresh !== false) {
-        await refreshWorkspace();
+        // Confirma a ação assim que a gravação termina e sincroniza a visão
+        // completa em segundo plano. Isso evita que cada botão espere uma nova
+        // leitura de toda a área de trabalho.
+        void refreshWorkspace();
       }
       if (options.successMessage) {
         setToast({ message: options.successMessage });
@@ -2914,6 +2937,10 @@ export function ManagementApp() {
         method: "POST",
         body: JSON.stringify({ email, password }),
       });
+      if (status.identity?.role === "customer") {
+        window.location.assign("/portal");
+        return;
+      }
       setSessionExpiresAt(status.sessionExpiresAt ?? null);
       setRuntimeMode("loading");
       await refreshWorkspace();
@@ -3060,6 +3087,15 @@ export function ManagementApp() {
     invoices.filter((invoice) => invoice.status !== "paid").length;
   const signedInName =
     workspacePayload?.identity.displayName || "Administração";
+  const signedInRole = workspacePayload?.identity.role ?? "owner";
+  const visibleNavItems =
+    signedInRole === "owner"
+      ? navItems
+      : navItems.filter((item) =>
+          ["today", "agenda", "requests", "dogs", "customers"].includes(
+            item.id,
+          ),
+        );
 
   const copy = pageCopy[view];
 
@@ -3082,7 +3118,7 @@ export function ManagementApp() {
 
         <nav className="side-nav">
           <p className="nav-caption">Trabalho</p>
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <button
               key={item.id}
               className={view === item.id ? "nav-item active" : "nav-item"}
@@ -3110,7 +3146,9 @@ export function ManagementApp() {
           </span>
           <span>
             <strong>{signedInName}</strong>
-            <small>Administrador</small>
+            <small>
+              {signedInRole === "owner" ? "Administrador" : "Funcionário"}
+            </small>
           </span>
           {runtimeMode === "ready" && (
             <button
@@ -3311,6 +3349,7 @@ export function ManagementApp() {
               onLodgingInvoice={issueLodgingInvoice}
             />
           )}
+          {view === "requests" && <CustomerRequestsView />}
           {view === "dogs" &&
             (selectedDog ? (
               <DogProfile
@@ -3397,6 +3436,9 @@ export function ManagementApp() {
           {view === "activity" && (
             <ActivityView activities={activities} />
           )}
+          {view === "access" && signedInRole === "owner" && (
+            <AccessView customers={customers} />
+          )}
           {view === "settings" && (
             <SettingsView
               prices={servicePrices}
@@ -3409,7 +3451,7 @@ export function ManagementApp() {
       </div>
 
       <nav className="mobile-nav" aria-label="Navegação móvel">
-        {navItems.slice(0, 4).map((item) => (
+        {visibleNavItems.slice(0, 4).map((item) => (
           <button
             key={item.id}
             className={view === item.id ? "active" : ""}
@@ -3425,7 +3467,7 @@ export function ManagementApp() {
         <button
           className={
             mobileMoreOpen ||
-            ["billing", "activity", "settings"].includes(view)
+            ["billing", "activity", "access", "settings"].includes(view)
               ? "active"
               : ""
           }
@@ -3439,7 +3481,7 @@ export function ManagementApp() {
 
       {mobileMoreOpen && (
         <div className="mobile-more-menu" role="menu">
-          {navItems.slice(4).map((item) => (
+          {visibleNavItems.slice(4).map((item) => (
             <button
               key={item.id}
               role="menuitem"
@@ -3468,7 +3510,11 @@ export function ManagementApp() {
       {dialog === "service" && (
         <Dialog
           title="Novo serviço"
-          description="Agende um cuidado e defina o valor aplicado."
+          description={
+            signedInRole === "owner"
+              ? "Agende um cuidado e defina o valor aplicado."
+              : "Agende um cuidado com o valor padrão definido pela administração."
+          }
           onClose={() => setDialog(null)}
         >
           <form className="form-grid" onSubmit={submitService}>
@@ -3595,7 +3641,9 @@ export function ManagementApp() {
                 min="0"
                 step="0.01"
                 defaultValue={(serviceDraftType === "transport" ? (serviceDraftTransportDirection === "round_trip" ? 10 : 5) : servicePrices[serviceDraftType] / 100).toFixed(2)}
-                readOnly={serviceDraftType === "transport"}
+                readOnly={
+                  serviceDraftType === "transport" || signedInRole !== "owner"
+                }
                 required
               />
             </label>
@@ -4279,11 +4327,11 @@ function LoginScreen({
         <span className="brand-mark startup-mark" aria-hidden="true">
           HQ
         </span>
-        <p className="eyebrow">Acesso administrativo</p>
+        <p className="eyebrow">Acesso protegido</p>
         <h1>Entre para cuidar da operação.</h1>
         <p>
-          Agenda, clientes e financeiro ficam protegidos. Use uma das duas
-          contas de administrador cadastradas no primeiro acesso.
+          Use o e-mail e a senha da sua conta. Cada pessoa acessa somente as
+          áreas apropriadas ao seu trabalho.
         </p>
         <form onSubmit={onSubmit}>
           <label className="field">
@@ -4317,6 +4365,9 @@ function LoginScreen({
           <button className="primary-button" type="submit" disabled={busy}>
             {busy ? "Entrando…" : "Entrar"}
           </button>
+          <a className="auth-secondary-link" href="/recuperar">
+            Esqueci minha senha
+          </a>
         </form>
         <small className="security-caption">
           A sessão termina automaticamente por segurança. O sistema não oferece
@@ -4346,7 +4397,8 @@ function InitialSetupScreen({
         <h1>Cadastre os dois administradores.</h1>
         <p>
           Esta tela desaparece assim que a configuração é concluída. Depois,
-          somente estas duas contas poderão entrar.
+          os administradores poderão convidar funcionários e clientes com
+          acessos individuais.
         </p>
         <form onSubmit={onSubmit}>
           <div className="setup-foundation">
@@ -6538,6 +6590,500 @@ function ActivityView({ activities }: { activities: AuditActivity[] }) {
         </p>
       </div>
     </section>
+  );
+}
+
+type CustomerRequestRow = {
+  id: string;
+  type: "service" | "cancellation" | "profile_update";
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  customerName: string;
+  dogName: string | null;
+  serviceName: string | null;
+  requestedDate: string | null;
+  requestedEndDate: string | null;
+  notes: string | null;
+  createdAt: string;
+};
+
+function CustomerRequestsView() {
+  const [requests, setRequests] = useState<CustomerRequestRow[]>([]);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      const payload = await requestJson<{ requests: CustomerRequestRow[] }>(
+        "/api/customer-requests",
+      );
+      setRequests(payload.requests);
+      setError("");
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Não foi possível carregar os pedidos.",
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  async function review(
+    request: CustomerRequestRow,
+    status: "approved" | "rejected",
+  ) {
+    if (busy) return;
+    const responseNote =
+      status === "rejected"
+        ? window.prompt(
+            "Escreva uma explicação breve para o cliente (opcional):",
+          )
+        : null;
+    setBusy(request.id);
+    try {
+      await requestJson(`/api/customer-requests/${request.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status, responseNote }),
+      });
+      await load();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Não foi possível analisar o pedido.",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const pending = requests.filter((request) => request.status === "pending");
+  const reviewed = requests.filter((request) => request.status !== "pending");
+  return (
+    <section className="panel full-panel">
+      <div className="panel-heading">
+        <div>
+          <p className="section-kicker">Aguardando análise</p>
+          <h2>Pedidos dos clientes</h2>
+        </div>
+        <span className="count-badge">{pending.length}</span>
+      </div>
+      {error && <p className="form-error">{error}</p>}
+      {pending.length ? (
+        <div className="request-review-list">
+          {pending.map((request) => (
+            <article className="request-review-row" key={request.id}>
+              <div>
+                <strong>
+                  {request.type === "cancellation"
+                    ? "Cancelamento solicitado"
+                    : "Novo serviço solicitado"}
+                </strong>
+                <p>
+                  {request.customerName}
+                  {request.dogName ? ` · ${request.dogName}` : ""}
+                  {request.serviceName ? ` · ${request.serviceName}` : ""}
+                </p>
+                {request.requestedDate && (
+                  <small>
+                    {formatSelectedDate(request.requestedDate)}
+                    {request.requestedEndDate
+                      ? ` a ${formatSelectedDate(request.requestedEndDate)}`
+                      : ""}
+                  </small>
+                )}
+                {request.notes && <em>{request.notes}</em>}
+              </div>
+              <div className="access-actions">
+                <button
+                  className="secondary-button"
+                  disabled={busy === request.id}
+                  onClick={() => void review(request, "rejected")}
+                >
+                  Não aprovar
+                </button>
+                <button
+                  className="primary-button"
+                  disabled={busy === request.id}
+                  onClick={() => void review(request, "approved")}
+                >
+                  Aprovar
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <EmptyState
+          title="Tudo analisado"
+          description="Não há pedidos de clientes aguardando sua decisão."
+        />
+      )}
+      {reviewed.length > 0 && (
+        <details className="reviewed-requests">
+          <summary>Ver pedidos já analisados ({reviewed.length})</summary>
+          {reviewed.slice(0, 50).map((request) => (
+            <p key={request.id}>
+              <strong>{request.customerName}</strong> ·{" "}
+              {request.status === "approved" ? "aprovado" : "não aprovado"}
+            </p>
+          ))}
+        </details>
+      )}
+      <div className="audit-note">
+        <strong>Aprovar não altera a agenda automaticamente</strong>
+        <p>
+          Depois de conferir disponibilidade, crie o serviço na agenda. Isso
+          evita reservas automáticas em horários ou datas incompatíveis.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+type AccessUser = {
+  id: string;
+  email: string;
+  displayName: string;
+  role: "owner" | "staff" | "finance" | "customer";
+  status: "active" | "disabled" | "invited";
+};
+
+type AccessInvitation = {
+  id: string;
+  email: string;
+  role: "staff" | "customer";
+  customerName: string | null;
+  status: "pending" | "accepted" | "revoked" | "expired";
+  deliveryStatus: "pending" | "sent" | "failed" | "manual";
+  expiresAt: string;
+};
+
+function AccessView({ customers }: { customers: Customer[] }) {
+  const [users, setUsers] = useState<AccessUser[]>([]);
+  const [invitations, setInvitations] = useState<AccessInvitation[]>([]);
+  const [emailConfigured, setEmailConfigured] = useState(false);
+  const [links, setLinks] = useState<Record<string, string>>({});
+  const [inviteRole, setInviteRole] = useState<"staff" | "customer">("staff");
+  const [busy, setBusy] = useState("");
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      const payload = await requestJson<{
+        users: AccessUser[];
+        invitations: AccessInvitation[];
+        emailConfigured: boolean;
+      }>("/api/users");
+      setUsers(payload.users);
+      setInvitations(payload.invitations);
+      setEmailConfigured(payload.emailConfigured);
+      setError("");
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Não foi possível carregar os acessos.",
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  async function invite(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const role = String(form.get("role") ?? "");
+    setBusy("invite");
+    setNotice("");
+    setError("");
+    try {
+      const payload = await requestJson<{
+        invitation: AccessInvitation & { inviteUrl: string };
+      }>("/api/users", {
+        method: "POST",
+        body: JSON.stringify({
+          email: String(form.get("email") ?? ""),
+          role,
+          accountId:
+            role === "customer"
+              ? String(form.get("accountId") ?? "")
+              : undefined,
+        }),
+      });
+      setLinks((current) => ({
+        ...current,
+        [payload.invitation.id]: payload.invitation.inviteUrl,
+      }));
+      setNotice(
+        payload.invitation.deliveryStatus === "sent"
+          ? "Convite enviado por e-mail."
+          : "Convite criado. Copie o link seguro abaixo e envie à pessoa.",
+      );
+      formElement.reset();
+      setInviteRole("staff");
+      await load();
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Não foi possível convidar.",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function changeUser(user: AccessUser) {
+    if (busy) return;
+    const nextStatus = user.status === "active" ? "disabled" : "active";
+    setBusy(user.id);
+    setError("");
+    try {
+      await requestJson(`/api/users/${user.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      setNotice(
+        nextStatus === "active" ? "Acesso reativado." : "Acesso encerrado.",
+      );
+      await load();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Não foi possível alterar o acesso.",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function changeInvitation(
+    invitation: AccessInvitation,
+    action: "resend" | "revoke",
+  ) {
+    if (busy) return;
+    setBusy(invitation.id);
+    setError("");
+    try {
+      const payload = await requestJson<{
+        invitation?: { inviteUrl?: string; deliveryStatus?: string };
+      }>(`/api/users/invitations/${invitation.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action }),
+      });
+      if (payload.invitation?.inviteUrl) {
+        setLinks((current) => ({
+          ...current,
+          [invitation.id]: payload.invitation!.inviteUrl!,
+        }));
+      }
+      setNotice(
+        action === "revoke"
+          ? "Convite cancelado."
+          : payload.invitation?.deliveryStatus === "sent"
+            ? "Novo convite enviado."
+            : "Novo link seguro criado.",
+      );
+      await load();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Não foi possível alterar o convite.",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <div className="access-layout">
+      <section className="panel access-invite-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Novo acesso</p>
+            <h2>Convidar uma pessoa</h2>
+          </div>
+        </div>
+        {!emailConfigured && (
+          <div className="access-warning">
+            O envio automático por e-mail ainda não está configurado. O sistema
+            criará um link seguro para você compartilhar.
+          </div>
+        )}
+        <form className="form-grid" onSubmit={invite}>
+          <label className="field full">
+            <span>Tipo de conta</span>
+            <select
+              name="role"
+              value={inviteRole}
+              onChange={(event) =>
+                setInviteRole(event.target.value as "staff" | "customer")
+              }
+            >
+              <option value="staff">Funcionário</option>
+              <option value="customer">Cliente</option>
+            </select>
+          </label>
+          <label className="field full">
+            <span>E-mail da pessoa</span>
+            <input
+              name="email"
+              type="email"
+              autoComplete="off"
+              maxLength={254}
+              required
+            />
+          </label>
+          {inviteRole === "customer" && (
+            <label className="field full">
+              <span>Cadastro do cliente</span>
+              <select name="accountId" defaultValue="" required>
+                <option value="" disabled>
+                  Selecione o cliente
+                </option>
+                {customers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {error && <p className="form-error full">{error}</p>}
+          {notice && <p className="access-success full">{notice}</p>}
+          <div className="dialog-actions full">
+            <button className="primary-button" disabled={busy === "invite"}>
+              {busy === "invite" ? "Criando…" : "Criar convite"}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="panel access-people-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Contas</p>
+            <h2>Quem pode entrar</h2>
+          </div>
+          <span className="count-badge">{users.length}</span>
+        </div>
+        <div className="access-list">
+          {users.map((user) => (
+            <div className="access-row" key={user.id}>
+              <span className="avatar avatar-forest">
+                {initials(user.displayName)}
+              </span>
+              <span>
+                <strong>{user.displayName}</strong>
+                <small>{user.email}</small>
+                <em>
+                  {user.role === "owner"
+                    ? "Administrador"
+                    : user.role === "customer"
+                      ? "Cliente"
+                      : "Funcionário"}{" "}
+                  · {user.status === "active" ? "ativo" : "desativado"}
+                </em>
+              </span>
+              {user.role !== "owner" && (
+                <button
+                  className="text-button"
+                  disabled={busy === user.id}
+                  onClick={() => void changeUser(user)}
+                >
+                  {user.status === "active" ? "Encerrar acesso" : "Reativar"}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel full-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Convites</p>
+            <h2>Envios recentes</h2>
+          </div>
+        </div>
+        <div className="access-list">
+          {invitations.length ? (
+            invitations.map((invitation) => (
+              <div className="access-row invitation-row" key={invitation.id}>
+                <span>
+                  <strong>{invitation.email}</strong>
+                  <small>
+                    {invitation.role === "customer"
+                      ? `Cliente${invitation.customerName ? ` · ${invitation.customerName}` : ""}`
+                      : "Funcionário"}
+                  </small>
+                  <em>
+                    {invitation.status === "pending"
+                      ? "Aguardando cadastro"
+                      : invitation.status === "accepted"
+                        ? "Aceito"
+                        : invitation.status === "expired"
+                          ? "Expirado"
+                          : "Cancelado"}
+                  </em>
+                </span>
+                <div className="access-actions">
+                  {links[invitation.id] && (
+                    <button
+                      className="secondary-button"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(
+                          links[invitation.id],
+                        );
+                        setNotice("Link copiado.");
+                      }}
+                    >
+                      Copiar link
+                    </button>
+                  )}
+                  {invitation.status === "pending" && (
+                    <>
+                      <button
+                        className="text-button"
+                        onClick={() =>
+                          void changeInvitation(invitation, "resend")
+                        }
+                      >
+                        Reenviar
+                      </button>
+                      <button
+                        className="text-button danger"
+                        onClick={() =>
+                          void changeInvitation(invitation, "revoke")
+                        }
+                      >
+                        Cancelar
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyState
+              title="Nenhum convite ainda"
+              description="Os convites criados aparecerão aqui."
+            />
+          )}
+        </div>
+      </section>
+    </div>
   );
 }
 

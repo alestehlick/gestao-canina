@@ -972,6 +972,18 @@ function activityActionLabel(action: string) {
     "credit_receipt.failed": "Falha no envio do recibo registrada",
     "invoice.created": "Cobrança preparada",
     "invoice.payment_recorded": "Pagamento registrado",
+    "account.invited": "Convite de acesso criado",
+    "account.invitation_resent": "Convite de acesso reenviado",
+    "account.invitation_revoked": "Convite de acesso cancelado",
+    "account.invitation_accepted": "Nova conta ativada",
+    "account.disabled": "Acesso de conta encerrado",
+    "account.reactivated": "Acesso de conta reativado",
+    "auth.password_reset_requested": "Recuperação de senha solicitada",
+    "auth.password_reset_completed": "Senha redefinida",
+    "customer.request_created": "Cliente enviou um pedido",
+    "customer_request.approved": "Pedido de cliente aprovado",
+    "customer_request.rejected": "Pedido de cliente não aprovado",
+    "customer.profile_updated": "Cliente atualizou seus dados",
   };
   return labels[action] ?? "Ação administrativa registrada";
 }
@@ -988,6 +1000,10 @@ function entityTypeLabel(entityType: string) {
     credit_receipt: "Recibo",
     invoice: "Cobrança",
     payment: "Pagamento",
+    app_user: "Conta",
+    account_invitation: "Convite",
+    customer_request: "Pedido do cliente",
+    customer_account: "Cadastro do cliente",
   };
   return labels[entityType] ?? "Registro";
 }

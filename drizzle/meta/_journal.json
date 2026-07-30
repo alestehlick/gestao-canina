@@ -43,6 +43,13 @@
       "when": 1785400000000,
       "tag": "0005_final_invoice_workflow",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1785412800000,
+      "tag": "0006_accounts_and_customer_portal",
+      "breakpoints": true
     }
   ]
 }

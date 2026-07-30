@@ -188,3 +188,47 @@ test("mantém o manual e os detalhes das faturas disponíveis", async () => {
   assert.match(migration, /DROP TABLE IF EXISTS `pix_charges`/);
   assert.match(migration, /CREATE TABLE `invoice_payments`/);
 });
+
+test("separa acessos, protege o portal e registra pedidos dos clientes", async () => {
+  const [users, invitations, portal, requests, workspace, app, schema, migration] =
+    await Promise.all([
+      readFile(new URL("../app/api/users/route.ts", import.meta.url), "utf8"),
+      readFile(
+        new URL("../app/api/auth/invitations/route.ts", import.meta.url),
+        "utf8",
+      ),
+      readFile(new URL("../app/api/portal/route.ts", import.meta.url), "utf8"),
+      readFile(
+        new URL("../app/api/portal/requests/route.ts", import.meta.url),
+        "utf8",
+      ),
+      readFile(new URL("../app/api/workspace/route.ts", import.meta.url), "utf8"),
+      readFile(
+        new URL("../app/components/management-app.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+      readFile(
+        new URL(
+          "../drizzle/0006_accounts_and_customer_portal.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    ]);
+
+  assert.match(users, /requireIdentity\(request, \["owner"\]\)/);
+  assert.match(users, /hashSessionToken\(oneTime\.token\)/);
+  assert.match(invitations, /status = 'accepted'/);
+  assert.match(invitations, /destination: invitation\.role === "customer"/);
+  assert.match(portal, /requireIdentity\(request, \["customer"\]\)/);
+  assert.match(portal, /eq\(dogs\.accountId, context\.accountId\)/);
+  assert.match(requests, /customer\.request_created/);
+  assert.match(workspace, /identity\.role === "staff"/);
+  assert.match(workspace, /cpf: identity\.role === "owner"/);
+  assert.match(app, /signedInRole !== "owner"/);
+  assert.match(app, /Pedidos dos clientes/);
+  assert.match(schema, /sqliteTable\(\s*"account_invitations"/);
+  assert.match(schema, /sqliteTable\(\s*"customer_requests"/);
+  assert.match(migration, /CREATE TABLE `password_reset_tokens`/);
+});

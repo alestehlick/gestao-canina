@@ -447,6 +447,7 @@ export async function GET(request: Request) {
       serviceCatalog: services,
       customers: accounts.map((account) => ({
         ...account,
+        cpf: identity.role === "owner" ? account.cpf : null,
         tutors: tutorsByAccount.get(account.id) ?? [],
       })),
       dogs: dogRows.map((dog) => ({
@@ -456,22 +457,32 @@ export async function GET(request: Request) {
       agenda: [...agendaById.values()],
       tasks: taskRows,
       billing: {
-        invoices: invoiceRows.map((invoice) => ({
-          ...invoice,
-          items: invoiceItemRows.filter((item) => item.invoiceId === invoice.id),
-        })),
-        creditPackages: packageRows,
-        creditPurchases: purchaseRows,
+        invoices:
+          identity.role === "staff"
+            ? []
+            : invoiceRows.map((invoice) => ({
+                ...invoice,
+                items: invoiceItemRows.filter(
+                  (item) => item.invoiceId === invoice.id,
+                ),
+              })),
+        creditPackages: identity.role === "staff" ? [] : packageRows,
+        creditPurchases: identity.role === "staff" ? [] : purchaseRows,
         creditBalances: balanceRows.map((balance) => ({
           ...balance,
           availableUnits: Number(balance.availableUnits),
         })),
-        creditReceipts: receiptRows.map((receipt) => ({
-          ...receipt,
-          deliveryChannels: JSON.parse(receipt.deliveryChannelsJson) as unknown,
-        })),
+        creditReceipts:
+          identity.role === "staff"
+            ? []
+            : receiptRows.map((receipt) => ({
+                ...receipt,
+                deliveryChannels: JSON.parse(
+                  receipt.deliveryChannelsJson,
+                ) as unknown,
+              })),
       },
-      activities: activityRows,
+      activities: identity.role === "owner" ? activityRows : [],
     });
   } catch (error) {
     return errorResponse(error, requestId);

@@ -135,7 +135,19 @@ export async function POST(request: Request) {
     const appointmentId = crypto.randomUUID();
     const itemId = crypto.randomUUID();
     const auditId = crypto.randomUUID();
-    const priceCents = customPriceCents ?? (service.code === "taxi_dog" ? (direction === "round_trip" ? 1_000 : 500) : service.code === "hotel" ? Math.round(service.basePriceCents * (lodgingNights ?? 1)) : service.basePriceCents);
+    const catalogPriceCents =
+      service.code === "taxi_dog"
+        ? direction === "round_trip"
+          ? 1_000
+          : 500
+        : service.code === "hotel"
+          ? Math.round(service.basePriceCents * (lodgingNights ?? 1))
+          : service.basePriceCents;
+    // Somente administradores podem conceder valores especiais.
+    const priceCents =
+      identity.role === "owner"
+        ? (customPriceCents ?? catalogPriceCents)
+        : catalogPriceCents;
     await db.batch([
       db.insert(appointments).values({
         id: appointmentId,

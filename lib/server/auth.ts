@@ -52,7 +52,6 @@ export async function getAdminConfigurationState() {
       activeOwnersTotal === 0,
     valid:
       establishmentsTotal === 1 &&
-      credentialsTotal === 2 &&
       activeOwnersTotal === 2,
   };
 }

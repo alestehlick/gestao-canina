@@ -262,6 +262,16 @@ export function createOpaqueSession() {
   return { token, expiresAt };
 }
 
+export function createOneTimeToken(durationSeconds: number) {
+  if (!Number.isFinite(durationSeconds) || durationSeconds < 300) {
+    throw new Error("invalid_token_duration");
+  }
+  return {
+    token: encodeBase64Url(randomBytes(32)),
+    expiresAt: new Date(Date.now() + durationSeconds * 1_000).toISOString(),
+  };
+}
+
 export async function hashSessionToken(token: string) {
   const digest = await crypto.subtle.digest("SHA-256", encoder.encode(token));
   return encodeBase64Url(new Uint8Array(digest));

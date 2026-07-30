@@ -556,7 +556,7 @@ export async function PATCH(
         body.paymentPreference === undefined
           ? item.paymentPreference
           : body.paymentPreference;
-      const priceCents =
+      const requestedPriceCents =
         body.priceCents === undefined ? item.totalCents : body.priceCents;
 
       if (
@@ -589,10 +589,10 @@ export async function PATCH(
         );
       }
       if (
-        typeof priceCents !== "number" ||
-        !Number.isSafeInteger(priceCents) ||
-        priceCents < 0 ||
-        priceCents > 100_000_000
+        typeof requestedPriceCents !== "number" ||
+        !Number.isSafeInteger(requestedPriceCents) ||
+        requestedPriceCents < 0 ||
+        requestedPriceCents > 100_000_000
       ) {
         throw new HttpError(
           400,
@@ -619,6 +619,18 @@ export async function PATCH(
           "O serviço selecionado não foi encontrado.",
         );
       }
+      const catalogPriceCents =
+        service.code === "hotel"
+          ? Math.round(
+              service.basePriceCents * (appointment.lodgingNights ?? 1),
+            )
+          : service.code === "taxi_dog"
+            ? item.descriptionSnapshot === "Ida e volta"
+              ? 1_000
+              : 500
+            : service.basePriceCents;
+      const priceCents =
+        identity.role === "owner" ? requestedPriceCents : catalogPriceCents;
       if (
         paymentPreference === "credit" &&
         !["daycare", "bath", "bath_grooming", "taxi_dog"].includes(service.code)

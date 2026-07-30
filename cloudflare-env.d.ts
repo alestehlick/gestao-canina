@@ -4,5 +4,7 @@ declare namespace Cloudflare {
     FILES: R2Bucket;
     INITIAL_SETUP_KEY?: string;
     AUTH_PASSWORD_PEPPER?: string;
+    POSTMARK_SERVER_TOKEN?: string;
+    AUTH_EMAIL_FROM?: string;
   }
 }

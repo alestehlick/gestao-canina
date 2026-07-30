@@ -1,8 +1,8 @@
 # Hospet Quintal
 
 Ferramenta de operação para creche, hospedagem, banho, banho e tosa e Taxi-dog.
-A interface está em português brasileiro e foi pensada para o uso diário dos
-dois administradores.
+A interface está em português brasileiro e foi pensada para administradores,
+funcionários e clientes, cada um com acesso somente ao que precisa.
 
 ## Estado atual
 
@@ -19,6 +19,10 @@ Este repositório entrega:
   apenas como apoio no desenvolvimento local;
 - configuração inicial protegida para exatamente dois administradores e login
   obrigatório nas visitas seguintes;
+- convites individuais para funcionários e clientes, recuperação de senha,
+  encerramento imediato de acesso e portal privado do cliente;
+- histórico global identificado por pessoa e fila de pedidos de serviços ou
+  cancelamentos enviados pelo portal;
 - modelo D1 para agenda, recorrências, créditos, faturas, pagamentos,
   auditoria e metadados de arquivos privados;
 - APIs iniciais com autorização no servidor, proteção de origem, limites de
@@ -88,10 +92,12 @@ nunca em arquivos versionados:
 |---|---|
 | `INITIAL_SETUP_KEY` | Chave secreta usada uma única vez no primeiro acesso |
 | `AUTH_PASSWORD_PEPPER` | Segredo adicional da derivação das senhas |
+| `POSTMARK_SERVER_TOKEN` | Token opcional para envio automático de convites |
+| `AUTH_EMAIL_FROM` | Remetente verificado usado nos e-mails de acesso |
 
 O endereço do site pode ser público porque as páginas de gestão exigem a sessão
 própria. Cabeçalhos externos de identidade não são aceitos nesta versão: o
-acesso fica restrito às duas contas cadastradas na configuração inicial.
+os dois administradores iniciais controlam os convites de outras contas.
 
 ## Inicialização do banco
 
@@ -104,7 +110,8 @@ duas contas e o catálogo básico de serviços em um único lote. Ela não inser
 clientes ou cães fictícios.
 
 Depois dessa configuração, o cadastro inicial é encerrado e todo acesso exige
-e-mail e senha de um dos dois administradores. As senhas usam PBKDF2-SHA256,
+e-mail e senha próprios. Os administradores podem convidar funcionários e
+clientes; links de convite são de uso único e expiram em 48 horas. As senhas usam PBKDF2-SHA256,
 salt individual, pepper externo e 310 mil iterações. As sessões duram 12 horas,
 usam cookie `HttpOnly`, `Secure` e `SameSite=Lax`, e somente o hash do token é
 armazenado no D1. Tentativas de login são limitadas por IP e por combinação de

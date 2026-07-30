@@ -1,0 +1,401 @@
+import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
+import { getD1Database, getDb } from "@/db";
+import {
+  appUsers,
+  appointmentItems,
+  appointments,
+  creditMovements,
+  creditReceipts,
+  customerAccounts,
+  customerRequests,
+  dogs,
+  dogTutors,
+  invoiceItems,
+  invoices,
+  serviceCatalog,
+  tutors,
+} from "@/db/schema";
+import { requireIdentity } from "@/lib/server/auth";
+import {
+  assertSameOrigin,
+  errorResponse,
+  HttpError,
+  json,
+  optionalString,
+  readJsonObject,
+} from "@/lib/server/http";
+
+function normalizeBrazilianPhone(value: string | null) {
+  if (!value) return null;
+  const digits = value.replace(/\D/g, "");
+  if (digits.length === 10 || digits.length === 11) return `+55${digits}`;
+  if (
+    (digits.length === 12 || digits.length === 13) &&
+    digits.startsWith("55")
+  ) {
+    return `+${digits}`;
+  }
+  if (value.trim().startsWith("+") && digits.length >= 10 && digits.length <= 15) {
+    return `+${digits}`;
+  }
+  throw new HttpError(400, "invalid_phone", "Informe um telefone com DDD.");
+}
+
+async function getCustomerContext(userId: string, establishmentId: string) {
+  const [context] = await getDb()
+    .select({
+      userId: appUsers.id,
+      tutorId: tutors.id,
+      accountId: tutors.accountId,
+    })
+    .from(appUsers)
+    .innerJoin(tutors, eq(tutors.id, appUsers.tutorId))
+    .where(
+      and(
+        eq(appUsers.id, userId),
+        eq(appUsers.establishmentId, establishmentId),
+        eq(appUsers.role, "customer"),
+        eq(appUsers.status, "active"),
+        eq(tutors.status, "active"),
+      ),
+    )
+    .limit(1);
+  if (!context) {
+    throw new HttpError(
+      403,
+      "customer_link_missing",
+      "Sua conta ainda não está ligada a um cadastro de cliente.",
+    );
+  }
+  return context;
+}
+
+export async function GET(request: Request) {
+  const requestId = crypto.randomUUID();
+  try {
+    const identity = await requireIdentity(request, ["customer"]);
+    const establishmentId = identity.establishmentId!;
+    const context = await getCustomerContext(identity.userId!, establishmentId);
+    const db = getDb();
+    const oldestDate = new Date();
+    oldestDate.setUTCFullYear(oldestDate.getUTCFullYear() - 2);
+    const from = oldestDate.toISOString().slice(0, 10);
+
+    const [
+      accountRows,
+      tutorRows,
+      dogRows,
+      appointmentRows,
+      invoiceRows,
+      invoiceItemRows,
+      balanceRows,
+      receiptRows,
+      requestRows,
+      services,
+    ] = await Promise.all([
+      db
+        .select()
+        .from(customerAccounts)
+        .where(
+          and(
+            eq(customerAccounts.id, context.accountId),
+            eq(customerAccounts.establishmentId, establishmentId),
+          ),
+        )
+        .limit(1),
+      db
+        .select({
+          id: tutors.id,
+          fullName: tutors.fullName,
+          email: tutors.email,
+          phoneE164: tutors.phoneE164,
+          isFinancialContact: tutors.isFinancialContact,
+        })
+        .from(tutors)
+        .where(
+          and(
+            eq(tutors.accountId, context.accountId),
+            eq(tutors.status, "active"),
+          ),
+        )
+        .orderBy(desc(tutors.isFinancialContact), asc(tutors.fullName)),
+      db
+        .select({
+          id: dogs.id,
+          name: dogs.name,
+          breed: dogs.breed,
+          birthDate: dogs.birthDate,
+          sex: dogs.sex,
+          weightGrams: dogs.weightGrams,
+          neutered: dogs.neutered,
+          photoObjectKey: dogs.photoObjectKey,
+          feedingNotes: dogs.feedingNotes,
+          temperamentNotes: dogs.temperamentNotes,
+          medicationNotes: dogs.medicationNotes,
+          vaccinesJson: dogs.vaccinesJson,
+          emergencyNotes: dogs.emergencyNotes,
+          vaccinesCurrent: dogs.vaccinesCurrent,
+          status: dogs.status,
+        })
+        .from(dogs)
+        .innerJoin(
+          dogTutors,
+          and(
+            eq(dogTutors.dogId, dogs.id),
+            eq(dogTutors.tutorId, context.tutorId),
+            eq(dogTutors.portalVisible, true),
+          ),
+        )
+        .where(
+          and(
+            eq(dogs.accountId, context.accountId),
+            eq(dogs.establishmentId, establishmentId),
+            eq(dogs.status, "active"),
+          ),
+        )
+        .orderBy(asc(dogs.normalizedName)),
+      db
+        .select({
+          id: appointments.id,
+          dogId: appointments.dogId,
+          dogName: dogs.name,
+          startDate: appointments.startDate,
+          endDate: appointments.endDate,
+          startTime: appointments.startTime,
+          endTime: appointments.endTime,
+          lodgingNights: appointments.lodgingNights,
+          depositPercent: appointments.depositPercent,
+          status: appointments.status,
+          serviceName: appointmentItems.serviceNameSnapshot,
+          description: appointmentItems.descriptionSnapshot,
+          totalCents: appointmentItems.totalCents,
+          settlementMethod: appointmentItems.settlementMethod,
+        })
+        .from(appointments)
+        .innerJoin(dogs, eq(dogs.id, appointments.dogId))
+        .leftJoin(
+          appointmentItems,
+          eq(appointmentItems.appointmentId, appointments.id),
+        )
+        .where(
+          and(
+            eq(appointments.establishmentId, establishmentId),
+            eq(appointments.accountId, context.accountId),
+            gte(appointments.startDate, from),
+          ),
+        )
+        .orderBy(desc(appointments.startDate))
+        .limit(250),
+      db
+        .select()
+        .from(invoices)
+        .where(
+          and(
+            eq(invoices.establishmentId, establishmentId),
+            eq(invoices.accountId, context.accountId),
+            sql`${invoices.status} <> 'draft'`,
+          ),
+        )
+        .orderBy(desc(invoices.createdAt))
+        .limit(100),
+      db
+        .select({
+          id: invoiceItems.id,
+          invoiceId: invoiceItems.invoiceId,
+          dogName: invoiceItems.dogNameSnapshot,
+          serviceName: invoiceItems.serviceNameSnapshot,
+          serviceDate: invoiceItems.serviceDateSnapshot,
+          description: invoiceItems.descriptionSnapshot,
+          amountCents: invoiceItems.amountCents,
+        })
+        .from(invoiceItems)
+        .innerJoin(invoices, eq(invoices.id, invoiceItems.invoiceId))
+        .where(
+          and(
+            eq(invoices.establishmentId, establishmentId),
+            eq(invoices.accountId, context.accountId),
+          ),
+        )
+        .orderBy(asc(invoiceItems.serviceDateSnapshot)),
+      db
+        .select({
+          serviceCatalogId: creditMovements.serviceCatalogId,
+          serviceName: serviceCatalog.name,
+          serviceCode: serviceCatalog.code,
+          availableUnits: sql<number>`coalesce(sum(${creditMovements.deltaUnits}), 0)`,
+        })
+        .from(creditMovements)
+        .innerJoin(
+          serviceCatalog,
+          eq(serviceCatalog.id, creditMovements.serviceCatalogId),
+        )
+        .where(
+          and(
+            eq(creditMovements.establishmentId, establishmentId),
+            eq(creditMovements.accountId, context.accountId),
+          ),
+        )
+        .groupBy(
+          creditMovements.serviceCatalogId,
+          serviceCatalog.name,
+          serviceCatalog.code,
+        ),
+      db
+        .select({
+          id: creditReceipts.id,
+          receiptNumber: creditReceipts.receiptNumber,
+          dogName: creditReceipts.dogNameSnapshot,
+          serviceName: creditReceipts.serviceNameSnapshot,
+          serviceDate: creditReceipts.serviceDateSnapshot,
+          creditUnits: creditReceipts.creditUnits,
+          issuedAt: creditReceipts.issuedAt,
+        })
+        .from(creditReceipts)
+        .where(
+          and(
+            eq(creditReceipts.establishmentId, establishmentId),
+            eq(creditReceipts.accountId, context.accountId),
+          ),
+        )
+        .orderBy(desc(creditReceipts.issuedAt))
+        .limit(100),
+      db
+        .select()
+        .from(customerRequests)
+        .where(
+          and(
+            eq(customerRequests.establishmentId, establishmentId),
+            eq(customerRequests.accountId, context.accountId),
+          ),
+        )
+        .orderBy(desc(customerRequests.createdAt))
+        .limit(100),
+      db
+        .select({
+          id: serviceCatalog.id,
+          code: serviceCatalog.code,
+          name: serviceCatalog.name,
+        })
+        .from(serviceCatalog)
+        .where(
+          and(
+            eq(serviceCatalog.establishmentId, establishmentId),
+            eq(serviceCatalog.active, true),
+          ),
+        )
+        .orderBy(asc(serviceCatalog.name)),
+    ]);
+
+    const account = accountRows[0];
+    if (!account) {
+      throw new HttpError(
+        404,
+        "customer_not_found",
+        "O cadastro ligado à conta não foi encontrado.",
+      );
+    }
+    return json({
+      identity: {
+        email: identity.email,
+        displayName: identity.displayName,
+        role: identity.role,
+      },
+      account,
+      tutors: tutorRows,
+      dogs: dogRows.map((dog) => ({
+        ...dog,
+        photoUrl: dog.photoObjectKey
+          ? `/api/dogs/${dog.id}?photo=1`
+          : null,
+        vaccines: JSON.parse(dog.vaccinesJson || "[]") as unknown,
+      })),
+      appointments: appointmentRows,
+      invoices: invoiceRows.map((invoice) => ({
+        ...invoice,
+        items: invoiceItemRows.filter((item) => item.invoiceId === invoice.id),
+      })),
+      credits: balanceRows.map((balance) => ({
+        ...balance,
+        availableUnits: Number(balance.availableUnits),
+      })),
+      receipts: receiptRows,
+      requests: requestRows,
+      services,
+    });
+  } catch (error) {
+    return errorResponse(error, requestId);
+  }
+}
+
+export async function PATCH(request: Request) {
+  const requestId = crypto.randomUUID();
+  try {
+    assertSameOrigin(request);
+    const identity = await requireIdentity(request, ["customer"]);
+    const establishmentId = identity.establishmentId!;
+    const context = await getCustomerContext(identity.userId!, establishmentId);
+    const body = await readJsonObject(request);
+    const phone = normalizeBrazilianPhone(optionalString(body, "phone", 40));
+    const addressLine = optionalString(body, "addressLine", 300);
+    const addressCity = optionalString(body, "addressCity", 120);
+    const addressRegion = optionalString(body, "addressRegion", 40);
+    const addressPostalCode = optionalString(body, "addressPostalCode", 20);
+    const now = new Date().toISOString();
+    const d1 = getD1Database();
+    await d1.batch([
+      d1
+        .prepare(
+          `UPDATE tutors
+          SET phone_e164 = ?, whatsapp_enabled = ?, updated_at = ?
+          WHERE id = ? AND account_id = ?`,
+        )
+        .bind(phone, Boolean(phone) ? 1 : 0, now, context.tutorId, context.accountId),
+      d1
+        .prepare(
+          `UPDATE customer_accounts
+          SET address_line = ?, address_city = ?, address_region = ?,
+            address_postal_code = ?, updated_at = ?
+          WHERE id = ? AND establishment_id = ?`,
+        )
+        .bind(
+          addressLine,
+          addressCity,
+          addressRegion,
+          addressPostalCode,
+          now,
+          context.accountId,
+          establishmentId,
+        ),
+      d1
+        .prepare(
+          `INSERT INTO audit_events (
+            id, establishment_id, actor_user_id, actor_role, action,
+            entity_type, entity_id, request_id, result, metadata_json,
+            occurred_at
+          ) VALUES (?, ?, ?, ?, 'customer.profile_updated',
+            'customer_account', ?, ?, 'success', ?, ?)`,
+        )
+        .bind(
+          crypto.randomUUID(),
+          establishmentId,
+          identity.userId,
+          identity.role,
+          context.accountId,
+          requestId,
+          JSON.stringify({
+            changedFields: [
+              "phone",
+              "addressLine",
+              "addressCity",
+              "addressRegion",
+              "addressPostalCode",
+            ],
+          }),
+          now,
+        ),
+    ]);
+    return json({ updated: true });
+  } catch (error) {
+    return errorResponse(error, requestId);
+  }
+}

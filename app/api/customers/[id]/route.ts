@@ -92,6 +92,13 @@ export async function PATCH(
     if (birthDate && !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) {
       throw new HttpError(400, "invalid_birth_date", "A data de nascimento é inválida.");
     }
+    if (identity.role !== "owner" && body.cpf !== undefined) {
+      throw new HttpError(
+        403,
+        "permission_denied",
+        "Somente administradores podem alterar o CPF.",
+      );
+    }
     if (
       displayName === null &&
       fullName === null &&

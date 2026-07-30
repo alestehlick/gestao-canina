@@ -207,6 +207,87 @@ export const adminSessions = sqliteTable(
   ],
 );
 
+export const accountInvitations = sqliteTable(
+  "account_invitations",
+  {
+    id: text("id").primaryKey(),
+    establishmentId: text("establishment_id")
+      .notNull()
+      .references(() => establishments.id, { onDelete: "cascade" }),
+    normalizedEmail: text("normalized_email").notNull(),
+    email: text("email").notNull(),
+    role: text("role", { enum: ["staff", "customer"] }).notNull(),
+    accountId: text("account_id").references(() => customerAccounts.id, {
+      onDelete: "cascade",
+    }),
+    tokenHash: text("token_hash").notNull(),
+    status: text("status", {
+      enum: ["pending", "accepted", "revoked", "expired"],
+    })
+      .notNull()
+      .default("pending"),
+    deliveryStatus: text("delivery_status", {
+      enum: ["pending", "sent", "failed", "manual"],
+    })
+      .notNull()
+      .default("pending"),
+    deliveryMessageId: text("delivery_message_id"),
+    deliveryError: text("delivery_error"),
+    expiresAt: text("expires_at").notNull(),
+    sentAt: text("sent_at"),
+    acceptedAt: text("accepted_at"),
+    acceptedUserId: text("accepted_user_id").references(() => appUsers.id, {
+      onDelete: "set null",
+    }),
+    invitedByUserId: text("invited_by_user_id").references(() => appUsers.id, {
+      onDelete: "set null",
+    }),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("account_invitations_token_hash_unique").on(table.tokenHash),
+    index("account_invitations_establishment_status_idx").on(
+      table.establishmentId,
+      table.status,
+      table.createdAt,
+    ),
+    index("account_invitations_email_status_idx").on(
+      table.establishmentId,
+      table.normalizedEmail,
+      table.status,
+    ),
+  ],
+);
+
+export const passwordResetTokens = sqliteTable(
+  "password_reset_tokens",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    status: text("status", {
+      enum: ["pending", "used", "revoked", "expired"],
+    })
+      .notNull()
+      .default("pending"),
+    expiresAt: text("expires_at").notNull(),
+    usedAt: text("used_at"),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("password_reset_tokens_token_hash_unique").on(table.tokenHash),
+    index("password_reset_tokens_user_status_idx").on(
+      table.userId,
+      table.status,
+      table.createdAt,
+    ),
+  ],
+);
+
 export const dogs = sqliteTable(
   "dogs",
   {
@@ -521,6 +602,61 @@ export const tasks = sqliteTable(
       table.establishmentId,
       table.scheduledDate,
       table.status,
+    ),
+  ],
+);
+
+export const customerRequests = sqliteTable(
+  "customer_requests",
+  {
+    id: text("id").primaryKey(),
+    establishmentId: text("establishment_id")
+      .notNull()
+      .references(() => establishments.id, { onDelete: "cascade" }),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => customerAccounts.id, { onDelete: "cascade" }),
+    requestedByUserId: text("requested_by_user_id").references(
+      () => appUsers.id,
+      { onDelete: "set null" },
+    ),
+    type: text("type", {
+      enum: ["service", "cancellation", "profile_update"],
+    }).notNull(),
+    status: text("status", {
+      enum: ["pending", "approved", "rejected", "cancelled"],
+    })
+      .notNull()
+      .default("pending"),
+    dogId: text("dog_id").references(() => dogs.id, { onDelete: "set null" }),
+    appointmentId: text("appointment_id").references(() => appointments.id, {
+      onDelete: "set null",
+    }),
+    serviceCatalogId: text("service_catalog_id").references(
+      () => serviceCatalog.id,
+      { onDelete: "set null" },
+    ),
+    requestedDate: text("requested_date"),
+    requestedEndDate: text("requested_end_date"),
+    notes: text("notes"),
+    reviewedByUserId: text("reviewed_by_user_id").references(
+      () => appUsers.id,
+      { onDelete: "set null" },
+    ),
+    reviewedAt: text("reviewed_at"),
+    responseNote: text("response_note"),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (table) => [
+    index("customer_requests_establishment_status_idx").on(
+      table.establishmentId,
+      table.status,
+      table.createdAt,
+    ),
+    index("customer_requests_account_created_idx").on(
+      table.accountId,
+      table.createdAt,
     ),
   ],
 );

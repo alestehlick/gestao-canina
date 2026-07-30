@@ -35,6 +35,10 @@ Cada cartão da agenda mostra o cão, o cliente, o serviço e a situação atual
 
 Use **Opções** para editar ou cancelar. O cancelamento exige um motivo e permanece no histórico.
 
+Essas mesmas ações aparecem em **Cães > Agenda e histórico** e em
+**Clientes > Serviços**. Você pode trabalhar a partir da Agenda ou abrir a
+ficha da pessoa ou do cão; a atualização é a mesma.
+
 ## Cadastros
 
 ### 4. Cadastrar um cliente
@@ -74,6 +78,18 @@ Na forma de quitação, escolha:
 
 - **Gerar fatura**: o serviço será cobrado depois da conclusão.
 - **Usar 1 crédito**: disponível para creche, banho, banho e tosa e Taxi-dog, desde que o cliente tenha saldo.
+
+Para repetir semanalmente, escolha **Toda semana** e informe a quantidade de
+semanas, entre 2 e 52. A série inteira é salva de uma vez.
+
+Ao cancelar um dia de uma série semanal, escolha com atenção:
+
+- **Somente este dia** mantém as outras semanas;
+- **Toda a recorrência** cancela todos os agendamentos ainda abertos da série.
+
+Atendimentos já concluídos permanecem no histórico. Se uma das semanas já tiver
+fatura ou pagamento, o cancelamento global será interrompido para proteger o
+financeiro; resolva essa cobrança antes de tentar novamente.
 
 ### 7. Hospedagem com sinal
 

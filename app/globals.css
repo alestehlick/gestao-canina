@@ -1405,6 +1405,11 @@ h3 {
   color: var(--daycare);
 }
 
+.settlement-note.recurrence {
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
 .status-pill {
   display: inline-flex;
   min-height: 24px;
@@ -2754,6 +2759,58 @@ h3 {
   width: 18px;
   height: 18px;
   accent-color: var(--forest);
+}
+
+.radio-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  padding: 11px 12px;
+}
+
+.radio-option input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  margin-top: 2px;
+  accent-color: var(--forest);
+}
+
+.radio-option span,
+.radio-option strong,
+.radio-option small {
+  display: block;
+}
+
+.form-grid fieldset.field {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.form-grid fieldset.field > legend {
+  margin-bottom: 6px;
+  color: #4e544f;
+  font-size: 0.72rem;
+  font-weight: 710;
+}
+
+.profile-appointment-groups {
+  display: grid;
+  gap: 24px;
+}
+
+.profile-appointment-groups > section {
+  min-width: 0;
+}
+
+.radio-option small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.68rem;
 }
 
 .package-summary {

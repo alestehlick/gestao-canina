@@ -150,6 +150,8 @@ export type WorkspaceAppointment = {
   depositPercent: number | null;
   status: BookingStatus;
   source: "manual" | "recurring";
+  recurringScheduleId: string | null;
+  occurrenceDate: string | null;
   internalNotes: string | null;
   cancellationReason: string | null;
   createdAt: string;
@@ -561,6 +563,8 @@ export function mapWorkspaceBookings(
       id: appointment.id,
       itemId: firstItem?.id,
       serviceCatalogId: firstItem?.serviceCatalogId,
+      recurringScheduleId: appointment.recurringScheduleId ?? undefined,
+      occurrenceDate: appointment.occurrenceDate ?? undefined,
       date: appointment.startDate,
       endDate: appointment.endDate,
       time: appointment.startTime ?? "Sem horário",
@@ -575,6 +579,12 @@ export function mapWorkspaceBookings(
         displayItems.map((item) => item.serviceName).join(" · ") ||
         "Serviço sem item",
       serviceType,
+      transportDirection:
+        firstService?.code === "taxi_dog"
+          ? firstItem?.description === "Ida e volta"
+            ? "round_trip"
+            : "one_way"
+          : undefined,
       status: appointment.status,
       priceCents: displayItems.reduce(
         (total, item) => total + Math.max(0, item.totalCents),
@@ -956,6 +966,8 @@ function roleLabel(role: string) {
 function activityActionLabel(action: string) {
   const labels: Record<string, string> = {
     "appointment.created": "Serviço agendado",
+    "recurring_schedule.created": "Recorrência semanal criada",
+    "recurring_schedule.cancelled": "Recorrência semanal cancelada",
     "appointment.updated": "Serviço atualizado",
     "appointment.cancelled": "Atendimento cancelado",
     "appointment.status_changed": "Situação do atendimento atualizada",
@@ -993,6 +1005,7 @@ function activityActionLabel(action: string) {
 function entityTypeLabel(entityType: string) {
   const labels: Record<string, string> = {
     appointment: "Atendimento",
+    recurring_schedule: "Recorrência semanal",
     appointment_item: "Serviço",
     customer: "Cliente",
     dog: "Cão",

@@ -75,7 +75,7 @@ test("protege as mutações essenciais no servidor", async () => {
     assert.match(route, /requireIdentity\(request/);
   }
   for (const route of [appointments, tasks]) {
-    assert.match(route, /auditEvents/);
+    assert.match(route, /auditEvents|audit_events/);
   }
   assert.match(invoices, /audit_events/);
   assert.match(credits, /audit_events/);
@@ -84,6 +84,42 @@ test("protege as mutações essenciais no servidor", async () => {
   assert.doesNotMatch(auth, /NODE_ENV/);
   assert.match(nextConfig, /frame-ancestors 'none'/);
   assert.match(nextConfig, /private, no-store/);
+});
+
+test("mantém ações completas nos perfis e recorrências semanais seguras", async () => {
+  const [app, appointments, appointmentUpdate, workspace, data] =
+    await Promise.all([
+      readFile(
+        new URL("../app/components/management-app.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/api/appointments/route.ts", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/api/appointments/[id]/route.ts", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/api/workspace/route.ts", import.meta.url),
+        "utf8",
+      ),
+      readFile(new URL("../lib/workspace-data.ts", import.meta.url), "utf8"),
+    ]);
+
+  assert.match(app, /function ProfileAppointments/);
+  assert.match(app, /onEditBooking/);
+  assert.match(app, /onCancelBooking/);
+  assert.match(app, /Toda a recorrência/);
+  assert.match(app, /Repetir por quantas semanas/);
+  assert.match(appointments, /recurring_schedule\.created/);
+  assert.match(appointments, /await d1\.batch\(statements\)/);
+  assert.match(appointmentUpdate, /recurring_schedule\.cancelled/);
+  assert.match(appointmentUpdate, /status NOT IN \('completed', 'cancelled'\)/);
+  assert.match(appointmentUpdate, /recurring_schedule_has_payment/);
+  assert.match(workspace, /recurringScheduleId/);
+  assert.match(data, /Recorrência semanal cancelada/);
 });
 
 test("mantém o primeiro acesso e o login protegidos sem bloqueio global da conta", async () => {

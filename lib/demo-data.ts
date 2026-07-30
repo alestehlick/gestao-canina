@@ -58,6 +58,8 @@ export type Booking = {
   id: string;
   itemId?: string;
   serviceCatalogId?: string;
+  recurringScheduleId?: string;
+  occurrenceDate?: string;
   date: string;
   time: string;
   endTime?: string;
@@ -70,6 +72,7 @@ export type Booking = {
   customerName: string;
   service: string;
   serviceType: ServiceType;
+  transportDirection?: "one_way" | "round_trip";
   status: BookingStatus;
   priceCents: number;
   paymentPreference: "invoice" | "credit";

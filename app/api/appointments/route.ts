@@ -1,9 +1,6 @@
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
+import { getD1Database, getDb } from "@/db";
 import {
-  appointmentItems,
-  appointments,
-  auditEvents,
   dogs,
   serviceCatalog,
 } from "@/db/schema";
@@ -17,6 +14,31 @@ import {
   readJsonObject,
   requiredString,
 } from "@/lib/server/http";
+
+const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
+
+function shiftIsoDate(date: string, days: number) {
+  const value = new Date(`${date}T00:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+function daysBetween(from: string, to: string) {
+  return Math.round(
+    (Date.parse(`${to}T00:00:00.000Z`) -
+      Date.parse(`${from}T00:00:00.000Z`)) /
+      86_400_000,
+  );
+}
+
+function chunksOf<T>(values: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
 
 export async function POST(request: Request) {
   const requestId = crypto.randomUUID();
@@ -32,6 +54,33 @@ export async function POST(request: Request) {
     const startTime = optionalString(body, "startTime", 5);
     const endTime = optionalString(body, "endTime", 5);
     const internalNotes = optionalString(body, "internalNotes", 2_000);
+    const recurrence =
+      body.recurrence === undefined ? "none" : body.recurrence;
+    if (recurrence !== "none" && recurrence !== "weekly") {
+      throw new HttpError(
+        400,
+        "invalid_recurrence",
+        "Escolha uma recorrência válida.",
+      );
+    }
+    const recurrenceCount =
+      recurrence === "weekly"
+        ? body.recurrenceCount === undefined
+          ? 12
+          : body.recurrenceCount
+        : 1;
+    if (
+      typeof recurrenceCount !== "number" ||
+      !Number.isSafeInteger(recurrenceCount) ||
+      recurrenceCount < 1 ||
+      recurrenceCount > 52
+    ) {
+      throw new HttpError(
+        400,
+        "invalid_recurrence_count",
+        "Informe uma duração entre 1 e 52 semanas.",
+      );
+    }
     const paymentPreference =
       body.paymentPreference === undefined ? "invoice" : body.paymentPreference;
     if (
@@ -60,8 +109,16 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    if (!isoDatePattern.test(startDate) || !isoDatePattern.test(endDate)) {
       throw new HttpError(400, "invalid_date", "A data informada é inválida.");
+    }
+    const durationDays = daysBetween(startDate, endDate);
+    if (durationDays < 0) {
+      throw new HttpError(
+        400,
+        "invalid_date_range",
+        "A data final deve ser igual ou posterior à inicial.",
+      );
     }
     if (startTime && !/^\d{2}:\d{2}$/.test(startTime)) {
       throw new HttpError(400, "invalid_time", "O horário inicial é inválido.");
@@ -132,9 +189,6 @@ export async function POST(request: Request) {
       }
     }
     const direction = body.transportDirection === "round_trip" ? "round_trip" : "one_way";
-    const appointmentId = crypto.randomUUID();
-    const itemId = crypto.randomUUID();
-    const auditId = crypto.randomUUID();
     const catalogPriceCents =
       service.code === "taxi_dog"
         ? direction === "round_trip"
@@ -148,69 +202,189 @@ export async function POST(request: Request) {
       identity.role === "owner"
         ? (customPriceCents ?? catalogPriceCents)
         : catalogPriceCents;
-    await db.batch([
-      db.insert(appointments).values({
-        id: appointmentId,
-        establishmentId,
-        accountId: dog.accountId,
-        dogId: dog.id,
-        startDate,
-        endDate,
-        startTime,
-        endTime,
-        lodgingNights: service.code === "hotel" ? lodgingNights : null,
-        depositPercent: service.code === "hotel" ? depositPercent : null,
-        internalNotes,
-        createdByUserId: identity.userId,
-      }),
-      db.insert(appointmentItems).values({
-        id: itemId,
-        appointmentId,
-        serviceCatalogId: service.id,
-        serviceNameSnapshot: service.name,
-        unitPriceCents: priceCents,
-        quantity: 1,
-        totalCents: priceCents,
-        descriptionSnapshot: service.code === "taxi_dog" ? (direction === "round_trip" ? "Ida e volta" : "Ida") : service.code === "hotel" && depositPercent ? `Sinal de ${depositPercent}% no check-in; saldo no check-out.` : null,
-        paymentPreference,
-      }),
-      db.insert(auditEvents).values({
-        id: auditId,
-        establishmentId,
-        actorUserId: identity.userId,
-        actorRole: identity.role,
-        action: "appointment.created",
-        entityType: "appointment",
-        entityId: appointmentId,
-        requestId,
-        metadataJson: JSON.stringify({
-          dogId: dog.id,
-          serviceCatalogId: service.id,
-          paymentPreference,
-          transportDirection: service.code === "taxi_dog" ? direction : null,
-          lodgingNights: service.code === "hotel" ? lodgingNights : null,
-          depositPercent: service.code === "hotel" ? depositPercent : null,
-        }),
-      }),
-    ]);
+    const recurringScheduleId =
+      recurrence === "weekly" ? crypto.randomUUID() : null;
+    const occurrenceDates = Array.from(
+      { length: recurrenceCount },
+      (_, index) => shiftIsoDate(startDate, index * 7),
+    );
+    const createdAppointments = occurrenceDates.map((occurrenceStartDate) => ({
+      id: crypto.randomUUID(),
+      itemId: crypto.randomUUID(),
+      startDate: occurrenceStartDate,
+      endDate: shiftIsoDate(occurrenceStartDate, durationDays),
+    }));
+    const description =
+      service.code === "taxi_dog"
+        ? direction === "round_trip"
+          ? "Ida e volta"
+          : "Ida"
+        : service.code === "hotel" && depositPercent
+          ? `Sinal de ${depositPercent}% no check-in; saldo no check-out.`
+          : null;
+    const d1 = getD1Database();
+    const statements = [];
+
+    if (recurringScheduleId) {
+      const weekday = new Date(`${startDate}T12:00:00.000Z`).getUTCDay();
+      statements.push(
+        d1
+          .prepare(
+            `INSERT INTO recurring_schedules (
+              id, establishment_id, dog_id, service_catalog_id,
+              weekdays_mask, starts_on, ends_on, start_time, end_time,
+              fixed_price_cents, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active',
+              ${nowExpression}, ${nowExpression})`,
+          )
+          .bind(
+            recurringScheduleId,
+            establishmentId,
+            dog.id,
+            service.id,
+            1 << weekday,
+            startDate,
+            occurrenceDates.at(-1)!,
+            startTime,
+            endTime,
+            priceCents,
+          ),
+      );
+    }
+
+    for (const appointmentChunk of chunksOf(createdAppointments, 5)) {
+      const placeholders = appointmentChunk
+        .map(
+          () =>
+            `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?,
+              ${nowExpression}, ${nowExpression})`,
+        )
+        .join(", ");
+      statements.push(
+        d1
+          .prepare(
+            `INSERT INTO appointments (
+              id, establishment_id, account_id, dog_id, start_date, end_date,
+              start_time, end_time, lodging_nights, deposit_percent, status,
+              source, recurring_schedule_id, occurrence_date, internal_notes,
+              created_by_user_id, created_at, updated_at
+            ) VALUES ${placeholders}`,
+          )
+          .bind(
+            ...appointmentChunk.flatMap((created) => [
+              created.id,
+              establishmentId,
+              dog.accountId,
+              dog.id,
+              created.startDate,
+              created.endDate,
+              startTime,
+              endTime,
+              service.code === "hotel" ? lodgingNights : null,
+              service.code === "hotel" ? depositPercent : null,
+              recurringScheduleId ? "recurring" : "manual",
+              recurringScheduleId,
+              recurringScheduleId ? created.startDate : null,
+              internalNotes,
+              identity.userId,
+            ]),
+          ),
+      );
+    }
+
+    for (const itemChunk of chunksOf(createdAppointments, 10)) {
+      const placeholders = itemChunk
+        .map(
+          () =>
+            `(?, ?, ?, ?, ?, ?, 1, ?, 'scheduled', ?, 'unsettled',
+              ${nowExpression}, ${nowExpression})`,
+        )
+        .join(", ");
+      statements.push(
+        d1
+          .prepare(
+            `INSERT INTO appointment_items (
+              id, appointment_id, service_catalog_id, service_name_snapshot,
+              description_snapshot, unit_price_cents, quantity, total_cents,
+              status, payment_preference, settlement_method, created_at,
+              updated_at
+            ) VALUES ${placeholders}`,
+          )
+          .bind(
+            ...itemChunk.flatMap((created) => [
+              created.itemId,
+              created.id,
+              service.id,
+              service.name,
+              description,
+              priceCents,
+              priceCents,
+              paymentPreference,
+            ]),
+          ),
+      );
+    }
+
+    const auditId = crypto.randomUUID();
+    statements.push(
+      d1
+        .prepare(
+          `INSERT INTO audit_events (
+            id, establishment_id, actor_user_id, actor_role, action,
+            entity_type, entity_id, request_id, result, metadata_json,
+            occurred_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'success', ?, ${nowExpression})`,
+        )
+        .bind(
+          auditId,
+          establishmentId,
+          identity.userId,
+          identity.role,
+          recurringScheduleId
+            ? "recurring_schedule.created"
+            : "appointment.created",
+          recurringScheduleId ? "recurring_schedule" : "appointment",
+          recurringScheduleId ?? createdAppointments[0].id,
+          requestId,
+          JSON.stringify({
+            appointmentIds: createdAppointments.map((item) => item.id),
+            occurrenceCount: createdAppointments.length,
+            dogId: dog.id,
+            serviceCatalogId: service.id,
+            paymentPreference,
+            transportDirection:
+              service.code === "taxi_dog" ? direction : null,
+            lodgingNights:
+              service.code === "hotel" ? lodgingNights : null,
+            depositPercent:
+              service.code === "hotel" ? depositPercent : null,
+          }),
+        ),
+    );
+    await d1.batch(statements);
 
     return json(
       {
         appointment: {
-          id: appointmentId,
-          itemId,
+          id: createdAppointments[0].id,
+          itemId: createdAppointments[0].itemId,
           dogId: dog.id,
           dogName: dog.name,
           serviceName: service.name,
           priceCents,
-          startDate,
-          endDate,
+          startDate: createdAppointments[0].startDate,
+          endDate: createdAppointments[0].endDate,
           startTime,
           endTime,
           status: "scheduled",
           paymentPreference,
           settlementMethod: "unsettled",
+          recurringScheduleId,
         },
+        appointments: createdAppointments.map((item) => ({
+          ...item,
+          recurringScheduleId,
+        })),
       },
       { status: 201 },
     );

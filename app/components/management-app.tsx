@@ -556,10 +556,14 @@ async function deliverInvoice(
 function recurrenceDates(
   startDate: string,
   recurrence: "none" | "weekly",
+  recurrenceCount = 12,
 ) {
   if (recurrence === "none") return [startDate];
   if (recurrence === "weekly") {
-    return [0, 7, 14, 21].map((days) => shiftDate(startDate, days));
+    return Array.from(
+      { length: recurrenceCount },
+      (_, index) => shiftDate(startDate, index * 7),
+    );
   }
   return [startDate];
 }
@@ -650,6 +654,11 @@ export function ManagementApp() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [bookingToCancel, setBookingToCancel] = useState<Booking | null>(null);
   const [bookingToEdit, setBookingToEdit] = useState<Booking | null>(null);
+  const [editDraftType, setEditDraftType] =
+    useState<ServiceType>("daycare");
+  const [editDraftTransportDirection, setEditDraftTransportDirection] =
+    useState<"one_way" | "round_trip">("one_way");
+  const [editDraftHasDeposit, setEditDraftHasDeposit] = useState(false);
   const [dogToEdit, setDogToEdit] = useState<Dog | null>(null);
   const [customerToEdit, setCustomerToEdit] = useState<Customer | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -666,6 +675,9 @@ export function ManagementApp() {
   const [serviceDraftTransportDirection, setServiceDraftTransportDirection] =
     useState<"one_way" | "round_trip">("one_way");
   const [serviceDraftHasDeposit, setServiceDraftHasDeposit] = useState(false);
+  const [serviceDraftRecurrence, setServiceDraftRecurrence] = useState<
+    "none" | "weekly"
+  >("none");
   const [daycareStartTime, setDaycareStartTime] = useState("07:30");
   const [daycareEndTime, setDaycareEndTime] = useState("19:30");
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
@@ -1045,6 +1057,7 @@ export function ManagementApp() {
     setServiceDraftType("daycare");
     setServiceDraftPayment("invoice");
     setServiceDraftHasDeposit(false);
+    setServiceDraftRecurrence("none");
     setDialog("service");
   }
 
@@ -1082,6 +1095,7 @@ export function ManagementApp() {
   async function updateBookingStatus(
     booking: Booking,
     status: BookingStatus,
+    recurrenceScope: "occurrence" | "series" = "occurrence",
   ) {
     const previous = booking.status;
 
@@ -1137,7 +1151,10 @@ export function ManagementApp() {
               body: JSON.stringify({
                 status,
                 ...(status === "cancelled" && booking.note
-                  ? { cancellationReason: booking.note }
+                  ? {
+                      cancellationReason: booking.note,
+                      recurrenceScope,
+                    }
                   : {}),
               }),
             },
@@ -1153,7 +1170,9 @@ export function ManagementApp() {
                 ? `Atendimento de ${booking.dogName} concluído e pronto para faturamento.`
                 : `Atendimento de ${booking.dogName} concluído.`
               : status === "cancelled"
-                ? `Atendimento de ${booking.dogName} cancelado.`
+                ? recurrenceScope === "series"
+                  ? `Recorrência de ${booking.dogName} cancelada.`
+                  : `Atendimento de ${booking.dogName} cancelado.`
                 : previous === "completed"
                   ? `Atendimento de ${booking.dogName} reaberto.`
                 : `Situação de ${booking.dogName} atualizada.`,
@@ -1305,6 +1324,11 @@ export function ManagementApp() {
 
     setBookings((current) =>
       current.map((item) =>
+        (recurrenceScope === "series" &&
+          booking.recurringScheduleId &&
+          item.recurringScheduleId === booking.recurringScheduleId &&
+          item.status !== "completed" &&
+          item.status !== "cancelled") ||
         item.id === booking.id
           ? {
               ...item,
@@ -1365,6 +1389,11 @@ export function ManagementApp() {
 
   function openBookingEditor(booking: Booking) {
     setBookingToEdit(booking);
+    setEditDraftType(booking.serviceType);
+    setEditDraftTransportDirection(
+      booking.transportDirection ?? "one_way",
+    );
+    setEditDraftHasDeposit(Boolean(booking.depositPercent));
     setDialog("editService");
     setOpenMenuId(null);
   }
@@ -1386,15 +1415,58 @@ export function ManagementApp() {
     const date = String(form.get("date") ?? "");
     const time = String(form.get("time") ?? "");
     const endTime = String(form.get("endTime") ?? "");
+    const endDate = String(form.get("endDate") ?? date);
     const serviceType = String(form.get("serviceType") ?? "") as ServiceType;
-    const priceCents = Math.round(Number(form.get("price") ?? 0) * 100);
-    if (!date || !time || !serviceType || priceCents < 0) {
+    const transportDirection: "one_way" | "round_trip" =
+      String(form.get("transportDirection") ?? "one_way") === "round_trip"
+        ? "round_trip"
+        : "one_way";
+    const lodgingNights = Number(form.get("lodgingNights") ?? 0);
+    const depositPercent =
+      form.get("hasDeposit") === "on"
+        ? Number(form.get("depositPercent") ?? 50)
+        : null;
+    const priceCents =
+      serviceType === "transport"
+        ? transportDirection === "round_trip"
+          ? 1_000
+          : 500
+        : Math.round(Number(form.get("price") ?? 0) * 100);
+    if (
+      !date ||
+      !serviceType ||
+      priceCents < 0 ||
+      (serviceType !== "transport" &&
+        serviceType !== "hotel" &&
+        !time)
+    ) {
       setToast({ message: "Revise os campos do serviço." });
       return;
     }
-    if (endTime && endTime <= time) {
+    if (time && endTime && endTime <= time && endDate === date) {
       setToast({ message: "O horário final deve ser posterior ao inicial." });
       return;
+    }
+    if (serviceType === "hotel") {
+      const calendarDays = endDate
+        ? Math.round(
+            (dateFromIso(endDate).valueOf() - dateFromIso(date).valueOf()) /
+              86_400_000,
+          )
+        : 0;
+      if (
+        calendarDays < 1 ||
+        lodgingNights < 1 ||
+        Math.round(lodgingNights * 2) !== lodgingNights * 2 ||
+        lodgingNights < calendarDays ||
+        lodgingNights > calendarDays + 0.5
+      ) {
+        setToast({
+          message:
+            "Revise a saída e as diárias. Use o período em dias ou acrescente meia diária.",
+        });
+        return;
+      }
     }
     const paymentPreference: Booking["paymentPreference"] =
       creditServiceTypes.includes(serviceType as CreditServiceType) &&
@@ -1420,13 +1492,20 @@ export function ManagementApp() {
               method: "PATCH",
               body: JSON.stringify({
                 startDate: date,
-                endDate: date,
-                startTime: time,
-                endTime: endTime || null,
+                endDate: serviceType === "hotel" ? endDate : date,
+                startTime:
+                  serviceType === "transport" ? null : time || null,
+                endTime:
+                  serviceType === "transport" ? null : endTime || null,
                 serviceCatalogId: service.id,
                 priceCents,
                 paymentPreference,
                 internalNotes: note ?? null,
+                transportDirection,
+                lodgingNights:
+                  serviceType === "hotel" ? lodgingNights : null,
+                depositPercent:
+                  serviceType === "hotel" ? depositPercent : null,
               }),
             },
           ),
@@ -1450,10 +1529,25 @@ export function ManagementApp() {
             ? {
                 ...booking,
                 date,
-                time,
+                endDate:
+                  serviceType === "hotel" ? endDate : undefined,
+                time:
+                  serviceType === "transport"
+                    ? "Sem horário"
+                    : time || "Sem horário",
                 endTime: endTime || undefined,
+                lodgingNights:
+                  serviceType === "hotel" ? lodgingNights : undefined,
+                depositPercent:
+                  serviceType === "hotel"
+                    ? depositPercent ?? undefined
+                    : undefined,
                 serviceType,
                 service: serviceLabels[serviceType],
+                transportDirection:
+                  serviceType === "transport"
+                    ? transportDirection
+                    : undefined,
                 priceCents,
                 paymentPreference,
                 note,
@@ -1688,7 +1782,7 @@ export function ManagementApp() {
     setToast({ message: "Cadastro do cliente atualizado." });
   }
 
-  function submitCancellation(event: FormEvent<HTMLFormElement>) {
+  async function submitCancellation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!bookingToCancel) return;
     const form = new FormData(event.currentTarget);
@@ -1697,9 +1791,15 @@ export function ManagementApp() {
       setToast({ message: "Informe o motivo do cancelamento." });
       return;
     }
-    updateBookingStatus(
+    const recurrenceScope =
+      bookingToCancel.recurringScheduleId &&
+      String(form.get("recurrenceScope") ?? "occurrence") === "series"
+        ? "series"
+        : "occurrence";
+    await updateBookingStatus(
       { ...bookingToCancel, note: reason },
       "cancelled",
+      recurrenceScope,
     );
     setDialog(null);
     setBookingToCancel(null);
@@ -1722,6 +1822,10 @@ export function ManagementApp() {
     const recurrence = String(form.get("recurrence") ?? "none") as
       | "none"
       | "weekly";
+    const recurrenceCount =
+      recurrence === "weekly"
+        ? Number(form.get("recurrenceCount") ?? 12)
+        : 1;
 
     if (!dog || !serviceType || !date || (serviceType !== "transport" && serviceType !== "hotel" && !time)) {
       setToast({ message: "Revise os campos obrigatórios." });
@@ -1752,8 +1856,20 @@ export function ManagementApp() {
       setToast({ message: "O horário final deve ser posterior ao inicial." });
       return;
     }
+    if (
+      !Number.isSafeInteger(recurrenceCount) ||
+      recurrenceCount < 1 ||
+      recurrenceCount > 52
+    ) {
+      setToast({ message: "Informe uma duração entre 1 e 52 semanas." });
+      return;
+    }
 
-    const scheduledDates = recurrenceDates(date, recurrence);
+    const scheduledDates = recurrenceDates(
+      date,
+      recurrence,
+      recurrenceCount,
+    );
     const priceCents = serviceType === "transport" ? (transportDirection === "round_trip" ? 1_000 : 500) : Math.max(0, Math.round(price * 100));
     const paymentPreference: Booking["paymentPreference"] =
       creditServiceTypes.includes(serviceType as CreditServiceType) &&
@@ -1772,46 +1888,35 @@ export function ManagementApp() {
       }
       const result = await runLiveAction(
         `new-service:${dog.id}`,
-        async () => {
-          const created: Array<{ appointment: { id: string } }> = [];
-          try {
-            for (const scheduledDate of scheduledDates) {
-              created.push(
-                await requestJson<{ appointment: { id: string } }>(
-                  "/api/appointments",
-                  {
-                    method: "POST",
-                    body: JSON.stringify({
-                      dogId: dog.id,
-                      serviceCatalogId: service.id,
-                      startDate: scheduledDate,
-                      endDate: serviceType === "hotel" ? endDate : scheduledDate,
-                      startTime: serviceType === "transport" ? undefined : time || undefined,
-                      endTime: serviceType === "transport" ? undefined : endTime || undefined,
-                      internalNotes: note,
-                      paymentPreference,
-                      priceCents,
-                      transportDirection,
-                      lodgingNights: serviceType === "hotel" ? lodgingNights : undefined,
-                      depositPercent: serviceType === "hotel" ? depositPercent : undefined,
-                    }),
-                  },
-                ),
-              );
-            }
-          } catch (error) {
-            if (created.length > 0) {
-              await refreshWorkspace();
-              throw new ApiRequestError(
-                `${created.length} atendimento(s) foram salvos, mas a sequência não pôde ser concluída. ${
-                  error instanceof Error ? error.message : ""
-                }`.trim(),
-              );
-            }
-            throw error;
-          }
-          return created;
-        },
+        () =>
+          requestJson<{
+            appointment: { id: string };
+            appointments: Array<{ id: string }>;
+          }>("/api/appointments", {
+            method: "POST",
+            body: JSON.stringify({
+              dogId: dog.id,
+              serviceCatalogId: service.id,
+              startDate: date,
+              endDate: serviceType === "hotel" ? endDate : date,
+              startTime:
+                serviceType === "transport" ? undefined : time || undefined,
+              endTime:
+                serviceType === "transport"
+                  ? undefined
+                  : endTime || undefined,
+              internalNotes: note,
+              paymentPreference,
+              priceCents,
+              transportDirection,
+              lodgingNights:
+                serviceType === "hotel" ? lodgingNights : undefined,
+              depositPercent:
+                serviceType === "hotel" ? depositPercent : undefined,
+              recurrence,
+              recurrenceCount,
+            }),
+          }),
         {
           refresh: true,
           successMessage:
@@ -1828,12 +1933,26 @@ export function ManagementApp() {
       return;
     }
 
+    const recurringScheduleId =
+      recurrence === "weekly" ? `recurring-${crypto.randomUUID()}` : undefined;
+    const lodgingDurationDays =
+      serviceType === "hotel"
+        ? Math.round(
+            (dateFromIso(endDate).valueOf() - dateFromIso(date).valueOf()) /
+              86_400_000,
+          )
+        : 0;
     const newBookings: Booking[] = scheduledDates.map((scheduledDate) => ({
         id: `booking-${crypto.randomUUID()}`,
+        recurringScheduleId,
+        occurrenceDate: recurringScheduleId ? scheduledDate : undefined,
         date: scheduledDate,
         time: serviceType === "transport" ? "Sem horário" : time || "Sem horário",
         endTime: endTime || undefined,
-        endDate: serviceType === "hotel" ? endDate : undefined,
+        endDate:
+          serviceType === "hotel"
+            ? shiftDate(scheduledDate, lodgingDurationDays)
+            : undefined,
         lodgingNights: serviceType === "hotel" ? lodgingNights : undefined,
         depositPercent: serviceType === "hotel" ? depositPercent ?? undefined : undefined,
         dogId: dog.id,
@@ -3361,6 +3480,14 @@ export function ManagementApp() {
                 onBack={() => setSelectedDogId(null)}
                 onEdit={() => openDogEditor(selectedDog)}
                 onNewService={() => openServiceDialog(selectedDog.id)}
+                receipts={receipts}
+                onAdvance={advanceBooking}
+                onMenu={setOpenMenuId}
+                openMenuId={openMenuId}
+                onEditBooking={openBookingEditor}
+                onCancelBooking={askToCancel}
+                onOpenReceipt={openReceipt}
+                onLodgingInvoice={issueLodgingInvoice}
               />
             ) : (
               <DogsView
@@ -3403,6 +3530,12 @@ export function ManagementApp() {
                 onAddCredits={() => openCreditPackage(selectedCustomer.id)}
                 onOpenReceipt={openReceipt}
                 onNewService={() => openServiceDialog()}
+                onAdvance={advanceBooking}
+                onMenu={setOpenMenuId}
+                openMenuId={openMenuId}
+                onEditBooking={openBookingEditor}
+                onCancelBooking={askToCancel}
+                onLodgingInvoice={issueLodgingInvoice}
               />
             ) : (
               <CustomersView
@@ -3649,11 +3782,36 @@ export function ManagementApp() {
             </label>
             <label className="field">
               <span>Recorrência</span>
-              <select name="recurrence" defaultValue="none">
+              <select
+                name="recurrence"
+                value={serviceDraftRecurrence}
+                onChange={(event) =>
+                  setServiceDraftRecurrence(
+                    event.target.value as "none" | "weekly",
+                  )
+                }
+              >
                 <option value="none">Não repetir</option>
                 <option value="weekly">Toda semana</option>
               </select>
             </label>
+            {serviceDraftRecurrence === "weekly" && (
+              <label className="field">
+                <span>Repetir por quantas semanas? *</span>
+                <input
+                  name="recurrenceCount"
+                  type="number"
+                  min="2"
+                  max="52"
+                  step="1"
+                  defaultValue="12"
+                  required
+                />
+                <small>
+                  Cada semana ficará ligada à mesma recorrência.
+                </small>
+              </label>
+            )}
             <label className="field full">
               <span>Forma de quitação ao concluir</span>
               <select
@@ -3719,7 +3877,9 @@ export function ManagementApp() {
         >
           <form className="form-grid" onSubmit={submitBookingEdit}>
             <label className="field">
-              <span>Data *</span>
+              <span>
+                {editDraftType === "hotel" ? "Entrada *" : "Data *"}
+              </span>
               <input
                 name="date"
                 type="date"
@@ -3728,19 +3888,36 @@ export function ManagementApp() {
                 required
               />
             </label>
+            {editDraftType === "hotel" && (
+              <label className="field">
+                <span>Saída *</span>
+                <input
+                  name="endDate"
+                  type="date"
+                  defaultValue={
+                    bookingToEdit.endDate ??
+                    shiftDate(bookingToEdit.date, 1)
+                  }
+                  required
+                />
+              </label>
+            )}
             <label className="field">
               <span>Serviço *</span>
               <select
                 name="serviceType"
-                defaultValue={bookingToEdit.serviceType}
+                value={editDraftType}
                 onChange={(event) => {
+                  const next = event.target.value as ServiceType;
+                  setEditDraftType(next);
+                  if (next !== "hotel") setEditDraftHasDeposit(false);
                   const form = event.currentTarget.form;
                   const price = form?.elements.namedItem("price") as
                     | HTMLInputElement
                     | null;
                   if (price) {
                     price.value = String(
-                      servicePrices[event.target.value as ServiceType] / 100,
+                      servicePrices[next] / 100,
                     );
                   }
                 }}
@@ -3752,31 +3929,120 @@ export function ManagementApp() {
                 ))}
               </select>
             </label>
-            <label className="field">
-              <span>Horário inicial *</span>
-              <input
-                name="time"
-                type="time"
-                defaultValue={bookingToEdit.time}
-                required
-              />
-            </label>
-            <label className="field">
-              <span>Horário final</span>
-              <input
-                name="endTime"
-                type="time"
-                defaultValue={bookingToEdit.endTime}
-              />
-            </label>
+            {editDraftType !== "transport" && (
+              <>
+                <label className="field">
+                  <span>
+                    {editDraftType === "hotel"
+                      ? "Horário de entrada (opcional)"
+                      : "Horário inicial *"}
+                  </span>
+                  <input
+                    name="time"
+                    type="time"
+                    defaultValue={
+                      bookingToEdit.time === "Sem horário"
+                        ? ""
+                        : bookingToEdit.time
+                    }
+                    required={editDraftType !== "hotel"}
+                  />
+                </label>
+                <label className="field">
+                  <span>
+                    {editDraftType === "hotel"
+                      ? "Horário de saída (opcional)"
+                      : "Horário final"}
+                  </span>
+                  <input
+                    name="endTime"
+                    type="time"
+                    defaultValue={bookingToEdit.endTime}
+                  />
+                </label>
+              </>
+            )}
+            {editDraftType === "transport" && (
+              <label className="field">
+                <span>Trajeto *</span>
+                <select
+                  name="transportDirection"
+                  value={editDraftTransportDirection}
+                  onChange={(event) =>
+                    setEditDraftTransportDirection(
+                      event.target.value as "one_way" | "round_trip",
+                    )
+                  }
+                >
+                  <option value="one_way">Ida · R$ 5,00</option>
+                  <option value="round_trip">
+                    Ida e volta · R$ 10,00
+                  </option>
+                </select>
+              </label>
+            )}
+            {editDraftType === "hotel" && (
+              <>
+                <label className="field">
+                  <span>Número de diárias *</span>
+                  <input
+                    name="lodgingNights"
+                    type="number"
+                    min="1"
+                    step="0.5"
+                    defaultValue={bookingToEdit.lodgingNights ?? 1}
+                    required
+                  />
+                </label>
+                <label className="check-field">
+                  <input
+                    name="hasDeposit"
+                    type="checkbox"
+                    checked={editDraftHasDeposit}
+                    onChange={(event) =>
+                      setEditDraftHasDeposit(event.target.checked)
+                    }
+                  />
+                  <span>Cobrar sinal no check-in</span>
+                </label>
+                {editDraftHasDeposit && (
+                  <label className="field">
+                    <span>Sinal no check-in (%)</span>
+                    <input
+                      name="depositPercent"
+                      type="number"
+                      min="1"
+                      max="99"
+                      defaultValue={bookingToEdit.depositPercent ?? 50}
+                      required
+                    />
+                  </label>
+                )}
+              </>
+            )}
             <label className="field">
               <span>Valor aplicado (R$) *</span>
               <input
+                key={`${editDraftType}-${editDraftTransportDirection}`}
                 name="price"
                 type="number"
                 min="0"
                 step="0.01"
-                defaultValue={(bookingToEdit.priceCents / 100).toFixed(2)}
+                defaultValue={
+                  editDraftType === "transport"
+                    ? editDraftTransportDirection === "round_trip"
+                      ? "10.00"
+                      : "5.00"
+                    : editDraftType === bookingToEdit.serviceType
+                    ? (bookingToEdit.priceCents / 100).toFixed(2)
+                    : (
+                        servicePrices[editDraftType] / 100
+                      ).toFixed(2)
+                }
+                readOnly={
+                  editDraftType === "transport" ||
+                  signedInRole !== "owner"
+                }
                 required
               />
             </label>
@@ -4190,6 +4456,37 @@ export function ManagementApp() {
               <span>Motivo do cancelamento *</span>
               <textarea name="reason" rows={3} autoFocus required />
             </label>
+            {bookingToCancel.recurringScheduleId && (
+              <fieldset className="field full">
+                <legend>O que deseja cancelar?</legend>
+                <label className="radio-option">
+                  <input
+                    name="recurrenceScope"
+                    type="radio"
+                    value="occurrence"
+                    defaultChecked
+                  />
+                  <span>
+                    <strong>Somente este dia</strong>
+                    <small>As outras semanas continuam agendadas.</small>
+                  </span>
+                </label>
+                <label className="radio-option">
+                  <input
+                    name="recurrenceScope"
+                    type="radio"
+                    value="series"
+                  />
+                  <span>
+                    <strong>Toda a recorrência</strong>
+                    <small>
+                      Cancela todos os agendamentos ainda abertos desta série.
+                      Atendimentos já concluídos permanecem no histórico.
+                    </small>
+                  </span>
+                </label>
+              </fieldset>
+            )}
             <div className="dialog-actions full">
               <button
                 className="secondary-button"
@@ -5191,6 +5488,11 @@ function AgendaCard({
         </div>
         <p>{booking.service}</p>
         <small>{booking.customerName}</small>
+        {booking.recurringScheduleId && (
+          <span className="settlement-note recurrence">
+            Recorrência semanal
+          </span>
+        )}
         {booking.paymentPreference === "credit" &&
           booking.settlementStatus !== "credit_used" && (
             <span className="settlement-note credit">
@@ -5360,6 +5662,112 @@ function DogsView({
   );
 }
 
+function ProfileAppointments({
+  bookings,
+  dogs,
+  receipts,
+  onAdvance,
+  onMenu,
+  openMenuId,
+  onEdit,
+  onCancel,
+  onOpenReceipt,
+  onLodgingInvoice,
+}: {
+  bookings: Booking[];
+  dogs: Dog[];
+  receipts: ServiceReceipt[];
+  onAdvance: (booking: Booking) => void;
+  onMenu: (id: string | null) => void;
+  openMenuId: string | null;
+  onEdit: (booking: Booking) => void;
+  onCancel: (booking: Booking) => void;
+  onOpenReceipt: (receipt: ServiceReceipt) => void;
+  onLodgingInvoice: (
+    booking: Booking,
+    kind: "deposit" | "balance",
+  ) => void;
+}) {
+  const openBookings = bookings
+    .filter(
+      (booking) =>
+        booking.status !== "completed" && booking.status !== "cancelled",
+    )
+    .sort((left, right) =>
+      `${left.date}-${left.time}`.localeCompare(
+        `${right.date}-${right.time}`,
+      ),
+    );
+  const historyBookings = bookings
+    .filter(
+      (booking) =>
+        booking.status === "completed" || booking.status === "cancelled",
+    )
+    .sort((left, right) =>
+      `${right.date}-${right.time}`.localeCompare(
+        `${left.date}-${left.time}`,
+      ),
+    );
+
+  function renderBooking(booking: Booking) {
+    return (
+      <AgendaCard
+        key={booking.id}
+        booking={booking}
+        dog={dogs.find((dog) => dog.id === booking.dogId)}
+        onAdvance={onAdvance}
+        openMenu={openMenuId === booking.id}
+        onMenu={() =>
+          onMenu(openMenuId === booking.id ? null : booking.id)
+        }
+        onEdit={onEdit}
+        onCancel={onCancel}
+        receipt={receipts.find(
+          (receipt) => receipt.number === booking.receiptNumber,
+        )}
+        onOpenReceipt={onOpenReceipt}
+        onLodgingInvoice={onLodgingInvoice}
+      />
+    );
+  }
+
+  if (!bookings.length) {
+    return (
+      <EmptyState
+        title="Nenhum serviço neste período"
+        description="Use “Novo serviço” para criar o primeiro agendamento."
+      />
+    );
+  }
+
+  return (
+    <div className="profile-appointment-groups">
+      {openBookings.length > 0 && (
+        <section>
+          <div className="agenda-day-divider">
+            <span>Próximos e em andamento</span>
+            <span>{openBookings.length}</span>
+          </div>
+          <div className="agenda-list spacious">
+            {openBookings.map(renderBooking)}
+          </div>
+        </section>
+      )}
+      {historyBookings.length > 0 && (
+        <section>
+          <div className="agenda-day-divider">
+            <span>Histórico recente</span>
+            <span>{historyBookings.length}</span>
+          </div>
+          <div className="agenda-list spacious">
+            {historyBookings.map(renderBooking)}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
 function DogProfile({
   dog,
   creditBalances,
@@ -5367,6 +5775,14 @@ function DogProfile({
   onBack,
   onEdit,
   onNewService,
+  receipts,
+  onAdvance,
+  onMenu,
+  openMenuId,
+  onEditBooking,
+  onCancelBooking,
+  onOpenReceipt,
+  onLodgingInvoice,
 }: {
   dog: Dog;
   creditBalances: CreditBalances;
@@ -5374,6 +5790,17 @@ function DogProfile({
   onBack: () => void;
   onEdit: () => void;
   onNewService: () => void;
+  receipts: ServiceReceipt[];
+  onAdvance: (booking: Booking) => void;
+  onMenu: (id: string | null) => void;
+  openMenuId: string | null;
+  onEditBooking: (booking: Booking) => void;
+  onCancelBooking: (booking: Booking) => void;
+  onOpenReceipt: (receipt: ServiceReceipt) => void;
+  onLodgingInvoice: (
+    booking: Booking,
+    kind: "deposit" | "balance",
+  ) => void;
 }) {
   const [tab, setTab] = useState("Resumo");
   const balances = creditBalances[dog.customerId] ?? {
@@ -5488,21 +5915,18 @@ function DogProfile({
       )}
       {tab === "Agenda e histórico" && (
         <section className="panel full-panel">
-          <div className="timeline">
-            {bookings.map((booking) => (
-              <div className="timeline-item" key={booking.id}>
-                <span className={`timeline-dot service-${booking.serviceType}`} />
-                <div>
-                  <small>
-                    {formatShortDate(booking.date)} · {booking.time}
-                  </small>
-                  <strong>{booking.service}</strong>
-                  <p>{statusLabels[booking.status]}</p>
-                </div>
-                <span>{formatCurrency(booking.priceCents)}</span>
-              </div>
-            ))}
-          </div>
+          <ProfileAppointments
+            bookings={bookings}
+            dogs={[dog]}
+            receipts={receipts}
+            onAdvance={onAdvance}
+            onMenu={onMenu}
+            openMenuId={openMenuId}
+            onEdit={onEditBooking}
+            onCancel={onCancelBooking}
+            onOpenReceipt={onOpenReceipt}
+            onLodgingInvoice={onLodgingInvoice}
+          />
         </section>
       )}
       {tab === "Saúde e cuidados" && (
@@ -5673,6 +6097,12 @@ function CustomerProfile({
   onAddCredits,
   onOpenReceipt,
   onNewService,
+  onAdvance,
+  onMenu,
+  openMenuId,
+  onEditBooking,
+  onCancelBooking,
+  onLodgingInvoice,
 }: {
   customer: Customer;
   dogs: Dog[];
@@ -5688,6 +6118,15 @@ function CustomerProfile({
   onAddCredits: () => void;
   onOpenReceipt: (receipt: ServiceReceipt) => void;
   onNewService: () => void;
+  onAdvance: (booking: Booking) => void;
+  onMenu: (id: string | null) => void;
+  openMenuId: string | null;
+  onEditBooking: (booking: Booking) => void;
+  onCancelBooking: (booking: Booking) => void;
+  onLodgingInvoice: (
+    booking: Booking,
+    kind: "deposit" | "balance",
+  ) => void;
 }) {
   const [tab, setTab] = useState("Resumo");
   const balances = creditBalances[customer.id] ?? {
@@ -5794,27 +6233,18 @@ function CustomerProfile({
       )}
       {tab === "Serviços" && (
         <section className="panel full-panel">
-          <div className="timeline">
-            {dogs.flatMap((dog) =>
-              bookings
-                .filter((booking) => booking.dogId === dog.id)
-                .map((booking) => (
-                  <div className="timeline-item" key={booking.id}>
-                    <DogAvatar dog={dog} size="small" />
-                    <div>
-                      <small>
-                        {formatShortDate(booking.date)} · {booking.time}
-                      </small>
-                      <strong>
-                        {dog.name} · {booking.service}
-                      </strong>
-                      <p>{statusLabels[booking.status]}</p>
-                    </div>
-                    <span>{formatCurrency(booking.priceCents)}</span>
-                  </div>
-                )),
-            )}
-          </div>
+          <ProfileAppointments
+            bookings={bookings}
+            dogs={dogs}
+            receipts={receipts}
+            onAdvance={onAdvance}
+            onMenu={onMenu}
+            openMenuId={openMenuId}
+            onEdit={onEditBooking}
+            onCancel={onCancelBooking}
+            onOpenReceipt={onOpenReceipt}
+            onLodgingInvoice={onLodgingInvoice}
+          />
         </section>
       )}
       {tab === "Financeiro e créditos" && (

@@ -190,6 +190,7 @@ sections = [
                 [
                     "Avance o cartão na ordem apresentada: <b>Confirmar</b>, <b>Registrar chegada</b> e <b>Concluir atendimento</b>.",
                     "Use <b>Opções</b> para editar ou cancelar. O cancelamento exige um motivo e permanece no histórico.",
+                    "As mesmas ações aparecem em <b>Cães &gt; Agenda e histórico</b> e em <b>Clientes &gt; Serviços</b>.",
                 ],
             ),
         ],
@@ -224,6 +225,7 @@ sections = [
                     "A Creche usa os horários padrão das configurações. O Taxi-dog pede ida ou ida e volta e não exige horário.",
                     "O administrador pode alterar o preço de um atendimento sem mudar o padrão. Funcionários sempre usam o valor definido pela administração.",
                     "Escolha <b>Gerar fatura</b> ou <b>Usar 1 crédito</b>. Crédito está disponível para creche, banho, banho e tosa e Taxi-dog quando há saldo.",
+                    "Para repetir semanalmente, escolha <b>Toda semana</b> e informe de 2 a 52 semanas. Ao cancelar, escolha somente o dia ou toda a recorrência. A opção global preserva atendimentos concluídos e é bloqueada se houver cobrança ou pagamento.",
                 ],
             ),
             (

@@ -61,6 +61,189 @@ async function hasActiveInvoiceBilling(
   return Boolean(result?.found);
 }
 
+async function cancelRecurringSeries({
+  appointment,
+  cancellationReason,
+  establishmentId,
+  identity,
+  requestId,
+}: {
+  appointment: typeof appointments.$inferSelect;
+  cancellationReason: string;
+  establishmentId: string;
+  identity: Awaited<ReturnType<typeof requireIdentity>>;
+  requestId: string;
+}) {
+  if (!appointment.recurringScheduleId) {
+    throw new HttpError(
+      400,
+      "appointment_is_not_recurring",
+      "Este agendamento não pertence a uma recorrência.",
+    );
+  }
+
+  const d1 = getD1Database();
+  const seriesRows = await d1
+    .prepare(
+      `SELECT a.id
+      FROM appointments a
+      WHERE a.establishment_id = ?
+        AND a.recurring_schedule_id = ?
+        AND a.status NOT IN ('completed', 'cancelled')
+      ORDER BY a.start_date, a.start_time`,
+    )
+    .bind(establishmentId, appointment.recurringScheduleId)
+    .all<{ id: string }>();
+  const appointmentIds = seriesRows.results.map((row) => row.id);
+  if (appointmentIds.length === 0) {
+    return {
+      appointment,
+      items: [],
+      cancelledAppointmentIds: [],
+      idempotent: true,
+    };
+  }
+
+  const auditId = crypto.randomUUID();
+  const guardInsert = d1
+    .prepare(
+      `INSERT INTO audit_events (
+        id, establishment_id, actor_user_id, actor_role, action,
+        entity_type, entity_id, request_id, result, reason, metadata_json,
+        occurred_at
+      )
+      SELECT ?, rs.establishment_id, ?, ?,
+        'recurring_schedule.cancelled', 'recurring_schedule', rs.id, ?,
+        'success', ?, ?, ${nowExpression}
+      FROM recurring_schedules rs
+      WHERE rs.id = ?
+        AND rs.establishment_id = ?
+        AND EXISTS (
+          SELECT 1
+          FROM appointments open_a
+          WHERE open_a.recurring_schedule_id = rs.id
+            AND open_a.establishment_id = rs.establishment_id
+            AND open_a.status NOT IN ('completed', 'cancelled')
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM appointments locked_a
+          INNER JOIN appointment_items locked_ai
+            ON locked_ai.appointment_id = locked_a.id
+          LEFT JOIN invoice_items locked_ii
+            ON locked_ii.appointment_item_id = locked_ai.id
+          LEFT JOIN invoices locked_i
+            ON locked_i.id = locked_ii.invoice_id
+          WHERE locked_a.recurring_schedule_id = rs.id
+            AND locked_a.establishment_id = rs.establishment_id
+            AND locked_a.status NOT IN ('completed', 'cancelled')
+            AND (
+              locked_ai.active_invoice_id IS NOT NULL
+              OR locked_ai.settlement_method <> 'unsettled'
+              OR (locked_i.id IS NOT NULL AND locked_i.status <> 'void')
+            )
+        )`,
+    )
+    .bind(
+      auditId,
+      identity.userId,
+      identity.role,
+      requestId,
+      cancellationReason,
+      JSON.stringify({
+        appointmentIds,
+        occurrenceCount: appointmentIds.length,
+      }),
+      appointment.recurringScheduleId,
+      establishmentId,
+    );
+  const results = await d1.batch([
+    guardInsert,
+    d1
+      .prepare(
+        `UPDATE appointment_items
+        SET status = 'cancelled',
+          updated_at = ${nowExpression}
+        WHERE status = 'scheduled'
+          AND appointment_id IN (
+            SELECT a.id
+            FROM appointments a
+            WHERE a.establishment_id = ?
+              AND a.recurring_schedule_id = ?
+              AND a.status NOT IN ('completed', 'cancelled')
+          )
+          AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)`,
+      )
+      .bind(establishmentId, appointment.recurringScheduleId, auditId),
+    d1
+      .prepare(
+        `UPDATE appointments
+        SET status = 'cancelled',
+          cancellation_reason = ?,
+          updated_at = ${nowExpression}
+        WHERE establishment_id = ?
+          AND recurring_schedule_id = ?
+          AND status NOT IN ('completed', 'cancelled')
+          AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)`,
+      )
+      .bind(
+        cancellationReason,
+        establishmentId,
+        appointment.recurringScheduleId,
+        auditId,
+      ),
+    d1
+      .prepare(
+        `UPDATE recurring_schedules
+        SET status = 'ended',
+          updated_at = ${nowExpression}
+        WHERE id = ?
+          AND establishment_id = ?
+          AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)`,
+      )
+      .bind(appointment.recurringScheduleId, establishmentId, auditId),
+  ]);
+
+  if ((results[0].meta.changes ?? 0) !== 1) {
+    const locked = await Promise.all(
+      appointmentIds.map((candidateId) =>
+        hasActiveInvoiceBilling(candidateId, establishmentId),
+      ),
+    );
+    if (locked.some(Boolean)) {
+      throw new HttpError(
+        409,
+        "recurring_schedule_has_payment",
+        "Há uma ocorrência desta recorrência com fatura ou pagamento. Resolva a parte financeira antes de cancelar toda a série.",
+      );
+    }
+    throw new HttpError(
+      409,
+      "recurring_schedule_cancel_conflict",
+      "A recorrência foi alterada por outra operação. Atualize a agenda e tente novamente.",
+    );
+  }
+
+  const db = getDb();
+  const [[updatedAppointment], updatedItems] = await Promise.all([
+    db
+      .select()
+      .from(appointments)
+      .where(eq(appointments.id, appointment.id))
+      .limit(1),
+    db
+      .select()
+      .from(appointmentItems)
+      .where(eq(appointmentItems.appointmentId, appointment.id)),
+  ]);
+  return {
+    appointment: updatedAppointment,
+    items: updatedItems,
+    cancelledAppointmentIds: appointmentIds,
+    idempotent: false,
+  };
+}
+
 async function reopenCompletedAppointment({
   appointmentId,
   establishmentId,
@@ -468,6 +651,20 @@ export async function PATCH(
       "cancellationReason",
       500,
     );
+    const recurrenceScope =
+      body.recurrenceScope === undefined
+        ? "occurrence"
+        : requiredString(body, "recurrenceScope", 20);
+    if (
+      recurrenceScope !== "occurrence" &&
+      recurrenceScope !== "series"
+    ) {
+      throw new HttpError(
+        400,
+        "invalid_recurrence_scope",
+        "Escolha cancelar somente este dia ou toda a recorrência.",
+      );
+    }
     if (requestedStatus === "cancelled" && !cancellationReason) {
       throw new HttpError(
         400,
@@ -619,13 +816,71 @@ export async function PATCH(
           "O serviço selecionado não foi encontrado.",
         );
       }
+      const direction =
+        body.transportDirection === "round_trip"
+          ? "round_trip"
+          : "one_way";
+      const lodgingNights: number | null =
+        service.code === "hotel"
+          ? body.lodgingNights === undefined
+            ? appointment.lodgingNights
+            : typeof body.lodgingNights === "number"
+              ? body.lodgingNights
+              : Number.NaN
+          : null;
+      const depositPercent: number | null =
+        service.code === "hotel"
+          ? body.depositPercent === undefined
+            ? appointment.depositPercent
+            : body.depositPercent === null
+              ? null
+              : typeof body.depositPercent === "number"
+                ? body.depositPercent
+                : Number.NaN
+          : null;
+      if (service.code === "hotel") {
+        const calendarDays = Math.round(
+          (Date.parse(`${endDate}T00:00:00.000Z`) -
+            Date.parse(`${startDate}T00:00:00.000Z`)) /
+            86_400_000,
+        );
+        if (
+          typeof lodgingNights !== "number" ||
+          !Number.isFinite(lodgingNights) ||
+          lodgingNights < 1 ||
+          lodgingNights > 365 ||
+          Math.round(lodgingNights * 2) !== lodgingNights * 2 ||
+          calendarDays < 1 ||
+          lodgingNights < calendarDays ||
+          lodgingNights > calendarDays + 0.5
+        ) {
+          throw new HttpError(
+            400,
+            "invalid_lodging_nights",
+            "Revise a saída e informe as diárias em múltiplos de meio dia.",
+          );
+        }
+        if (
+          depositPercent !== null &&
+          (typeof depositPercent !== "number" ||
+            !Number.isInteger(depositPercent) ||
+            depositPercent < 1 ||
+            depositPercent > 99)
+        ) {
+          throw new HttpError(
+            400,
+            "invalid_deposit_percent",
+            "Informe um sinal entre 1% e 99%.",
+          );
+        }
+      }
       const catalogPriceCents =
         service.code === "hotel"
           ? Math.round(
-              service.basePriceCents * (appointment.lodgingNights ?? 1),
+              service.basePriceCents * (lodgingNights ?? 1),
             )
           : service.code === "taxi_dog"
-            ? item.descriptionSnapshot === "Ida e volta"
+            ? direction === "round_trip"
               ? 1_000
               : 500
             : service.basePriceCents;
@@ -651,6 +906,8 @@ export async function PATCH(
             endDate,
             startTime,
             endTime,
+            lodgingNights,
+            depositPercent,
             internalNotes,
             updatedAt: now,
           })
@@ -662,6 +919,14 @@ export async function PATCH(
             serviceNameSnapshot: service.name,
             unitPriceCents: priceCents,
             totalCents: priceCents,
+            descriptionSnapshot:
+              service.code === "taxi_dog"
+                ? direction === "round_trip"
+                  ? "Ida e volta"
+                  : "Ida"
+                : service.code === "hotel" && depositPercent
+                  ? `Sinal de ${depositPercent}% no check-in; saldo no check-out.`
+                  : null,
             paymentPreference,
             updatedAt: now,
           })
@@ -686,10 +951,14 @@ export async function PATCH(
           startTime,
           endTime,
           internalNotes,
+          lodgingNights,
+          depositPercent,
           serviceCatalogId: service.id,
           serviceName: service.name,
           priceCents,
           paymentPreference,
+          transportDirection:
+            service.code === "taxi_dog" ? direction : null,
         },
       });
     }
@@ -726,6 +995,28 @@ export async function PATCH(
         "appointment_is_final",
         "Um agendamento concluído ou cancelado não pode ter o status alterado.",
       );
+    }
+
+    if (
+      requestedStatus === "cancelled" &&
+      recurrenceScope === "series"
+    ) {
+      const result = await cancelRecurringSeries({
+        appointment,
+        cancellationReason: cancellationReason!,
+        establishmentId,
+        identity,
+        requestId,
+      });
+      return json({
+        appointment: {
+          ...result.appointment,
+          items: result.items,
+        },
+        cancelledAppointmentIds: result.cancelledAppointmentIds,
+        recurrenceScope,
+        idempotent: result.idempotent,
+      });
     }
 
     if (requestedStatus === "completed") {

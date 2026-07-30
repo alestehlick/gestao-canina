@@ -190,11 +190,18 @@ test("mantém o manual e os detalhes das faturas disponíveis", async () => {
 });
 
 test("separa acessos, protege o portal e registra pedidos dos clientes", async () => {
-  const [users, invitations, portal, requests, workspace, app, schema, migration] =
+  const [users, invitations, adminReset, portal, requests, workspace, app, schema, migration] =
     await Promise.all([
       readFile(new URL("../app/api/users/route.ts", import.meta.url), "utf8"),
       readFile(
         new URL("../app/api/auth/invitations/route.ts", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL(
+          "../app/api/users/[id]/password-reset/route.ts",
+          import.meta.url,
+        ),
         "utf8",
       ),
       readFile(new URL("../app/api/portal/route.ts", import.meta.url), "utf8"),
@@ -221,6 +228,8 @@ test("separa acessos, protege o portal e registra pedidos dos clientes", async (
   assert.match(users, /hashSessionToken\(oneTime\.token\)/);
   assert.match(invitations, /status = 'accepted'/);
   assert.match(invitations, /destination: invitation\.role === "customer"/);
+  assert.match(adminReset, /requireIdentity\(request, \["owner"\]\)/);
+  assert.match(adminReset, /resetUrl: actionUrl\.toString\(\)/);
   assert.match(portal, /requireIdentity\(request, \["customer"\]\)/);
   assert.match(portal, /eq\(dogs\.accountId, context\.accountId\)/);
   assert.match(requests, /customer\.request_created/);

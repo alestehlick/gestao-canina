@@ -5,7 +5,10 @@ import {
   appUsers,
   passwordResetTokens,
 } from "@/db/schema";
-import { sendAccessEmail } from "@/lib/server/email";
+import {
+  emailDeliveryConfigured,
+  sendAccessEmail,
+} from "@/lib/server/email";
 import {
   assertSameOrigin,
   errorResponse,
@@ -127,8 +130,9 @@ export async function POST(request: Request) {
     return json(
       {
         accepted: true,
-        message:
-          "Se existir uma conta ativa com este e-mail, enviaremos as instruções.",
+        message: emailDeliveryConfigured()
+          ? "Se existir uma conta ativa com este e-mail, enviaremos as instruções."
+          : "O envio automático ainda não está ativo. Peça a um administrador para gerar seu link seguro de recuperação.",
       },
       { status: 202 },
     );

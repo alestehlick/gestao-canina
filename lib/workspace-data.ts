@@ -979,6 +979,8 @@ function activityActionLabel(action: string) {
     "account.disabled": "Acesso de conta encerrado",
     "account.reactivated": "Acesso de conta reativado",
     "auth.password_reset_requested": "Recuperação de senha solicitada",
+    "auth.password_reset_requested_by_admin":
+      "Administrador gerou recuperação de senha",
     "auth.password_reset_completed": "Senha redefinida",
     "customer.request_created": "Cliente enviou um pedido",
     "customer_request.approved": "Pedido de cliente aprovado",

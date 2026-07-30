@@ -6768,6 +6768,9 @@ function AccessView({ customers }: { customers: Customer[] }) {
   const [invitations, setInvitations] = useState<AccessInvitation[]>([]);
   const [emailConfigured, setEmailConfigured] = useState(false);
   const [links, setLinks] = useState<Record<string, string>>({});
+  const [recoveryLinks, setRecoveryLinks] = useState<Record<string, string>>(
+    {},
+  );
   const [inviteRole, setInviteRole] = useState<"staff" | "customer">("staff");
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
@@ -6861,6 +6864,38 @@ function AccessView({ customers }: { customers: Customer[] }) {
         reason instanceof Error
           ? reason.message
           : "Não foi possível alterar o acesso.",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function createPasswordReset(user: AccessUser) {
+    if (busy || user.status !== "active") return;
+    setBusy(`reset-${user.id}`);
+    setNotice("");
+    setError("");
+    try {
+      const payload = await requestJson<{
+        passwordReset: {
+          resetUrl: string;
+          deliveryStatus: "sent" | "manual" | "failed";
+        };
+      }>(`/api/users/${user.id}/password-reset`, { method: "POST" });
+      setRecoveryLinks((current) => ({
+        ...current,
+        [user.id]: payload.passwordReset.resetUrl,
+      }));
+      setNotice(
+        payload.passwordReset.deliveryStatus === "sent"
+          ? `Recuperação enviada para ${user.email}.`
+          : "Link de recuperação criado. Copie-o e envie em particular; ele vale por 1 hora.",
+      );
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Não foi possível gerar a recuperação.",
       );
     } finally {
       setBusy("");
@@ -6996,15 +7031,41 @@ function AccessView({ customers }: { customers: Customer[] }) {
                   · {user.status === "active" ? "ativo" : "desativado"}
                 </em>
               </span>
-              {user.role !== "owner" && (
-                <button
-                  className="text-button"
-                  disabled={busy === user.id}
-                  onClick={() => void changeUser(user)}
-                >
-                  {user.status === "active" ? "Encerrar acesso" : "Reativar"}
-                </button>
-              )}
+              <div className="access-actions">
+                {recoveryLinks[user.id] && (
+                  <button
+                    className="secondary-button"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(
+                        recoveryLinks[user.id],
+                      );
+                      setNotice("Link de recuperação copiado.");
+                    }}
+                  >
+                    Copiar recuperação
+                  </button>
+                )}
+                {user.status === "active" && (
+                  <button
+                    className="text-button"
+                    disabled={busy === `reset-${user.id}`}
+                    onClick={() => void createPasswordReset(user)}
+                  >
+                    Redefinir senha
+                  </button>
+                )}
+                {user.role !== "owner" && (
+                  <button
+                    className="text-button"
+                    disabled={busy === user.id}
+                    onClick={() => void changeUser(user)}
+                  >
+                    {user.status === "active"
+                      ? "Encerrar acesso"
+                      : "Reativar"}
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>

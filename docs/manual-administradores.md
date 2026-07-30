@@ -178,7 +178,7 @@ Use **Aprovar** ou **Não aprovar** para devolver uma resposta ao portal do clie
 
 Em **Acessos**, use **Encerrar acesso** quando um funcionário sair ou um acesso de cliente não for mais necessário. As sessões abertas dessa conta são encerradas.
 
-Na tela de entrada, **Esqueci minha senha** envia um link de recuperação com validade curta. Nunca envie uma senha por mensagem.
+Na tela de entrada, **Esqueci minha senha** envia um link de recuperação com validade curta quando o e-mail automático está ativo. Se ele ainda não estiver, abra **Acessos**, use **Redefinir senha** na conta e compartilhe o link temporário em particular. Nunca envie uma senha por mensagem.
 
 ## Configurações e rotina
 

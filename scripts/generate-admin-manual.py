@@ -323,7 +323,7 @@ story.extend(
         ),
         Paragraph("16. Encerrar ou recuperar acesso", h2),
         Paragraph(
-            "Em Acessos, use <b>Encerrar acesso</b> quando necessário. As sessões dessa conta são interrompidas. Na entrada, <b>Esqueci minha senha</b> envia um link de recuperação com validade curta.",
+            "Em Acessos, use <b>Encerrar acesso</b> quando necessário. As sessões dessa conta são interrompidas. Se o e-mail automático ainda não estiver ativo, use <b>Redefinir senha</b> e compartilhe o link temporário em particular.",
             body,
         ),
         Paragraph("Configurações e rotina", h1),

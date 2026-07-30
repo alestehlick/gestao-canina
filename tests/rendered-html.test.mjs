@@ -18,7 +18,6 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.match(layout, /Hospet Quintal/);
   assert.match(layout, /\/favicon\.svg/);
   assert.match(page, /<ManagementApp \/>/);
-  assert.match(app, /Ambiente privado/);
   assert.match(app, /Demonstração segura/);
   assert.match(app, /\/api\/workspace/);
   assert.match(app, /Cloudflare/);
@@ -36,6 +35,92 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.doesNotMatch(app, /Mastercard|VISA|cart[aã]o de cr[eé]dito/);
   assert.match(styles, /\.billing-page\s*\{[^}]*min-width:\s*0;/s);
   assert.match(styles, /\.billing-page\s*>\s*\*\s*\{[^}]*min-width:\s*0;/s);
+});
+
+test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () => {
+  const [
+    schema,
+    cashRoute,
+    cashEntryRoute,
+    cashSettings,
+    payments,
+    workspace,
+    cashView,
+    app,
+    migration,
+  ] = await Promise.all([
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/cash/route.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../app/api/cash/[id]/route.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/api/cash/settings/route.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/api/invoices/[id]/payments/route.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../app/api/workspace/route.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../app/components/cash-view.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/components/management-app.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../drizzle/0007_cash_ledger.sql", import.meta.url),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(schema, /sqliteTable\(\s*"cash_entries"/);
+  assert.match(schema, /cashMonthStartDay/);
+  assert.match(schema, /cash_entries_source_payment_unique/);
+  assert.match(cashRoute, /requireIdentity\(request, \["owner"\]\)/);
+  assert.match(cashRoute, /between\(cashEntries\.occurredOn/);
+  assert.match(cashEntryRoute, /automatic_cash_entry_locked/);
+  assert.match(cashEntryRoute, /cash\.entry_excluded/);
+  assert.match(cashEntryRoute, /cash\.entry_restored/);
+  assert.doesNotMatch(cashEntryRoute, /export async function DELETE/);
+  assert.match(cashSettings, /min: 1/);
+  assert.match(cashSettings, /max: 28/);
+  assert.match(payments, /INSERT INTO cash_entries/);
+  assert.match(workspace, /cashEntryId/);
+  assert.match(cashView, /Entradas consideradas/);
+  assert.match(cashView, /Desconsiderar/);
+  assert.match(cashView, /Configurar início do mês financeiro/);
+  assert.match(app, /Considerar no Caixa/);
+  assert.match(migration, /FROM `invoice_payments` ip/);
+});
+
+test("mantém perfis e navegação móveis enxutos e completos", async () => {
+  const [app, styles, data, workspace] = await Promise.all([
+    readFile(
+      new URL("../app/components/management-app.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../lib/workspace-data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/workspace/route.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(app, /showDate/);
+  assert.match(app, /formatShortDate\(booking\.date\)/);
+  assert.doesNotMatch(app, /Documentos/);
+  assert.match(app, /dog\.feedingNotes \|\| "Não informada"/);
+  assert.match(app, /dog\.temperamentNotes \|\| "Não informado"/);
+  assert.match(app, /balances\.transport/);
+  assert.match(styles, /grid-template-columns:\s*repeat\(5,\s*1fr\)/);
+  assert.match(styles, /grid-auto-columns:\s*106px/);
+  assert.match(data, /year:\s*"numeric"/);
+  assert.match(app, /function bookingOccursOn/);
+  assert.match(workspace, /lte\(appointments\.startDate, to\)/);
+  assert.match(workspace, /gte\(appointments\.endDate, from\)/);
 });
 
 test("mantém dados operacionais fora do repositório público", async () => {

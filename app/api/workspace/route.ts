@@ -13,6 +13,7 @@ import {
   appointmentItems,
   appointments,
   auditEvents,
+  cashEntries,
   creditMovements,
   creditPackages,
   creditPurchases,
@@ -22,6 +23,7 @@ import {
   dogTutors,
   establishments,
   invoiceItems,
+  invoicePayments,
   invoices,
   serviceCatalog,
   tasks,
@@ -145,6 +147,7 @@ export async function GET(request: Request) {
       taskRows,
       invoiceRows,
       invoiceItemRows,
+      invoicePaymentRows,
       packageRows,
       purchaseRows,
       balanceRows,
@@ -230,8 +233,8 @@ export async function GET(request: Request) {
         .where(
           and(
             eq(appointments.establishmentId, establishmentId),
-            gte(appointments.startDate, from),
             lte(appointments.startDate, to),
+            gte(appointments.endDate, from),
           ),
         )
         .orderBy(
@@ -269,6 +272,18 @@ export async function GET(request: Request) {
         .innerJoin(invoices, eq(invoices.id, invoiceItems.invoiceId))
         .where(eq(invoices.establishmentId, establishmentId))
         .orderBy(asc(invoiceItems.serviceDateSnapshot)),
+      db
+        .select({
+          invoiceId: invoicePayments.invoiceId,
+          cashEntryId: cashEntries.id,
+          cashStatus: cashEntries.status,
+        })
+        .from(invoicePayments)
+        .leftJoin(
+          cashEntries,
+          eq(cashEntries.sourcePaymentId, invoicePayments.id),
+        )
+        .where(eq(invoicePayments.establishmentId, establishmentId)),
       db
         .select({
           id: creditPackages.id,
@@ -351,6 +366,10 @@ export async function GET(request: Request) {
       list.push(link);
       linksByDog.set(link.dogId, list);
     }
+
+    const paymentByInvoice = new Map(
+      invoicePaymentRows.map((payment) => [payment.invoiceId, payment]),
+    );
 
     type ScheduleRow = (typeof scheduleRows)[number];
     type AppointmentPayload = Omit<
@@ -466,6 +485,10 @@ export async function GET(request: Request) {
             ? []
             : invoiceRows.map((invoice) => ({
                 ...invoice,
+                cashEntryId:
+                  paymentByInvoice.get(invoice.id)?.cashEntryId ?? null,
+                cashIncluded:
+                  paymentByInvoice.get(invoice.id)?.cashStatus === "included",
                 items: invoiceItemRows.filter(
                   (item) => item.invoiceId === invoice.id,
                 ),

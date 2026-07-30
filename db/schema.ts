@@ -17,6 +17,7 @@ export const establishments = sqliteTable("establishments", {
   timezone: text("timezone").notNull().default("America/Sao_Paulo"),
   daycareStartTime: text("daycare_start_time").notNull().default("07:30"),
   daycareEndTime: text("daycare_end_time").notNull().default("19:30"),
+  cashMonthStartDay: integer("cash_month_start_day").notNull().default(1),
   createdAt: text("created_at").notNull().default(now),
   updatedAt: text("updated_at").notNull().default(now),
 });
@@ -976,6 +977,69 @@ export const invoicePayments = sqliteTable(
       table.paidAt,
     ),
     check("invoice_payments_amount_positive", sql`${table.amountCents} > 0`),
+  ],
+);
+
+export const cashEntries = sqliteTable(
+  "cash_entries",
+  {
+    id: text("id").primaryKey(),
+    establishmentId: text("establishment_id")
+      .notNull()
+      .references(() => establishments.id, { onDelete: "restrict" }),
+    direction: text("direction", { enum: ["inflow", "outflow"] }).notNull(),
+    origin: text("origin", {
+      enum: ["invoice_payment", "manual"],
+    }).notNull(),
+    sourcePaymentId: text("source_payment_id").references(
+      () => invoicePayments.id,
+      { onDelete: "restrict" },
+    ),
+    occurredOn: text("occurred_on").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    category: text("category").notNull(),
+    description: text("description").notNull(),
+    note: text("note"),
+    status: text("status", { enum: ["included", "excluded"] })
+      .notNull()
+      .default("included"),
+    exclusionReason: text("exclusion_reason"),
+    createdByUserId: text("created_by_user_id").references(() => appUsers.id, {
+      onDelete: "set null",
+    }),
+    updatedByUserId: text("updated_by_user_id").references(() => appUsers.id, {
+      onDelete: "set null",
+    }),
+    excludedByUserId: text("excluded_by_user_id").references(
+      () => appUsers.id,
+      { onDelete: "set null" },
+    ),
+    excludedAt: text("excluded_at"),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("cash_entries_source_payment_unique").on(
+      table.sourcePaymentId,
+    ),
+    index("cash_entries_establishment_date_idx").on(
+      table.establishmentId,
+      table.occurredOn,
+    ),
+    index("cash_entries_establishment_status_idx").on(
+      table.establishmentId,
+      table.status,
+      table.occurredOn,
+    ),
+    check("cash_entries_amount_positive", sql`${table.amountCents} > 0`),
+    check(
+      "cash_entries_source_valid",
+      sql`(${table.origin} = 'invoice_payment' and ${table.sourcePaymentId} is not null and ${table.direction} = 'inflow') or (${table.origin} = 'manual' and ${table.sourcePaymentId} is null)`,
+    ),
+    check(
+      "cash_entries_exclusion_valid",
+      sql`(${table.status} = 'excluded' and ${table.excludedAt} is not null) or (${table.status} = 'included' and ${table.excludedAt} is null)`,
+    ),
   ],
 );
 

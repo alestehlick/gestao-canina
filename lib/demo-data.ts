@@ -111,6 +111,8 @@ export type Invoice = {
   status: "pending" | "paid" | "overdue";
   items: string;
   sourceType?: "services" | "credit_package" | "lodging_deposit" | "lodging_balance";
+  cashEntryId?: string;
+  cashIncluded?: boolean;
   periodStart?: string;
   periodEnd?: string;
   lines: {
@@ -222,7 +224,7 @@ export const demoDogs: Dog[] = [
     customerName: "Marina Costa",
     color: "plum",
     vaccinesCurrent: true,
-    today: "Tosa às 10:00",
+    today: "Banho e tosa às 10:00",
     nextService: "Banho e tosa · hoje, 10:00",
     credits: [{ label: "Banho e tosa", value: 2 }],
   },
@@ -585,6 +587,8 @@ export const demoInvoices: Invoice[] = [
     amountCents: 18000,
     due: "Pago em 27/07",
     status: "paid",
+    cashEntryId: "cash-invoice-183",
+    cashIncluded: true,
     items: "Hospedagem da Mel",
     sourceType: "lodging_balance",
     periodStart: "2026-07-26",

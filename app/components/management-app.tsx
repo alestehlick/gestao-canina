@@ -15,6 +15,7 @@ import {
   BrazilianDateInput,
   formatBrazilianDate,
 } from "@/app/components/brazilian-date-input";
+import { CashView } from "@/app/components/cash-view";
 import {
   auditFixtures,
   defaultServicePrices,
@@ -59,6 +60,7 @@ type View =
   | "dogs"
   | "customers"
   | "billing"
+  | "cash"
   | "activity"
   | "settings"
   | "access";
@@ -123,6 +125,7 @@ const navItems: { id: View; label: string; shortLabel: string }[] = [
   { id: "dogs", label: "Cães", shortLabel: "Cães" },
   { id: "customers", label: "Clientes", shortLabel: "Clientes" },
   { id: "billing", label: "Cobranças", shortLabel: "Faturas" },
+  { id: "cash", label: "Caixa", shortLabel: "Caixa" },
   { id: "activity", label: "Atividades", shortLabel: "Ativ." },
   { id: "access", label: "Acessos", shortLabel: "Acessos" },
   { id: "settings", label: "Configurações", shortLabel: "Config." },
@@ -162,6 +165,12 @@ const pageCopy: Record<
     eyebrow: "Financeiro",
     title: "Faturas",
     description: "Revise serviços concluídos e prepare as faturas para o cliente.",
+  },
+  cash: {
+    eyebrow: "Controle financeiro",
+    title: "Caixa",
+    description:
+      "Acompanhe entradas, saídas e o saldo real de cada período.",
   },
   activity: {
     eyebrow: "Rastreabilidade",
@@ -1046,6 +1055,61 @@ export function ManagementApp() {
       return undefined;
     } finally {
       setBusyAction(null);
+    }
+  }
+
+  async function toggleInvoiceCash(invoice: Invoice) {
+    if (invoice.status !== "paid") return;
+    if (!invoice.cashEntryId) {
+      setToast({
+        message:
+          "Este pagamento ainda não possui um lançamento no Caixa. Atualize a página e tente novamente.",
+      });
+      return;
+    }
+    const nextIncluded = invoice.cashIncluded === false;
+    let reason: string | undefined;
+    if (!nextIncluded) {
+      const answer = window.prompt(
+        "Por que este recebimento deve ser desconsiderado do Caixa?",
+      );
+      if (answer === null) return;
+      reason = answer.trim();
+      if (!reason) {
+        setToast({ message: "Informe um motivo para preservar o histórico." });
+        return;
+      }
+    }
+
+    setInvoices((current) =>
+      current.map((item) =>
+        item.id === invoice.id
+          ? { ...item, cashIncluded: nextIncluded }
+          : item,
+      ),
+    );
+    if (runtimeMode === "ready") {
+      const result = await runLiveAction(
+        `cash-invoice:${invoice.id}`,
+        () =>
+          requestJson(`/api/cash/${invoice.cashEntryId}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              action: nextIncluded ? "restore" : "exclude",
+              reason,
+            }),
+          }),
+        { refresh: true },
+      );
+      if (!result) {
+        setInvoices((current) =>
+          current.map((item) =>
+            item.id === invoice.id
+              ? { ...item, cashIncluded: invoice.cashIncluded }
+              : item,
+          ),
+        );
+      }
     }
   }
 
@@ -3324,25 +3388,15 @@ export function ManagementApp() {
       </div>
 
       <div className="workspace">
-        <div
-          className={
-            runtimeMode === "ready"
-              ? "demo-banner private-banner"
-              : "demo-banner"
-          }
-          role="status"
-        >
-          <span className="demo-label">
-            {runtimeMode === "ready"
-              ? "Ambiente privado"
-              : "Demonstração segura"}
-          </span>
-          <span>
-            {runtimeMode === "ready"
-              ? "Agenda e cadastros são salvos na Cloudflare e não ficam no GitHub."
-              : "Todos os nomes, contatos e valores são fictícios. Nada aqui é uma cobrança real."}
-          </span>
-        </div>
+        {runtimeMode !== "ready" && (
+          <div className="demo-banner" role="status">
+            <span className="demo-label">Demonstração segura</span>
+            <span>
+              Todos os nomes, contatos e valores são fictícios. Nada aqui é
+              uma cobrança real.
+            </span>
+          </div>
+        )}
 
         <header className="topbar">
           <div>
@@ -3581,6 +3635,13 @@ export function ManagementApp() {
               onOpenInvoice={openExistingInvoice}
               onAddCredits={() => openCreditPackage()}
               onOpenReceipt={openReceipt}
+              onToggleCash={toggleInvoiceCash}
+            />
+          )}
+          {view === "cash" && signedInRole === "owner" && (
+            <CashView
+              referenceDate={operationalToday}
+              onChanged={() => void refreshWorkspace()}
             />
           )}
           {view === "activity" && (
@@ -3617,7 +3678,7 @@ export function ManagementApp() {
         <button
           className={
             mobileMoreOpen ||
-            ["billing", "activity", "access", "settings"].includes(view)
+            ["billing", "cash", "activity", "access", "settings"].includes(view)
               ? "active"
               : ""
           }
@@ -3652,7 +3713,10 @@ export function ManagementApp() {
       <button
         className="mobile-fab"
         onClick={() => openServiceDialog()}
-        hidden={Boolean(selectedDog || selectedCustomer) || view === "settings"}
+        hidden={
+          Boolean(selectedDog || selectedCustomer) ||
+          !["today", "agenda", "dogs", "customers"].includes(view)
+        }
       >
         <span aria-hidden="true">+</span> Novo serviço
       </button>
@@ -4614,6 +4678,7 @@ export function ManagementApp() {
               <span>
                 <strong>{bookingToCancel.dogName}</strong>
                 <small>
+                  {formatShortDate(bookingToCancel.date)} ·{" "}
                   {bookingToCancel.time} · {bookingToCancel.service}
                 </small>
               </span>
@@ -4945,8 +5010,8 @@ function InitialSetupScreen({
             <span className="attention-mark">i</span>
             <p>
               Use senhas diferentes, com pelo menos 12 caracteres, e guarde-as
-              em um gerenciador de senhas. Contas de funcionários serão
-              adicionadas somente em uma futura atualização.
+              em um gerenciador de senhas. Depois, os administradores poderão
+              convidar funcionários e clientes pela área Acessos.
             </p>
           </div>
           {error && (
@@ -5074,8 +5139,8 @@ function TodayView({
   onOpenReceipt: (receipt: ServiceReceipt) => void;
   invoice?: Invoice;
 }) {
-  const dayBookings = bookings.filter(
-    (booking) => booking.date === selectedDate,
+  const dayBookings = bookings.filter((booking) =>
+    bookingOccursOn(booking, selectedDate),
   );
   const visibleBookings = dayBookings.filter(
     (booking) => booking.status !== "cancelled",
@@ -5454,8 +5519,8 @@ function AgendaView({
   ) => void;
   receipts: ServiceReceipt[];
 }) {
-  const dayBookings = bookings.filter(
-    (booking) => booking.date === selectedDate,
+  const dayBookings = bookings.filter((booking) =>
+    bookingOccursOn(booking, selectedDate),
   );
   const filtered = filterBookings(dayBookings, agendaFilter);
   return (
@@ -5595,6 +5660,13 @@ function filterBookings(
   return bookings;
 }
 
+function bookingOccursOn(booking: Booking, date: string) {
+  if (booking.serviceType === "hotel" && booking.endDate) {
+    return booking.date <= date && booking.endDate >= date;
+  }
+  return booking.date === date;
+}
+
 function AgendaCard({
   booking,
   dog,
@@ -5606,6 +5678,7 @@ function AgendaCard({
   receipt,
   onOpenReceipt,
   onLodgingInvoice,
+  showDate = false,
 }: {
   booking: Booking;
   dog?: Dog;
@@ -5620,6 +5693,7 @@ function AgendaCard({
     booking: Booking,
     kind: "deposit" | "balance",
   ) => void;
+  showDate?: boolean;
 }) {
   const action =
     booking.date > operationalToday &&
@@ -5632,8 +5706,20 @@ function AgendaCard({
       className={`agenda-card service-${booking.serviceType} status-${booking.status}`}
     >
       <div className="time-block">
+        {showDate && (
+          <span className="booking-card-date">
+            {formatShortDate(booking.date)}
+            {booking.endDate && booking.endDate !== booking.date
+              ? ` a ${formatShortDate(booking.endDate)}`
+              : ""}
+          </span>
+        )}
         <strong>{booking.time}</strong>
-        <span>{booking.endTime ? `até ${booking.endTime}` : "Sem fim"}</span>
+        {booking.time !== "Sem horário" && (
+          <span>
+            {booking.endTime ? `até ${booking.endTime}` : "Horário inicial"}
+          </span>
+        )}
       </div>
       <DogAvatar dog={dog} />
       <div className="agenda-main">
@@ -5645,6 +5731,17 @@ function AgendaCard({
         </div>
         <p>{booking.service}</p>
         <small>{booking.customerName}</small>
+        {booking.serviceType === "hotel" && booking.endDate && (
+          <span className="lodging-period">
+            Entrada {formatShortDate(booking.date)} · saída{" "}
+            {formatShortDate(booking.endDate)}
+            {booking.lodgingNights
+              ? ` · ${booking.lodgingNights} ${
+                  booking.lodgingNights === 1 ? "diária" : "diárias"
+                }`
+              : ""}
+          </span>
+        )}
         {booking.recurringScheduleId && (
           <span className="settlement-note recurrence">
             Recorrência semanal
@@ -5884,6 +5981,7 @@ function ProfileAppointments({
         )}
         onOpenReceipt={onOpenReceipt}
         onLodgingInvoice={onLodgingInvoice}
+        showDate
       />
     );
   }
@@ -6005,7 +6103,7 @@ function DogProfile({
         </div>
       )}
       <div className="tabs" role="tablist" aria-label={`Perfil de ${dog.name}`}>
-        {["Resumo", "Agenda e histórico", "Saúde e cuidados", "Documentos"].map(
+        {["Resumo", "Agenda e histórico", "Saúde e cuidados"].map(
           (item) => (
             <button
               key={item}
@@ -6035,11 +6133,7 @@ function DogProfile({
               </div>
               <div>
                 <span>Alimentação</span>
-                <strong>
-                  {dog.name === "Mel"
-                    ? "Ração própria · 2 porções"
-                    : "Rotina cadastrada"}
-                </strong>
+                <strong>{dog.feedingNotes || "Não informada"}</strong>
               </div>
             </div>
           </section>
@@ -6059,6 +6153,10 @@ function DogProfile({
                 <div>
                   <span>Banho e tosa</span>
                   <strong>{balances.grooming}</strong>
+                </div>
+                <div>
+                  <span>Taxi-dog</span>
+                  <strong>{balances.transport}</strong>
                 </div>
               </div>
             ) : (
@@ -6093,31 +6191,34 @@ function DogProfile({
           <div className="detail-list two-columns">
             <div>
               <span>Vacinas</span>
-              <strong>
-                {dog.vaccinesCurrent ? "Em dia" : "Comprovante pendente"}
-              </strong>
+              {dog.vaccines?.length ? (
+                <strong>
+                  {dog.vaccines
+                    .map(
+                      (vaccine) =>
+                        `${vaccine.name} · vence em ${formatShortDate(
+                          vaccine.expiresOn,
+                        )}`,
+                    )
+                    .join(" · ")}
+                </strong>
+              ) : (
+                <strong>Nenhuma vacina cadastrada</strong>
+              )}
             </div>
             <div>
               <span>Temperamento</span>
-              <strong>Sociável, adaptação gradual</strong>
+              <strong>{dog.temperamentNotes || "Não informado"}</strong>
             </div>
             <div>
               <span>Alimentação</span>
-              <strong>Rotina cadastrada</strong>
+              <strong>{dog.feedingNotes || "Não informada"}</strong>
             </div>
             <div>
               <span>Medicação</span>
-              <strong>Nenhuma contínua</strong>
+              <strong>{dog.medicationNotes || "Nenhuma informada"}</strong>
             </div>
           </div>
-        </section>
-      )}
-      {tab === "Documentos" && (
-        <section className="panel full-panel">
-          <EmptyState
-            title="Arquivos privados"
-            description="Documentos serão guardados no armazenamento privado da Cloudflare após a conexão do ambiente."
-          />
         </section>
       )}
     </div>
@@ -6320,7 +6421,7 @@ function CustomerProfile({
         </div>
       </section>
       <div className="tabs" role="tablist" aria-label="Perfil do cliente">
-        {["Resumo", "Serviços", "Financeiro e créditos", "Documentos"].map(
+        {["Resumo", "Serviços", "Financeiro e créditos"].map(
           (item) => (
             <button
               key={item}
@@ -6463,6 +6564,10 @@ function CustomerProfile({
               </div>
               <div>
                 <span>Taxi-dog</span>
+                <strong>{balances.transport}</strong>
+              </div>
+              <div>
+                <span>Taxi-dog</span>
                 <strong>{balances.transport ?? 0}</strong>
               </div>
             </div>
@@ -6546,14 +6651,6 @@ function CustomerProfile({
           </section>
         </div>
       )}
-      {tab === "Documentos" && (
-        <section className="panel full-panel">
-          <EmptyState
-            title="Nenhum documento compartilhado"
-            description="Arquivos privados só aparecerão após a conexão segura com o R2."
-          />
-        </section>
-      )}
     </div>
   );
 }
@@ -6573,6 +6670,7 @@ function BillingView({
   onOpenInvoice,
   onAddCredits,
   onOpenReceipt,
+  onToggleCash,
 }: {
   invoices: Invoice[];
   billableServices: BillableService[];
@@ -6588,6 +6686,7 @@ function BillingView({
   onOpenInvoice: (invoice: Invoice) => void;
   onAddCredits: () => void;
   onOpenReceipt: (receipt: ServiceReceipt) => void;
+  onToggleCash: (invoice: Invoice) => void;
 }) {
   const selectedTotal = billableServices
     .filter((item) => selectedBillables.includes(item.id))
@@ -6739,6 +6838,7 @@ function BillingView({
                     <th>Vencimento</th>
                     <th>Valor</th>
                     <th>Situação</th>
+                    <th>No Caixa</th>
                     <th>
                       <span className="sr-only">Ação</span>
                     </th>
@@ -6759,6 +6859,25 @@ function BillingView({
                       <td>
                         <InvoiceStatus invoice={invoice} />
                       </td>
+                      <td className="cash-inclusion-cell">
+                        {invoice.status === "paid" ? (
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={invoice.cashIncluded !== false}
+                              disabled={!invoice.cashEntryId}
+                              onChange={() => onToggleCash(invoice)}
+                            />
+                            <span>
+                              {invoice.cashIncluded === false
+                                ? "Não"
+                                : "Sim"}
+                            </span>
+                          </label>
+                        ) : (
+                          <span aria-label="Disponível após o pagamento">—</span>
+                        )}
+                      </td>
                       <td>
                         <button
                           className="row-link"
@@ -6774,25 +6893,40 @@ function BillingView({
             </div>
             <div className="mobile-card-list invoice-mobile-list">
               {invoices.map((invoice) => (
-                <button
+                <article
                   className="mobile-data-card"
                   key={`mobile-${invoice.id}`}
-                  onClick={() => onOpenInvoice(invoice)}
                 >
-                  <span>
-                    <strong>#{invoice.number} · {invoice.customerName}</strong>
-                    <small>{invoice.items}</small>
-                  </span>
-                  <strong>{formatCurrency(invoice.amountCents)}</strong>
-                  <span className="mobile-data-detail">
-                    {invoice.due} ·{" "}
-                    {invoice.status === "paid"
-                      ? "Pago"
-                      : invoice.status === "overdue"
-                        ? "Vencido"
-                        : "Pendente"}
-                  </span>
-                </button>
+                  <button
+                    className="mobile-card-main"
+                    onClick={() => onOpenInvoice(invoice)}
+                  >
+                    <span>
+                      <strong>#{invoice.number} · {invoice.customerName}</strong>
+                      <small>{invoice.items}</small>
+                    </span>
+                    <strong>{formatCurrency(invoice.amountCents)}</strong>
+                    <span className="mobile-data-detail">
+                      {invoice.due} ·{" "}
+                      {invoice.status === "paid"
+                        ? "Pago"
+                        : invoice.status === "overdue"
+                          ? "Vencido"
+                          : "Pendente"}
+                    </span>
+                  </button>
+                  {invoice.status === "paid" && (
+                    <label className="cash-inclusion-mobile">
+                      <input
+                        type="checkbox"
+                        checked={invoice.cashIncluded !== false}
+                        disabled={!invoice.cashEntryId}
+                        onChange={() => onToggleCash(invoice)}
+                      />
+                      Considerar no Caixa
+                    </label>
+                  )}
+                </article>
               ))}
             </div>
           </section>
@@ -6851,6 +6985,10 @@ function BillingView({
                       <div>
                         <span>Banho e tosa</span>
                         <strong>{balance.grooming}</strong>
+                      </div>
+                      <div>
+                        <span>Taxi-dog</span>
+                        <strong>{balance.transport}</strong>
                       </div>
                     </div>
                   </article>

@@ -240,11 +240,18 @@ sections = [
 ]
 
 for section_title, topics in sections:
-    story.append(Paragraph(section_title, h1))
-    for topic_title, paragraphs in topics:
-        blocks = [Paragraph(topic_title, h2)]
-        blocks.extend(Paragraph(text, body) for text in paragraphs)
-        story.append(KeepTogether(blocks))
+    for topic_index, (topic_title, paragraphs) in enumerate(topics):
+        opening = []
+        if topic_index == 0:
+            opening.append(Paragraph(section_title, h1))
+        opening.extend(
+            [
+                Paragraph(topic_title, h2),
+                Paragraph(paragraphs[0], body),
+            ]
+        )
+        story.append(KeepTogether(opening))
+        story.extend(Paragraph(text, body) for text in paragraphs[1:])
 
 story.extend(
     [
@@ -284,8 +291,31 @@ story.extend(
             "<b>Registre somente depois de confirmar o recebimento.</b> A fatura passará para Pago e os serviços serão quitados.",
             callout,
         ),
+        Paragraph("Caixa", h1),
+        Paragraph("11. Acompanhar entradas e saídas", h2),
+        Paragraph(
+            "Abra <b>Caixa</b> para consultar entradas, saídas e o saldo de cada período. Quando uma fatura é marcada como paga, o recebimento entra automaticamente. Faturas abertas não são consideradas.",
+            body,
+        ),
+        Paragraph(
+            "Use <b>+ Entrada</b> para valores recebidos fora das faturas e <b>+ Saída</b> para despesas. Informe data, valor, categoria e uma descrição clara.",
+            body,
+        ),
+        Paragraph(
+            "Em Cobranças recentes, <b>Considerar no Caixa</b> aparece nas faturas pagas. Desmarcar não cancela o pagamento: apenas retira o valor do resultado financeiro.",
+            callout,
+        ),
+        Paragraph("12. Períodos e histórico", h2),
+        Paragraph(
+            "Use <b>Desconsiderar</b> em vez de apagar. Informe o motivo e use <b>Restaurar</b> se precisar. Lançamentos manuais podem ser editados; recebimentos automáticos devem ser corrigidos na cobrança original.",
+            body,
+        ),
+        Paragraph(
+            "O período começa no dia 1 por padrão. Você pode escolher um dia entre 1 e 28. Se escolher dia 5, o período vai do dia 5 ao dia 4 do mês seguinte. Use as setas para navegar.",
+            body,
+        ),
         Paragraph("Créditos pré-pagos", h1),
-        Paragraph("11. Vender um pacote", h2),
+        Paragraph("13. Vender um pacote", h2),
         Paragraph(
             "Em <b>Cobranças &gt; Créditos</b>, escolha <b>Vender pacote</b>. Selecione cliente, serviço e quantidade e informe o valor especial.",
             body,
@@ -294,13 +324,13 @@ story.extend(
             "A criação do pacote gera uma fatura, mas ainda não altera o saldo. Os créditos são liberados automaticamente quando você registra o pagamento da fatura.",
             body,
         ),
-        Paragraph("12. Usar um crédito", h2),
+        Paragraph("14. Usar um crédito", h2),
         Paragraph(
             "Ao criar ou editar o serviço, escolha <b>Usar 1 crédito</b>. Na conclusão, um crédito sai do saldo, nenhuma fatura é criada e um recibo fica disponível.",
             body,
         ),
         Paragraph("Pessoas e acessos", h1),
-        Paragraph("13. Convidar um funcionário", h2),
+        Paragraph("15. Convidar um funcionário", h2),
         Paragraph(
             "Em <b>Acessos</b>, escolha Funcionário e informe o e-mail. O convite vale por 48 horas e pode ser usado uma única vez. Se o e-mail automático não estiver ativo, copie o link seguro e envie em particular.",
             body,
@@ -309,7 +339,7 @@ story.extend(
             "Funcionários usam Hoje, Agenda, Pedidos, Cães e Clientes. Eles não abrem cobranças, configurações, histórico global ou gestão de acessos.",
             callout,
         ),
-        Paragraph("14. Convidar um cliente", h2),
+        Paragraph("16. Convidar um cliente", h2),
         Paragraph(
             "Em <b>Acessos</b>, escolha Cliente, informe o e-mail e selecione o cadastro correto. No portal, o cliente consulta seus cães, serviços, créditos, faturas e recibos, atualiza contato e envia pedidos.",
             body,
@@ -318,18 +348,18 @@ story.extend(
             "Cada cliente vê somente o próprio cadastro. Um pedido não reserva automaticamente uma data.",
             body,
         ),
-        Paragraph("15. Analisar pedidos", h2),
+        Paragraph("17. Analisar pedidos", h2),
         Paragraph(
             "Abra <b>Pedidos</b>, confira disponibilidade e analise a solicitação. Crie o agendamento normalmente e só depois marque o pedido como aprovado. Essa confirmação separada evita mudanças erradas na agenda.",
             body,
         ),
-        Paragraph("16. Encerrar ou recuperar acesso", h2),
+        Paragraph("18. Encerrar ou recuperar acesso", h2),
         Paragraph(
             "Em Acessos, use <b>Encerrar acesso</b> quando necessário. As sessões dessa conta são interrompidas. Se o e-mail automático ainda não estiver ativo, use <b>Redefinir senha</b> e compartilhe o link temporário em particular.",
             body,
         ),
         Paragraph("Configurações e rotina", h1),
-        Paragraph("17. Preços e horários padrão", h2),
+        Paragraph("19. Preços e horários padrão", h2),
         Paragraph(
             "Em <b>Configurações</b>, defina diária da hospedagem, creche, banho, banho e tosa, Taxi-dog de ida e horários da creche.",
             body,
@@ -338,12 +368,12 @@ story.extend(
             "As mudanças valem para novos serviços. Atendimentos já salvos mantêm o valor original.",
             body,
         ),
-        Paragraph("18. Revisão diária recomendada", h2),
+        Paragraph("20. Revisão diária recomendada", h2),
         Paragraph("No início: confira alertas, agenda, chegadas e vacinas.", bullet, bulletText="•"),
         Paragraph("Durante o dia: registre chegadas, conclusões e sinais de hospedagem.", bullet, bulletText="•"),
         Paragraph("No fim: gere faturas, registre recebimentos e confira créditos e recibos.", bullet, bulletText="•"),
         KeepTogether([
-            Paragraph("19. Se algo não funcionar", h2),
+            Paragraph("21. Se algo não funcionar", h2),
             Paragraph("Atualize a página e tente novamente uma vez.", bullet, bulletText="•"),
             Paragraph("Confira a internet e se a sessão continua aberta.", bullet, bulletText="•"),
             Paragraph("Leia a mensagem exibida e revise o campo indicado.", bullet, bulletText="•"),
@@ -353,6 +383,7 @@ story.extend(
                 callout,
             ),
         ]),
+        PageBreak(),
         Paragraph("Resumo rápido", h1),
         Paragraph("Use Hoje para comandar a operação.", bullet, bulletText="•"),
         Paragraph("Use a data para consultar dias futuros.", bullet, bulletText="•"),
@@ -360,6 +391,7 @@ story.extend(
         Paragraph("Registre o sinal pago antes de gerar o saldo da hospedagem.", bullet, bulletText="•"),
         Paragraph("Compartilhe o PDF por WhatsApp, e-mail ou Arquivos.", bullet, bulletText="•"),
         Paragraph("Registre pagamento somente depois de receber.", bullet, bulletText="•"),
+        Paragraph("Confira o Caixa e registre as despesas do período.", bullet, bulletText="•"),
         Paragraph("Mantenha contatos, vacinas e cuidados atualizados.", bullet, bulletText="•"),
         Paragraph("Use uma conta individual para cada pessoa.", bullet, bulletText="•"),
         Paragraph("Confira Pedidos antes de alterar a agenda.", bullet, bulletText="•"),

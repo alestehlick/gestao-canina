@@ -1345,8 +1345,24 @@ h3 {
   font-size: 0.69rem;
 }
 
+.time-block .booking-card-date {
+  margin: 0 0 5px;
+  color: var(--forest);
+  font-size: 0.66rem;
+  font-weight: 760;
+  line-height: 1.25;
+}
+
 .agenda-main {
   min-width: 0;
+}
+
+.lodging-period {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 650;
 }
 
 .agenda-title-row {
@@ -1922,6 +1938,11 @@ h3 {
   gap: 3px;
   overflow-x: auto;
   border-bottom: 1px solid var(--line);
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tabs button {
@@ -2279,6 +2300,192 @@ h3 {
 
 .billing-page > * {
   min-width: 0;
+}
+
+.cash-page {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.cash-period-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px;
+}
+
+.cash-period-panel h2 {
+  margin-top: 3px;
+}
+
+.cash-period-panel p:last-child {
+  margin-top: 5px;
+  color: var(--muted);
+}
+
+.cash-period-actions,
+.cash-row-actions,
+.cash-mobile-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.cash-period-actions .secondary-button:first-child,
+.cash-period-actions .secondary-button:last-child {
+  width: 44px;
+  padding: 0;
+  font-size: 1.25rem;
+}
+
+.inline-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid #e2b5ad;
+  border-radius: var(--radius-small);
+  background: #fae9e6;
+  color: var(--danger);
+  padding: 12px 14px;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.inline-error button {
+  min-height: 38px;
+  border: 0;
+  background: transparent;
+  color: currentColor;
+  font-weight: 760;
+}
+
+.cash-entry-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 13px;
+  margin: 16px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  padding: 18px;
+}
+
+.cash-form-heading,
+.cash-form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cash-form-heading h3 {
+  margin-top: 2px;
+}
+
+.cash-description-field,
+.cash-note-field {
+  grid-column: span 2;
+}
+
+.cash-form-actions {
+  justify-content: flex-end;
+}
+
+.cash-filters {
+  margin: 14px 0 4px;
+}
+
+.cash-table td:first-child {
+  white-space: nowrap;
+}
+
+.cash-inflow {
+  color: var(--success);
+}
+
+.cash-outflow,
+.negative-value {
+  color: var(--danger);
+}
+
+.cash-row-excluded {
+  opacity: 0.58;
+}
+
+.cash-row-excluded strong {
+  text-decoration-color: currentColor;
+}
+
+.cash-inclusion-cell label,
+.cash-inclusion-mobile {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 680;
+}
+
+.cash-inclusion-cell input,
+.cash-inclusion-mobile input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--forest);
+}
+
+.mobile-card-main {
+  display: contents;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.cash-mobile-list .mobile-data-card,
+.invoice-mobile-list .mobile-data-card {
+  cursor: default;
+}
+
+.cash-mobile-actions,
+.cash-inclusion-mobile {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 7px;
+}
+
+.cash-empty {
+  padding: 34px 12px 22px;
+}
+
+.cash-settings {
+  padding: 0;
+}
+
+.cash-settings summary {
+  min-height: 58px;
+  padding: 18px 21px;
+  cursor: pointer;
+  font-weight: 720;
+}
+
+.cash-settings form {
+  display: grid;
+  grid-template-columns: minmax(180px, 250px) 1fr auto;
+  align-items: end;
+  gap: 16px;
+  border-top: 1px solid var(--line-soft);
+  padding: 18px 21px 21px;
+}
+
+.cash-settings form > p {
+  align-self: center;
+  color: var(--muted);
+  font-size: 0.75rem;
 }
 
 .billing-tabs {
@@ -4109,7 +4316,7 @@ h3 {
   }
 
   .date-quick-list {
-    grid-auto-columns: 78px;
+    grid-auto-columns: 106px;
     grid-template-columns: none;
     grid-auto-flow: column;
     scroll-snap-type: x proximity;
@@ -4238,6 +4445,11 @@ h3 {
     flex: 1;
   }
 
+  .profile-page > .tabs button {
+    padding-inline: 10px;
+    font-size: 0.7rem;
+  }
+
   .detail-list.two-columns {
     grid-template-columns: 1fr;
   }
@@ -4267,6 +4479,10 @@ h3 {
     justify-self: end;
   }
 
+  .mobile-card-main > strong {
+    justify-self: end;
+  }
+
   .mobile-data-detail {
     grid-column: 1 / -1;
     color: var(--muted);
@@ -4278,6 +4494,50 @@ h3 {
     grid-template-columns: none;
     grid-auto-flow: column;
     overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .finance-summary::-webkit-scrollbar {
+    display: none;
+  }
+
+  .cash-period-panel,
+  .cash-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .cash-period-actions {
+    display: grid;
+    grid-template-columns: 44px 1fr 44px;
+  }
+
+  .cash-entry-form {
+    grid-template-columns: 1fr;
+    padding: 15px;
+  }
+
+  .cash-description-field,
+  .cash-note-field {
+    grid-column: auto;
+  }
+
+  .cash-form-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .cash-form-actions button {
+    width: 100%;
+  }
+
+  .cash-settings form {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .cash-settings form .primary-button {
+    width: 100%;
   }
 
   .billing-tabs {
@@ -4494,7 +4754,7 @@ h3 {
     z-index: 45;
     display: grid;
     min-height: 66px;
-    grid-template-columns: repeat(7, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     border-top: 1px solid var(--line);
     background: rgb(251 250 247 / 97%);
     padding-right: env(safe-area-inset-right);

@@ -50,6 +50,13 @@
       "when": 1785412800000,
       "tag": "0006_accounts_and_customer_portal",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1785427200000,
+      "tag": "0007_cash_ledger",
+      "breakpoints": true
     }
   ]
 }

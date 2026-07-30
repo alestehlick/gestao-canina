@@ -210,6 +210,8 @@ export type WorkspaceInvoice = {
   createdByUserId: string | null;
   createdAt: string;
   updatedAt: string;
+  cashEntryId?: string | null;
+  cashIncluded?: boolean;
   /**
    * The current workspace endpoint does not need this field to render a useful
    * fallback label, but the mapper accepts it when the endpoint includes invoice
@@ -300,6 +302,7 @@ export type WorkspaceReadyPayload = {
     timezone: string;
     daycareStartTime: string;
     daycareEndTime: string;
+    cashMonthStartDay: number;
     createdAt: string;
     updatedAt: string;
   };
@@ -703,6 +706,10 @@ export function mapWorkspaceInvoices(
         status,
         items: invoiceItemsLabel(invoice, purchase, service),
         sourceType: invoice.sourceType,
+        cashEntryId: invoice.cashEntryId ?? undefined,
+        cashIncluded: invoice.cashEntryId
+          ? invoice.cashIncluded !== false
+          : undefined,
         periodStart: invoice.items?.length
           ? invoice.items
               .map((item) => item.serviceDateSnapshot)
@@ -914,6 +921,7 @@ export function mapWorkspaceActivities(
     time: new Intl.DateTimeFormat("pt-BR", {
       day: "2-digit",
       month: "2-digit",
+      year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
       timeZone: payload.establishment.timezone,
@@ -984,6 +992,11 @@ function activityActionLabel(action: string) {
     "credit_receipt.failed": "Falha no envio do recibo registrada",
     "invoice.created": "Cobrança preparada",
     "invoice.payment_recorded": "Pagamento registrado",
+    "cash.entry_created": "Lançamento incluído no Caixa",
+    "cash.entry_updated": "Lançamento do Caixa atualizado",
+    "cash.entry_excluded": "Lançamento desconsiderado do Caixa",
+    "cash.entry_restored": "Lançamento restaurado no Caixa",
+    "cash.settings_updated": "Período do Caixa atualizado",
     "account.invited": "Convite de acesso criado",
     "account.invitation_resent": "Convite de acesso reenviado",
     "account.invitation_revoked": "Convite de acesso cancelado",
@@ -1015,6 +1028,7 @@ function entityTypeLabel(entityType: string) {
     credit_receipt: "Recibo",
     invoice: "Cobrança",
     payment: "Pagamento",
+    cash_entry: "Lançamento do Caixa",
     app_user: "Conta",
     account_invitation: "Convite",
     customer_request: "Pedido do cliente",

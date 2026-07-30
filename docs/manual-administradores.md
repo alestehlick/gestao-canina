@@ -143,9 +143,39 @@ Quando o valor realmente tiver sido recebido:
 
 Não use esse botão antes de confirmar o recebimento. A fatura passará para **Pago** e os serviços serão quitados.
 
+## Caixa
+
+### 11. Acompanhar entradas e saídas
+
+Abra **Caixa** para consultar o resultado financeiro de cada período. Quando uma
+fatura é marcada como paga, o recebimento entra automaticamente no Caixa.
+Faturas abertas não são consideradas.
+
+Use **+ Entrada** para registrar valores recebidos fora das faturas do sistema.
+Use **+ Saída** para registrar despesas. Informe data, valor, categoria e uma
+descrição clara.
+
+Lançamentos manuais podem ser editados. Recebimentos automáticos devem ser
+corrigidos a partir da cobrança original.
+
+Em **Cobranças recentes**, a opção **Considerar no Caixa** aparece nas faturas
+pagas. Desmarcá-la não cancela o pagamento: apenas retira aquele valor do
+resultado financeiro.
+
+### 12. Desconsiderar e navegar entre períodos
+
+Um lançamento nunca é apagado definitivamente. Use **Desconsiderar**, informe o
+motivo e, se necessário, use **Restaurar**. Assim, o histórico continua
+explicando quem fez cada alteração.
+
+Por padrão, o período começa no dia 1. Em **Configurar início do mês financeiro**,
+você pode escolher qualquer dia entre 1 e 28. Se escolher dia 5, por exemplo, o
+período vai do dia 5 até o dia 4 do mês seguinte. Use as setas para consultar
+períodos anteriores e futuros.
+
 ## Créditos pré-pagos
 
-### 11. Vender um pacote
+### 13. Vender um pacote
 
 Abra **Cobranças > Créditos** e escolha **Vender pacote**. Selecione cliente, serviço e quantidade. Informe o valor especial do pacote; o sistema mostra a comparação com o valor padrão.
 
@@ -153,7 +183,7 @@ Ao confirmar, será criada uma fatura. Os créditos ainda não entram no saldo.
 
 Depois que o cliente pagar, abra a fatura e registre o pagamento. Somente então os créditos são liberados.
 
-### 12. Usar um crédito
+### 14. Usar um crédito
 
 Ao criar ou editar um serviço, escolha **Usar 1 crédito**. Ao concluir o atendimento:
 
@@ -165,7 +195,7 @@ Se não houver saldo suficiente, o sistema interrompe a conclusão para evitar c
 
 ## Pessoas e acessos
 
-### 13. Convidar um funcionário
+### 15. Convidar um funcionário
 
 Abra **Acessos**, escolha **Funcionário**, informe o e-mail da pessoa e crie o convite. Se o envio automático estiver ativo, ela receberá o link por e-mail. Caso contrário, use **Copiar link** e envie por um canal particular.
 
@@ -173,7 +203,7 @@ O link vale por 48 horas e pode ser usado uma única vez. O funcionário escolhe
 
 Cada pessoa deve usar sua própria conta. Assim, o histórico identifica quem realizou cada ação.
 
-### 14. Convidar um cliente
+### 16. Convidar um cliente
 
 Em **Acessos**, escolha **Cliente**, informe o e-mail e selecione o cadastro correto. O cliente usa o convite para criar a própria senha.
 
@@ -188,13 +218,13 @@ No portal, o cliente pode:
 
 O cliente vê somente os dados ligados ao próprio cadastro. Um pedido não reserva automaticamente uma data.
 
-### 15. Analisar pedidos dos clientes
+### 17. Analisar pedidos dos clientes
 
 Abra **Pedidos**. Confira cliente, cão, serviço, datas e observações. Antes de aprovar um serviço, confirme a disponibilidade e crie o agendamento normalmente. Para cancelamentos, confira se já existe cobrança ou pagamento.
 
 Use **Aprovar** ou **Não aprovar** para devolver uma resposta ao portal do cliente. Essa separação evita mudanças automáticas erradas na agenda.
 
-### 16. Encerrar ou recuperar um acesso
+### 18. Encerrar ou recuperar um acesso
 
 Em **Acessos**, use **Encerrar acesso** quando um funcionário sair ou um acesso de cliente não for mais necessário. As sessões abertas dessa conta são encerradas.
 
@@ -202,7 +232,7 @@ Na tela de entrada, **Esqueci minha senha** envia um link de recuperação com v
 
 ## Configurações e rotina
 
-### 17. Preços e horários padrão
+### 19. Preços e horários padrão
 
 Em **Configurações**, o administrador define:
 
@@ -215,7 +245,7 @@ Em **Configurações**, o administrador define:
 
 As alterações valem para novos serviços. Atendimentos já salvos mantêm o valor original.
 
-### 18. Revisão diária recomendada
+### 20. Revisão diária recomendada
 
 No início do dia:
 
@@ -236,7 +266,7 @@ No fim do dia:
 3. Registre somente os pagamentos já recebidos.
 4. Confira saldos de créditos e recibos.
 
-### 19. Se algo não funcionar
+### 21. Se algo não funcionar
 
 - Atualize a página e tente novamente uma vez.
 - Confira se há internet.
@@ -254,6 +284,7 @@ Se o problema continuar, anote o que estava tentando fazer, o nome do cliente ou
 - Na hospedagem, registre o sinal pago antes de gerar o saldo.
 - Compartilhe o PDF por WhatsApp, e-mail ou salve nos arquivos.
 - Registre pagamento somente depois de receber.
+- Confira o Caixa e registre as despesas do período.
 - Créditos entram no saldo somente após o pagamento da fatura do pacote.
 - Mantenha contatos, vacinas e cuidados do cão atualizados.
 - Use uma conta individual para cada pessoa e encerre acessos que não são mais necessários.

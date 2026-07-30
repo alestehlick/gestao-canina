@@ -135,6 +135,43 @@ export async function POST(
         .bind(invoiceId, establishmentId, paymentId),
     ];
 
+    const cashEntryId = crypto.randomUUID();
+    statements.push(
+      d1
+        .prepare(
+          `INSERT INTO cash_entries (
+            id, establishment_id, direction, origin, source_payment_id,
+            occurred_on, amount_cents, category, description, note, status,
+            exclusion_reason, created_by_user_id, updated_by_user_id,
+            excluded_by_user_id, excluded_at, created_at, updated_at
+          )
+          SELECT ?, ip.establishment_id, 'inflow', 'invoice_payment', ip.id,
+            substr(ip.paid_at, 1, 10), ip.amount_cents,
+            CASE i.source_type
+              WHEN 'credit_package' THEN 'Créditos'
+              WHEN 'lodging_deposit' THEN 'Hospedagem'
+              WHEN 'lodging_balance' THEN 'Hospedagem'
+              ELSE 'Serviços'
+            END,
+            'Recebimento da fatura ' || i.invoice_number,
+            ip.note, 'included', NULL, ?, ?, NULL, NULL,
+            ${nowExpression}, ${nowExpression}
+          FROM invoice_payments ip
+          INNER JOIN invoices i ON i.id = ip.invoice_id
+          WHERE ip.id = ? AND ip.establishment_id = ?
+            AND NOT EXISTS (
+              SELECT 1 FROM cash_entries WHERE source_payment_id = ip.id
+            )`,
+        )
+        .bind(
+          cashEntryId,
+          identity.userId,
+          identity.userId,
+          paymentId,
+          establishmentId,
+        ),
+    );
+
     if (
       invoice.sourceType === "services" ||
       invoice.sourceType === "lodging_balance"
@@ -233,7 +270,8 @@ export async function POST(
     const results = await d1.batch(statements);
     if (
       (results[0].meta.changes ?? 0) !== 1 ||
-      (results[1].meta.changes ?? 0) !== 1
+      (results[1].meta.changes ?? 0) !== 1 ||
+      (results[2].meta.changes ?? 0) !== 1
     ) {
       throw new HttpError(
         409,

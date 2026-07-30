@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useId,
   useMemo,
   useRef,
@@ -10,7 +11,6 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { jsPDF } from "jspdf";
 import {
   auditFixtures,
   defaultServicePrices,
@@ -55,8 +55,7 @@ type View =
   | "customers"
   | "billing"
   | "activity"
-  | "settings"
-  | "portal";
+  | "settings";
 
 type DialogKind =
   | "service"
@@ -66,7 +65,7 @@ type DialogKind =
   | "editDog"
   | "editCustomer"
   | "cancel"
-  | "pix"
+  | "invoice"
   | "creditPackage"
   | "receipt"
   | null;
@@ -77,7 +76,7 @@ type ToastState = {
   action?: () => void;
 };
 
-type PixState = {
+type InvoiceState = {
   step: "review" | "code" | "paid";
   kind: "services" | "credit_package";
   invoice?: Invoice;
@@ -87,11 +86,9 @@ type PixState = {
   customerEmail?: string;
   amountCents: number;
   creditPurchase?: Omit<CreditPurchase, "id" | "status" | "createdAt">;
-  copyPasteCode?: string;
-  providerMessage?: string;
 };
 
-type BillingTab = "pix" | "credits" | "receipts";
+type BillingTab = "invoice" | "credits" | "receipts";
 type RuntimeMode =
   | "loading"
   | "setup"
@@ -118,13 +115,13 @@ const navItems: { id: View; label: string; shortLabel: string }[] = [
   { id: "agenda", label: "Agenda", shortLabel: "Agenda" },
   { id: "dogs", label: "Cães", shortLabel: "Cães" },
   { id: "customers", label: "Clientes", shortLabel: "Clientes" },
-  { id: "billing", label: "Cobranças", shortLabel: "Mais" },
+  { id: "billing", label: "Cobranças", shortLabel: "Faturas" },
   { id: "activity", label: "Atividades", shortLabel: "Ativ." },
   { id: "settings", label: "Configurações", shortLabel: "Config." },
 ];
 
 const pageCopy: Record<
-  Exclude<View, "portal">,
+  View,
   { eyebrow: string; title: string; description: string }
 > = {
   today: {
@@ -299,15 +296,31 @@ function formatShortDate(value: string) {
 
 type InvoiceDeliveryChannel = "whatsapp" | "email" | "save";
 
-function invoiceFileName(state: PixState) {
-  const number = state.invoice?.number ?? "nova";
+function invoiceDateToken(value: string | undefined) {
+  if (!value) return operationalToday;
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const brazilian = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value);
+  if (brazilian) return `${brazilian[3]}-${brazilian[2]}-${brazilian[1]}`;
+  return operationalToday;
+}
+
+function invoiceFileName(state: InvoiceState) {
   const customer = normalize(state.customerName)
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
-  return `fatura-${number}-${customer || "cliente"}.pdf`;
+  const dates =
+    state.invoice?.lines
+      .map((line) => invoiceDateToken(line.date))
+      .filter(Boolean)
+      .sort() ?? [];
+  const start = invoiceDateToken(state.invoice?.periodStart ?? dates[0]);
+  const end = invoiceDateToken(state.invoice?.periodEnd ?? dates.at(-1) ?? start);
+  const period = start === end ? start : `${start}-a-${end}`;
+  return `fatura-${customer || "cliente"}-${period}.pdf`;
 }
 
-function invoiceDescriptionLines(state: PixState) {
+function invoiceDescriptionLines(state: InvoiceState) {
   if (state.kind === "credit_package" && state.creditPurchase) {
     return [
       {
@@ -326,6 +339,13 @@ function invoiceDescriptionLines(state: PixState) {
       amountCents: service.amountCents,
     }));
   }
+  if (state.invoice?.lines.length) {
+    return state.invoice.lines.map((line) => ({
+      title: `${line.dogName} · ${line.service}`,
+      detail: formatShortDate(line.date),
+      amountCents: line.amountCents,
+    }));
+  }
   return [
     {
       title: state.invoice?.items ?? "Serviços selecionados",
@@ -335,7 +355,8 @@ function invoiceDescriptionLines(state: PixState) {
   ];
 }
 
-function createInvoicePdf(state: PixState) {
+async function createInvoicePdf(state: InvoiceState) {
+  const { jsPDF } = await import("jspdf");
   const document = new jsPDF({
     unit: "mm",
     format: "a4",
@@ -440,7 +461,7 @@ function createInvoicePdf(state: PixState) {
     { maxWidth: 174 },
   );
   document.setFont("helvetica", "bold");
-  document.text("Hospet Quintal · hopetquintal.com.br", 18, 289);
+  document.text("Hospet Quintal · hospetquintal.com.br", 18, 289);
 
   const blob = document.output("blob");
   const filename = invoiceFileName(state);
@@ -464,10 +485,10 @@ function downloadInvoice(blob: Blob, filename: string) {
 }
 
 async function deliverInvoice(
-  state: PixState,
+  state: InvoiceState,
   channel: InvoiceDeliveryChannel,
 ) {
-  const generated = createInvoicePdf(state);
+  const generated = await createInvoicePdf(state);
   const title = `Fatura ${state.invoice?.number ?? ""} · Hospet Quintal`.trim();
   const text = `Olá, ${state.customerName}. Segue a fatura do Hospet Quintal no valor de ${formatCurrency(
     state.amountCents,
@@ -616,8 +637,8 @@ export function ManagementApp() {
   const [dogToEdit, setDogToEdit] = useState<Dog | null>(null);
   const [customerToEdit, setCustomerToEdit] = useState<Customer | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [pixState, setPixState] = useState<PixState | null>(null);
-  const [billingTab, setBillingTab] = useState<BillingTab>("pix");
+  const [invoiceState, setInvoiceState] = useState<InvoiceState | null>(null);
+  const [billingTab, setBillingTab] = useState<BillingTab>("invoice");
   const [creditCustomerId, setCreditCustomerId] = useState<string>("");
   const [selectedReceipt, setSelectedReceipt] =
     useState<ServiceReceipt | null>(null);
@@ -625,10 +646,13 @@ export function ManagementApp() {
   const [serviceDraftType, setServiceDraftType] =
     useState<ServiceType>("daycare");
   const [serviceDraftPayment, setServiceDraftPayment] =
-    useState<Booking["paymentPreference"]>("pix");
+    useState<Booking["paymentPreference"]>("invoice");
   const [serviceDraftTransportDirection, setServiceDraftTransportDirection] =
     useState<"one_way" | "round_trip">("one_way");
-  const [portalTab, setPortalTab] = useState("Início");
+  const [serviceDraftHasDeposit, setServiceDraftHasDeposit] = useState(false);
+  const [daycareStartTime, setDaycareStartTime] = useState("07:30");
+  const [daycareEndTime, setDaycareEndTime] = useState("19:30");
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [sessionExpiresAt, setSessionExpiresAt] = useState<string | null>(null);
 
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -648,6 +672,8 @@ export function ManagementApp() {
     setReceipts([]);
     setActivities([]);
     setServicePrices(defaultServicePrices);
+    setDaycareStartTime("07:30");
+    setDaycareEndTime("19:30");
     setSelectedDogId(null);
     setSelectedCustomerId(null);
     setSelectedBillables([]);
@@ -660,7 +686,7 @@ export function ManagementApp() {
     setServiceDraftDogId("");
     setSearch("");
     setOpenMenuId(null);
-    setPixState(null);
+    setInvoiceState(null);
     setDialog(null);
     setToast(null);
   }, []);
@@ -712,6 +738,8 @@ export function ManagementApp() {
     setReceipts(data.receipts);
     setActivities(data.activities);
     setServicePrices(data.servicePrices);
+    setDaycareStartTime(payload.establishment.daycareStartTime || "07:30");
+    setDaycareEndTime(payload.establishment.daycareEndTime || "19:30");
     setCreditCustomerId((current) =>
       data.customers.some((customer) => customer.id === current)
         ? current
@@ -768,8 +796,6 @@ export function ManagementApp() {
   );
 
   const initializeApplication = useCallback(async () => {
-    setRuntimeMode("loading");
-    setLoadError("");
     try {
       const status = await requestJson<AuthStatusPayload>("/api/auth/status");
       if (status.configurationError) {
@@ -807,7 +833,10 @@ export function ManagementApp() {
   }, [activateDemo, clearOperationalData, refreshWorkspace]);
 
   useEffect(() => {
-    void initializeApplication();
+    const timer = window.setTimeout(() => {
+      void initializeApplication();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [initializeApplication]);
 
   const revalidateSession = useCallback(async () => {
@@ -991,7 +1020,8 @@ export function ManagementApp() {
   function openServiceDialog(dogId = "") {
     setServiceDraftDogId(dogId);
     setServiceDraftType("daycare");
-    setServiceDraftPayment("pix");
+    setServiceDraftPayment("invoice");
+    setServiceDraftHasDeposit(false);
     setDialog("service");
   }
 
@@ -1032,7 +1062,7 @@ export function ManagementApp() {
   ) {
     const previous = booking.status;
 
-    if (runtimeMode === "ready" && view !== "portal") {
+    if (runtimeMode === "ready") {
       if (
         status === "completed" &&
         booking.paymentPreference === "credit"
@@ -1096,7 +1126,7 @@ export function ManagementApp() {
         setToast({
           message:
             status === "completed"
-              ? booking.paymentPreference === "pix"
+              ? booking.paymentPreference === "invoice"
                 ? `Atendimento de ${booking.dogName} concluído e pronto para faturamento.`
                 : `Atendimento de ${booking.dogName} concluído.`
               : status === "cancelled"
@@ -1146,6 +1176,7 @@ export function ManagementApp() {
             daycare: 0,
             bath: 0,
             grooming: 0,
+            transport: 0,
           }),
           [serviceType]: available - 1,
         },
@@ -1202,6 +1233,7 @@ export function ManagementApp() {
               daycare: 0,
               bath: 0,
               grooming: 0,
+              transport: 0,
             }),
             [serviceType]:
               (creditBalances[booking.customerId]?.[serviceType] ?? 0) + 1,
@@ -1222,7 +1254,7 @@ export function ManagementApp() {
           current.filter((receipt) => receipt.number !== booking.receiptNumber),
         );
       }
-      if (booking.settlementStatus === "pix_pending") {
+      if (booking.settlementStatus === "invoice_pending") {
         setBillableServices((current) =>
           current.filter((service) => service.id !== `bill-${booking.id}`),
         );
@@ -1231,7 +1263,7 @@ export function ManagementApp() {
 
     if (
       status === "completed" &&
-      booking.paymentPreference === "pix" &&
+      booking.paymentPreference === "invoice" &&
       !billableServices.some((service) => service.id === `bill-${booking.id}`)
     ) {
       setBillableServices((current) => [
@@ -1257,7 +1289,7 @@ export function ManagementApp() {
               status,
               settlementStatus:
                 status === "completed"
-                  ? "pix_pending"
+                  ? "invoice_pending"
                   : "pending",
               receiptNumber:
                 status === "completed" ? item.receiptNumber : undefined,
@@ -1343,12 +1375,12 @@ export function ManagementApp() {
     }
     const paymentPreference: Booking["paymentPreference"] =
       creditServiceTypes.includes(serviceType as CreditServiceType) &&
-      String(form.get("paymentPreference") ?? "pix") === "credit"
+      String(form.get("paymentPreference") ?? "invoice") === "credit"
         ? "credit"
-        : "pix";
+        : "invoice";
     const note = String(form.get("note") ?? "").trim() || undefined;
 
-    if (runtimeMode === "ready" && view !== "portal") {
+    if (runtimeMode === "ready") {
       const service = workspacePayload?.serviceCatalog.find(
         (item) => item.code === toWorkspaceServiceCode(serviceType),
       );
@@ -1672,9 +1704,26 @@ export function ManagementApp() {
       setToast({ message: "Revise os campos obrigatórios." });
       return;
     }
-    if (serviceType === "hotel" && (!endDate || endDate < date || lodgingNights < 0.5 || Math.round(lodgingNights * 2) !== lodgingNights * 2)) {
-      setToast({ message: "Informe entrada, saída e diárias em múltiplos de 0,5." });
-      return;
+    if (serviceType === "hotel") {
+      const calendarDays = endDate
+        ? Math.round(
+            (dateFromIso(endDate).valueOf() - dateFromIso(date).valueOf()) /
+              86_400_000,
+          )
+        : 0;
+      if (
+        calendarDays < 1 ||
+        lodgingNights < 1 ||
+        Math.round(lodgingNights * 2) !== lodgingNights * 2 ||
+        lodgingNights < calendarDays ||
+        lodgingNights > calendarDays + 0.5
+      ) {
+        setToast({
+          message:
+            "Revise a saída e as diárias. Use o período em dias ou acrescente meia diária.",
+        });
+        return;
+      }
     }
     if (endTime && endTime <= time) {
       setToast({ message: "O horário final deve ser posterior ao inicial." });
@@ -1685,9 +1734,9 @@ export function ManagementApp() {
     const priceCents = serviceType === "transport" ? (transportDirection === "round_trip" ? 1_000 : 500) : Math.max(0, Math.round(price * 100));
     const paymentPreference: Booking["paymentPreference"] =
       creditServiceTypes.includes(serviceType as CreditServiceType) &&
-      String(form.get("paymentPreference") ?? "pix") === "credit"
+      String(form.get("paymentPreference") ?? "invoice") === "credit"
         ? "credit"
-        : "pix";
+        : "invoice";
     const note = String(form.get("note") ?? "").trim() || undefined;
 
     if (runtimeMode === "ready") {
@@ -1771,7 +1820,10 @@ export function ManagementApp() {
         service: serviceLabels[serviceType],
         serviceType,
         status: "scheduled",
-        priceCents,
+        priceCents:
+          serviceType === "hotel"
+            ? Math.round(priceCents * lodgingNights)
+            : priceCents,
         paymentPreference,
         settlementStatus: "pending",
         note,
@@ -2056,7 +2108,7 @@ export function ManagementApp() {
       return;
     }
     const standardValueCents = servicePrices[serviceType] * units;
-    setPixState({
+    setInvoiceState({
       step: "review",
       kind: "credit_package",
       selectedServices: [],
@@ -2073,13 +2125,17 @@ export function ManagementApp() {
         standardValueCents,
       },
     });
-    setDialog("pix");
+    setDialog("invoice");
   }
 
   async function saveDefaultPrices(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const next = { ...servicePrices };
+    const nextDaycareStartTime = String(
+      form.get("daycareStartTime") ?? "",
+    );
+    const nextDaycareEndTime = String(form.get("daycareEndTime") ?? "");
     for (const serviceType of ["hotel", ...creditServiceTypes] as const) {
       const cents = Math.round(Number(form.get(serviceType) ?? 0) * 100);
       if (!Number.isFinite(cents) || cents < 1) {
@@ -2087,6 +2143,17 @@ export function ManagementApp() {
         return;
       }
       next[serviceType] = cents;
+    }
+    if (
+      !nextDaycareStartTime ||
+      !nextDaycareEndTime ||
+      nextDaycareEndTime <= nextDaycareStartTime
+    ) {
+      setToast({
+        message:
+          "O horário final da creche deve ser posterior ao horário inicial.",
+      });
+      return;
     }
 
     if (runtimeMode === "ready") {
@@ -2100,9 +2167,11 @@ export function ManagementApp() {
                 hotel: next.hotel,
                 daycare: next.daycare,
                 bath: next.bath,
-                hygienic_grooming: next.grooming,
-                transport: next.transport,
+                bath_grooming: next.grooming,
+                taxi_dog: next.transport,
               },
+              daycareStartTime: nextDaycareStartTime,
+              daycareEndTime: nextDaycareEndTime,
             }),
           }),
         {
@@ -2111,11 +2180,17 @@ export function ManagementApp() {
             "Preços padrão salvos. Novos serviços já usarão os valores atualizados.",
         },
       );
-      if (result) setServicePrices(next);
+      if (result) {
+        setServicePrices(next);
+        setDaycareStartTime(nextDaycareStartTime);
+        setDaycareEndTime(nextDaycareEndTime);
+      }
       return;
     }
 
     setServicePrices(next);
+    setDaycareStartTime(nextDaycareStartTime);
+    setDaycareEndTime(nextDaycareEndTime);
     setToast({
       message:
         "Preços padrão salvos. Novos serviços já usarão os valores atualizados.",
@@ -2204,7 +2279,7 @@ export function ManagementApp() {
     });
   }
 
-  function openPixForSelection() {
+  function openInvoiceForSelection() {
     const selectedServices = billableServices.filter((item) =>
       selectedBillables.includes(item.id),
     );
@@ -2212,7 +2287,7 @@ export function ManagementApp() {
     const customer = customers.find(
       (item) => item.id === selectedServices[0].customerId,
     );
-    setPixState({
+    setInvoiceState({
       step: "review",
       kind: "services",
       selectedServices,
@@ -2224,18 +2299,18 @@ export function ManagementApp() {
         0,
       ),
     });
-    setDialog("pix");
+    setDialog("invoice");
   }
 
-  function openExistingPix(invoice: Invoice) {
+  function openExistingInvoice(invoice: Invoice) {
     const creditPurchase = creditPurchases.find(
       (purchase) => purchase.invoiceId === invoice.id,
     );
     const customer = customers.find(
       (item) => item.id === invoice.customerId,
     );
-    setPixState({
-      step: invoice.status === "paid" ? "paid" : "code",
+    setInvoiceState({
+      step: "code",
       kind: creditPurchase ? "credit_package" : "services",
       invoice,
       selectedServices: [],
@@ -2243,10 +2318,6 @@ export function ManagementApp() {
       customerPhone: customer?.phone,
       customerEmail: customer?.email,
       amountCents: invoice.amountCents,
-      providerMessage:
-        runtimeMode === "ready" && view !== "portal"
-          ? "A fatura está registrada e pronta para compartilhar com o cliente."
-          : undefined,
       creditPurchase: creditPurchase
         ? {
             customerId: creditPurchase.customerId,
@@ -2259,20 +2330,162 @@ export function ManagementApp() {
           }
         : undefined,
     });
-    setDialog("pix");
+    setDialog("invoice");
   }
 
-  async function issuePix() {
-    if (!pixState) return;
+  async function issueLodgingInvoice(
+    booking: Booking,
+    kind: "deposit" | "balance",
+  ) {
+    if (runtimeMode === "ready") {
+      const response = await runLiveAction(
+        `lodging-${kind}-invoice`,
+        () =>
+          requestJson<{
+            invoice: {
+              id: string;
+              invoiceNumber: string;
+              accountId: string;
+              recipientNameSnapshot: string;
+              totalCents: number;
+              dueDate: string;
+              sourceType: "lodging_deposit" | "lodging_balance";
+              items?: Array<{
+                dogNameSnapshot: string;
+                serviceNameSnapshot: string;
+                serviceDateSnapshot: string;
+                amountCents: number;
+              }>;
+            };
+          }>(
+            `/api/appointments/${booking.id}/${
+              kind === "deposit" ? "deposit-invoice" : "balance-invoice"
+            }`,
+            {
+              method: "POST",
+              body: JSON.stringify({ dueDate: operationalToday }),
+            },
+          ),
+        {
+          refresh: true,
+          successMessage:
+            kind === "deposit"
+              ? "Fatura do sinal criada."
+              : "Fatura do saldo criada com o sinal pago já abatido.",
+        },
+      );
+      if (!response) return;
+      const invoice: Invoice = {
+        id: response.invoice.id,
+        number: response.invoice.invoiceNumber,
+        customerId: response.invoice.accountId,
+        customerName: response.invoice.recipientNameSnapshot,
+        amountCents: response.invoice.totalCents,
+        due:
+          response.invoice.dueDate === operationalToday
+            ? "Vence hoje"
+            : `Vence em ${formatShortDate(response.invoice.dueDate)}`,
+        status: "pending",
+        items:
+          kind === "deposit"
+            ? `Sinal da hospedagem de ${booking.dogName}`
+            : `Saldo da hospedagem de ${booking.dogName}`,
+        sourceType: response.invoice.sourceType,
+        periodStart: booking.date,
+        periodEnd: booking.endDate ?? booking.date,
+        lines:
+          response.invoice.items?.map((item) => ({
+            dogName: item.dogNameSnapshot,
+            service: item.serviceNameSnapshot,
+            date: item.serviceDateSnapshot,
+            amountCents: item.amountCents,
+          })) ?? [
+            {
+              dogName: booking.dogName,
+              service:
+                kind === "deposit"
+                  ? "Sinal da hospedagem"
+                  : "Saldo da hospedagem",
+              date: booking.date,
+              amountCents: response.invoice.totalCents,
+            },
+          ],
+      };
+      openExistingInvoice(invoice);
+      return;
+    }
+
+    const depositAmount = Math.round(
+      (booking.priceCents * (booking.depositPercent ?? 50)) / 100,
+    );
+    const paidDeposit =
+      booking.depositInvoice?.status === "paid"
+        ? booking.depositInvoice.amountCents
+        : 0;
+    const amountCents =
+      kind === "deposit"
+        ? depositAmount
+        : Math.max(0, booking.priceCents - paidDeposit);
+    const invoice: Invoice = {
+      id: `invoice-${crypto.randomUUID()}`,
+      number: `${kind === "deposit" ? "SIN" : "SAL"}-${String(
+        185 + invoices.length,
+      ).padStart(6, "0")}`,
+      customerId: booking.customerId,
+      customerName: booking.customerName,
+      amountCents,
+      due: "Vence hoje",
+      status: "pending",
+      items:
+        kind === "deposit"
+          ? `Sinal da hospedagem de ${booking.dogName}`
+          : `Saldo da hospedagem de ${booking.dogName}`,
+      sourceType:
+        kind === "deposit" ? "lodging_deposit" : "lodging_balance",
+      periodStart: booking.date,
+      periodEnd: booking.endDate ?? booking.date,
+      lines: [
+        {
+          dogName: booking.dogName,
+          service:
+            kind === "deposit"
+              ? "Sinal da hospedagem"
+              : "Saldo da hospedagem",
+          date: booking.date,
+          amountCents,
+        },
+      ],
+    };
+    setInvoices((current) => [invoice, ...current]);
+    setBookings((current) =>
+      current.map((item) =>
+        item.id === booking.id
+          ? {
+              ...item,
+              [kind === "deposit" ? "depositInvoice" : "balanceInvoice"]: {
+                id: invoice.id,
+                number: invoice.number,
+                amountCents,
+                status: "pending",
+              },
+            }
+          : item,
+      ),
+    );
+    openExistingInvoice(invoice);
+  }
+
+  async function issueInvoice() {
+    if (!invoiceState) return;
 
     if (runtimeMode === "ready") {
       if (busyAction) return;
-      setBusyAction("issue-pix");
-      let registeredInvoice = pixState.invoice;
+      setBusyAction("issue-invoice");
+      let registeredInvoice = invoiceState.invoice;
       try {
         if (!registeredInvoice) {
-          if (pixState.kind === "credit_package" && pixState.creditPurchase) {
-            const purchase = pixState.creditPurchase;
+          if (invoiceState.kind === "credit_package" && invoiceState.creditPurchase) {
+            const purchase = invoiceState.creditPurchase;
             const response = await requestJson<{
               invoice: {
                 id: string;
@@ -2303,6 +2516,19 @@ export function ManagementApp() {
               items: `Pacote de ${purchase.units} créditos de ${
                 serviceLabels[purchase.serviceType]
               }`,
+              sourceType: "credit_package",
+              periodStart: operationalToday,
+              periodEnd: operationalToday,
+              lines: [
+                {
+                  dogName: "Não se aplica",
+                  service: `${purchase.units} créditos de ${
+                    serviceLabels[purchase.serviceType]
+                  }`,
+                  date: operationalToday,
+                  amountCents: response.invoice.totalCents,
+                },
+              ],
             };
           } else {
             const response = await requestJson<{
@@ -2316,7 +2542,7 @@ export function ManagementApp() {
             }>("/api/invoices", {
               method: "POST",
               body: JSON.stringify({
-                appointmentItemIds: pixState.selectedServices.map(
+                appointmentItemIds: invoiceState.selectedServices.map(
                   (service) => service.id,
                 ),
                 dueDate: operationalToday,
@@ -2330,22 +2556,26 @@ export function ManagementApp() {
               amountCents: response.invoice.totalCents,
               due: "Vence hoje",
               status: "pending",
-              items: `${pixState.selectedServices.length} serviços selecionados`,
+              items: `${invoiceState.selectedServices.length} serviços selecionados`,
+              sourceType: "services",
+              lines: invoiceState.selectedServices.map((service) => ({
+                dogName: service.dogName,
+                service: service.service,
+                date: service.date,
+                amountCents: service.amountCents,
+              })),
             };
           }
         }
 
         setSelectedBillables([]);
         await refreshWorkspace();
-        setPixState((current) =>
+        setInvoiceState((current) =>
           current
             ? {
                 ...current,
                 invoice: registeredInvoice,
                 step: "code",
-                copyPasteCode: undefined,
-                providerMessage:
-                  "O PDF está pronto para compartilhar ou salvar no aparelho.",
               }
             : current,
         );
@@ -2357,16 +2587,12 @@ export function ManagementApp() {
         }
         if (registeredInvoice) {
           await refreshWorkspace();
-          setPixState((current) =>
+          setInvoiceState((current) =>
             current
               ? {
                   ...current,
                   invoice: registeredInvoice,
                   step: "code",
-                  providerMessage:
-                    error instanceof Error
-                      ? error.message
-                      : "A fatura foi registrada, mas não foi possível atualizar a tela.",
                 }
               : current,
           );
@@ -2384,51 +2610,113 @@ export function ManagementApp() {
     }
 
     const invoice: Invoice =
-      pixState.invoice ??
+      invoiceState.invoice ??
       {
         id: `invoice-${crypto.randomUUID()}`,
         number: String(185 + invoices.length).padStart(6, "0"),
         customerId:
-          pixState.creditPurchase?.customerId ??
-          pixState.selectedServices[0]?.customerId ??
+          invoiceState.creditPurchase?.customerId ??
+          invoiceState.selectedServices[0]?.customerId ??
           "",
-        customerName: pixState.customerName,
-        amountCents: pixState.amountCents,
+        customerName: invoiceState.customerName,
+        amountCents: invoiceState.amountCents,
         due: "Vence hoje",
         status: "pending",
         items:
-          pixState.kind === "credit_package" && pixState.creditPurchase
-            ? `Pacote de ${pixState.creditPurchase.units} créditos de ${
-                serviceLabels[pixState.creditPurchase.serviceType]
+          invoiceState.kind === "credit_package" && invoiceState.creditPurchase
+            ? `Pacote de ${invoiceState.creditPurchase.units} créditos de ${
+                serviceLabels[invoiceState.creditPurchase.serviceType]
               }`
-            : `${pixState.selectedServices.length} serviços selecionados`,
+            : `${invoiceState.selectedServices.length} serviços selecionados`,
+        sourceType:
+          invoiceState.kind === "credit_package"
+            ? "credit_package"
+            : "services",
+        periodStart: operationalToday,
+        periodEnd: operationalToday,
+        lines:
+          invoiceState.kind === "credit_package" &&
+          invoiceState.creditPurchase
+            ? [
+                {
+                  dogName: "Não se aplica",
+                  service: `Pacote de ${invoiceState.creditPurchase.units} créditos de ${
+                    serviceLabels[invoiceState.creditPurchase.serviceType]
+                  }`,
+                  date: operationalToday,
+                  amountCents: invoiceState.amountCents,
+                },
+              ]
+            : invoiceState.selectedServices.map((service) => ({
+                dogName: service.dogName,
+                service: service.service,
+                date: service.date,
+                amountCents: service.amountCents,
+              })),
       };
-    if (!pixState.invoice) {
+    if (!invoiceState.invoice) {
       setInvoices((current) => [invoice, ...current]);
-      if (pixState.kind === "credit_package" && pixState.creditPurchase) {
+      if (invoiceState.kind === "credit_package" && invoiceState.creditPurchase) {
         const purchase: CreditPurchase = {
-          ...pixState.creditPurchase,
+          ...invoiceState.creditPurchase,
           id: `credit-purchase-${crypto.randomUUID()}`,
-          status: "awaiting_pix",
+          status: "awaiting_payment",
           createdAt: formatShortDate(operationalToday),
           invoiceId: invoice.id,
         };
         setCreditPurchases((current) => [purchase, ...current]);
       }
     }
-    setPixState({ ...pixState, invoice, step: "code" });
+    setInvoiceState({ ...invoiceState, invoice, step: "code" });
     setToast({
       message:
-        pixState.kind === "credit_package"
+        invoiceState.kind === "credit_package"
           ? "Fatura do pacote criada. Libere os créditos após registrar o pagamento."
           : "Fatura demonstrativa criada.",
     });
   }
 
-  function simulatePixPayment() {
-    if (runtimeMode === "ready" && view !== "portal") return;
-    if (!pixState?.invoice) return;
-    const invoiceId = pixState.invoice.id;
+  async function registerInvoicePayment(paidAt = operationalToday) {
+    if (!invoiceState?.invoice) return;
+    const invoiceId = invoiceState.invoice.id;
+    if (runtimeMode === "ready") {
+      const result = await runLiveAction(
+        "register-invoice-payment",
+        () =>
+          requestJson<{
+            invoice: { id: string; status: "paid"; paidAt: string };
+            creditsGranted: number;
+          }>(`/api/invoices/${invoiceId}/payments`, {
+            method: "POST",
+            body: JSON.stringify({ paidAt }),
+          }),
+        {
+          refresh: true,
+          successMessage:
+            invoiceState.kind === "credit_package"
+              ? "Pagamento registrado. Os créditos já estão disponíveis."
+              : "Pagamento registrado e fatura concluída.",
+        },
+      );
+      if (result) {
+        setInvoiceState((current) =>
+          current
+            ? {
+                ...current,
+                invoice: current.invoice
+                  ? {
+                      ...current.invoice,
+                      status: "paid",
+                      due: `Pago em ${formatShortDate(paidAt)}`,
+                    }
+                  : current.invoice,
+                step: "paid",
+              }
+            : current,
+        );
+      }
+      return;
+    }
     setInvoices((current) =>
       current.map((invoice) =>
         invoice.id === invoiceId
@@ -2436,12 +2724,13 @@ export function ManagementApp() {
           : invoice,
       ),
     );
-    if (pixState.kind === "credit_package" && pixState.creditPurchase) {
-      const purchase = pixState.creditPurchase;
+    if (invoiceState.kind === "credit_package" && invoiceState.creditPurchase) {
+      const purchase = invoiceState.creditPurchase;
       const currentCustomerBalance = creditBalances[purchase.customerId] ?? {
         daycare: 0,
         bath: 0,
         grooming: 0,
+        transport: 0,
       };
       const nextBalances: CreditBalances = {
         ...creditBalances,
@@ -2469,20 +2758,56 @@ export function ManagementApp() {
       );
     } else {
       const selectedIds = new Set(
-        pixState.selectedServices.map((item) => item.id),
+        invoiceState.selectedServices.map((item) => item.id),
       );
       setBillableServices((current) =>
         current.filter((item) => !selectedIds.has(item.id)),
       );
       setSelectedBillables([]);
     }
-    setPixState({ ...pixState, step: "paid" });
+    setInvoiceState({
+      ...invoiceState,
+      invoice: { ...invoiceState.invoice, status: "paid" },
+      step: "paid",
+    });
     setToast({
       message:
-        pixState.kind === "credit_package"
+        invoiceState.kind === "credit_package"
           ? "Pagamento confirmado. Os créditos já estão disponíveis para uso."
           : "Pagamento confirmado no ambiente de demonstração.",
     });
+  }
+
+  async function voidInvoice() {
+    if (!invoiceState?.invoice || invoiceState.invoice.status === "paid") return;
+    const reason = window.prompt(
+      "Por que esta fatura deve ser cancelada? O motivo ficará no histórico.",
+    )?.trim();
+    if (!reason) return;
+    if (runtimeMode === "ready") {
+      const result = await runLiveAction(
+        "void-invoice",
+        () =>
+          requestJson<{ invoice: { id: string; status: "void" } }>(
+            `/api/invoices/${invoiceState.invoice!.id}/void`,
+            {
+              method: "POST",
+              body: JSON.stringify({ reason }),
+            },
+          ),
+        {
+          refresh: true,
+          successMessage: "Fatura cancelada e itens liberados para correção.",
+        },
+      );
+      if (!result) return;
+    } else {
+      setInvoices((current) =>
+        current.filter((invoice) => invoice.id !== invoiceState.invoice?.id),
+      );
+    }
+    setDialog(null);
+    setInvoiceState(null);
   }
 
   async function submitInitialSetup(event: FormEvent<HTMLFormElement>) {
@@ -2736,26 +3061,6 @@ export function ManagementApp() {
   const signedInName =
     workspacePayload?.identity.displayName || "Administração";
 
-  if (view === "portal") {
-    return (
-      <CustomerPortal
-        dogs={demoDogs.filter((dog) => dog.customerId === "customer-marina")}
-        invoice={demoInvoices.find((invoice) => invoice.id === "invoice-184")}
-        portalTab={portalTab}
-        setPortalTab={setPortalTab}
-        onExit={() => navigate("today")}
-        onOpenPix={(invoice) => openExistingPix(invoice)}
-        dialog={dialog}
-        pixState={pixState}
-        setDialog={setDialog}
-        issuePix={issuePix}
-        simulatePixPayment={simulatePixPayment}
-        setToast={setToast}
-        liveMode={false}
-      />
-    );
-  }
-
   const copy = pageCopy[view];
 
   return (
@@ -2767,7 +3072,7 @@ export function ManagementApp() {
       <aside className="sidebar" aria-label="Navegação principal">
         <button className="brand" onClick={() => navigate("today")}>
           <span className="brand-mark" aria-hidden="true">
-            GC
+            HQ
           </span>
           <span>
             <strong>Hospet Quintal <small>HQ</small></strong>
@@ -2799,13 +3104,6 @@ export function ManagementApp() {
         </nav>
 
         <div className="sidebar-spacer" />
-        <button className="portal-entry" onClick={() => setView("portal")}>
-          <span>
-            <small>Área do cliente</small>
-            Prévia do portal
-          </span>
-          <span aria-hidden="true">›</span>
-        </button>
         <div className="account-card">
           <span className="avatar avatar-forest">
             {initials(signedInName)}
@@ -2828,7 +3126,7 @@ export function ManagementApp() {
 
       <div className="mobile-header">
         <button className="brand compact" onClick={() => navigate("today")}>
-          <span className="brand-mark">GC</span>
+          <span className="brand-mark">HQ</span>
           <strong>Hospet Quintal <small>HQ</small></strong>
         </button>
         <div className="mobile-header-actions">
@@ -2989,7 +3287,8 @@ export function ManagementApp() {
               onToggleTask={toggleTask}
               onViewAgenda={() => navigate("agenda")}
               onViewBilling={() => navigate("billing")}
-              onOpenPix={openExistingPix}
+              onOpenInvoice={openExistingInvoice}
+              onLodgingInvoice={issueLodgingInvoice}
               onOpenReceipt={openReceipt}
               invoice={invoices.find((item) => item.status !== "paid")}
             />
@@ -3009,7 +3308,7 @@ export function ManagementApp() {
               onEdit={openBookingEditor}
               onCancel={askToCancel}
               onOpenReceipt={openReceipt}
-              onNewService={() => openServiceDialog()}
+              onLodgingInvoice={issueLodgingInvoice}
             />
           )}
           {view === "dogs" &&
@@ -3054,7 +3353,7 @@ export function ManagementApp() {
                   setSelectedDogId(dogId);
                   setView("dogs");
                 }}
-                onOpenPix={openExistingPix}
+                onOpenInvoice={openExistingInvoice}
                 creditBalances={creditBalances}
                 creditPurchases={creditPurchases.filter(
                   (purchase) => purchase.customerId === selectedCustomer.id,
@@ -3089,8 +3388,8 @@ export function ManagementApp() {
               creditPurchases={creditPurchases}
               receipts={receipts}
               onToggleBillable={toggleBillable}
-              onCreatePix={openPixForSelection}
-              onOpenPix={openExistingPix}
+              onCreateInvoice={openInvoiceForSelection}
+              onOpenInvoice={openExistingInvoice}
               onAddCredits={() => openCreditPackage()}
               onOpenReceipt={openReceipt}
             />
@@ -3101,6 +3400,8 @@ export function ManagementApp() {
           {view === "settings" && (
             <SettingsView
               prices={servicePrices}
+              daycareStartTime={daycareStartTime}
+              daycareEndTime={daycareEndTime}
               onSave={saveDefaultPrices}
             />
           )}
@@ -3108,19 +3409,59 @@ export function ManagementApp() {
       </div>
 
       <nav className="mobile-nav" aria-label="Navegação móvel">
-        {navItems.map((item) => (
+        {navItems.slice(0, 4).map((item) => (
           <button
             key={item.id}
             className={view === item.id ? "active" : ""}
-            onClick={() => navigate(item.id)}
+            onClick={() => {
+              setMobileMoreOpen(false);
+              navigate(item.id);
+            }}
           >
             <span className="mobile-nav-mark" aria-hidden="true" />
             {item.shortLabel}
           </button>
         ))}
+        <button
+          className={
+            mobileMoreOpen ||
+            ["billing", "activity", "settings"].includes(view)
+              ? "active"
+              : ""
+          }
+          onClick={() => setMobileMoreOpen((current) => !current)}
+          aria-expanded={mobileMoreOpen}
+        >
+          <span className="mobile-nav-mark" aria-hidden="true" />
+          Mais
+        </button>
       </nav>
 
-      <button className="mobile-fab" onClick={() => openServiceDialog()}>
+      {mobileMoreOpen && (
+        <div className="mobile-more-menu" role="menu">
+          {navItems.slice(4).map((item) => (
+            <button
+              key={item.id}
+              role="menuitem"
+              onClick={() => {
+                setMobileMoreOpen(false);
+                navigate(item.id);
+              }}
+            >
+              <strong>{item.label}</strong>
+              {item.id === "billing" && pendingBillingCount > 0 && (
+                <span>{pendingBillingCount} pendentes</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <button
+        className="mobile-fab"
+        onClick={() => openServiceDialog()}
+        hidden={Boolean(selectedDog || selectedCustomer) || view === "settings"}
+      >
         <span aria-hidden="true">+</span> Novo serviço
       </button>
 
@@ -3138,7 +3479,7 @@ export function ManagementApp() {
                 value={serviceDraftDogId}
                 onChange={(event) => {
                   setServiceDraftDogId(event.target.value);
-                  setServiceDraftPayment("pix");
+                  setServiceDraftPayment("invoice");
                 }}
                 autoFocus
                 required
@@ -3160,7 +3501,13 @@ export function ManagementApp() {
             {serviceDraftType === "hotel" && (
               <label className="field">
                 <span>Saída *</span>
-                <input name="endDate" type="date" defaultValue={selectedDate} required />
+                <input
+                  name="endDate"
+                  type="date"
+                  min={shiftDate(selectedDate, 1)}
+                  defaultValue={shiftDate(selectedDate, 1)}
+                  required
+                />
               </label>
             )}
             <label className="field">
@@ -3174,8 +3521,9 @@ export function ManagementApp() {
                   if (
                     !creditServiceTypes.includes(next as CreditServiceType)
                   ) {
-                    setServiceDraftPayment("pix");
+                    setServiceDraftPayment("invoice");
                   }
+                  if (next !== "hotel") setServiceDraftHasDeposit(false);
                 }}
               >
                 {Object.entries(serviceLabels).map(([key, label]) => (
@@ -3189,11 +3537,11 @@ export function ManagementApp() {
               <>
                 <label className="field">
                   <span>{serviceDraftType === "hotel" ? "Horário de entrada (opcional)" : "Horário inicial *"}</span>
-                  <input name="time" type="time" defaultValue={serviceDraftType === "daycare" ? "07:30" : "09:00"} required={serviceDraftType !== "hotel"} />
+                  <input name="time" type="time" defaultValue={serviceDraftType === "daycare" ? daycareStartTime : "09:00"} required={serviceDraftType !== "hotel"} />
                 </label>
                 <label className="field">
                   <span>{serviceDraftType === "hotel" ? "Horário de saída (opcional)" : "Horário final"}</span>
-                  <input name="endTime" type="time" defaultValue={serviceDraftType === "daycare" ? "19:30" : "17:00"} />
+                  <input name="endTime" type="time" defaultValue={serviceDraftType === "daycare" ? daycareEndTime : "17:00"} />
                 </label>
               </>
             )}
@@ -3210,16 +3558,32 @@ export function ManagementApp() {
               <>
                 <label className="field">
                   <span>Número de diárias *</span>
-                  <input name="lodgingNights" type="number" min="0.5" step="0.5" defaultValue="1" required />
+                  <input name="lodgingNights" type="number" min="1" step="0.5" defaultValue="1" required />
                 </label>
                 <label className="check-field">
-                  <input name="hasDeposit" type="checkbox" />
+                  <input
+                    name="hasDeposit"
+                    type="checkbox"
+                    checked={serviceDraftHasDeposit}
+                    onChange={(event) =>
+                      setServiceDraftHasDeposit(event.target.checked)
+                    }
+                  />
                   <span>Cobrar sinal no check-in</span>
                 </label>
-                <label className="field">
-                  <span>Sinal (%)</span>
-                  <input name="depositPercent" type="number" min="1" max="99" defaultValue="50" />
-                </label>
+                {serviceDraftHasDeposit && (
+                  <label className="field">
+                    <span>Sinal no check-in (%)</span>
+                    <input
+                      name="depositPercent"
+                      type="number"
+                      min="1"
+                      max="99"
+                      defaultValue="50"
+                      required
+                    />
+                  </label>
+                )}
               </>
             )}
             <label className="field">
@@ -3253,7 +3617,7 @@ export function ManagementApp() {
                   )
                 }
               >
-                <option value="pix">Gerar fatura</option>
+                <option value="invoice">Gerar fatura</option>
                 <option
                   value="credit"
                   disabled={
@@ -3374,7 +3738,7 @@ export function ManagementApp() {
                 name="paymentPreference"
                 defaultValue={bookingToEdit.paymentPreference}
               >
-                <option value="pix">Gerar fatura</option>
+                <option value="invoice">Gerar fatura</option>
                 <option value="credit">Usar 1 crédito</option>
               </select>
             </label>
@@ -3819,18 +4183,23 @@ export function ManagementApp() {
         />
       )}
 
-      {dialog === "pix" && pixState && (
-        <PixDialog
-          state={pixState}
+      {dialog === "invoice" && invoiceState && (
+        <InvoiceDialog
+          state={invoiceState}
           onClose={() => {
             setDialog(null);
-            setPixState(null);
+            setInvoiceState(null);
           }}
-          onIssue={issuePix}
-          onSimulatePayment={simulatePixPayment}
+          onIssue={issueInvoice}
+          onRegisterPayment={registerInvoicePayment}
+          onVoid={voidInvoice}
           onFeedback={(message) => setToast({ message })}
           liveMode={runtimeMode === "ready"}
-          busy={busyAction === "issue-pix"}
+          busy={
+            busyAction === "issue-invoice" ||
+            busyAction === "register-invoice-payment" ||
+            busyAction === "void-invoice"
+          }
         />
       )}
 
@@ -3874,7 +4243,7 @@ function StartupScreen({
     <main className="startup-screen">
       <section className="startup-card" aria-live="polite">
         <span className="brand-mark startup-mark" aria-hidden="true">
-          GC
+          HQ
         </span>
         <p className="eyebrow">Hospet Quintal · HQ</p>
         <h1>{title}</h1>
@@ -3908,7 +4277,7 @@ function LoginScreen({
     <main className="startup-screen">
       <section className="startup-card auth-card">
         <span className="brand-mark startup-mark" aria-hidden="true">
-          GC
+          HQ
         </span>
         <p className="eyebrow">Acesso administrativo</p>
         <h1>Entre para cuidar da operação.</h1>
@@ -3971,7 +4340,7 @@ function InitialSetupScreen({
     <main className="startup-screen setup-screen">
       <section className="startup-card setup-card">
         <span className="brand-mark startup-mark" aria-hidden="true">
-          GC
+          HQ
         </span>
         <p className="eyebrow">Configuração única</p>
         <h1>Cadastre os dois administradores.</h1>
@@ -4100,7 +4469,7 @@ function OnboardingScreen({
     <main className="startup-screen">
       <section className="startup-card onboarding-card">
         <span className="brand-mark startup-mark" aria-hidden="true">
-          GC
+          HQ
         </span>
         <p className="eyebrow">Primeiro acesso</p>
         <h1>Vamos preparar seu ambiente privado.</h1>
@@ -4158,7 +4527,8 @@ function TodayView({
   onToggleTask,
   onViewAgenda,
   onViewBilling,
-  onOpenPix,
+  onOpenInvoice,
+  onLodgingInvoice,
   onOpenReceipt,
   invoice,
 }: {
@@ -4181,7 +4551,11 @@ function TodayView({
   onToggleTask: (id: string) => void;
   onViewAgenda: () => void;
   onViewBilling: () => void;
-  onOpenPix: (invoice: Invoice) => void;
+  onOpenInvoice: (invoice: Invoice) => void;
+  onLodgingInvoice: (
+    booking: Booking,
+    kind: "deposit" | "balance",
+  ) => void;
   onOpenReceipt: (receipt: ServiceReceipt) => void;
   invoice?: Invoice;
 }) {
@@ -4211,7 +4585,11 @@ function TodayView({
   ).size;
   const birthdays = customers.filter((customer) => customer.birthDate?.slice(5) === selectedDate.slice(5));
   const dogBirthdays = dogs.filter((dog) => dog.birthDate?.slice(5) === selectedDate.slice(5));
-  const vaccineAlerts = dogs.flatMap((dog) => (dog.vaccines ?? []).filter((vaccine) => vaccine.expiresOn >= selectedDate && vaccine.expiresOn <= shiftDate(selectedDate, 30)).map((vaccine) => ({ dog, vaccine })));
+  const vaccineAlerts = dogs.flatMap((dog) =>
+    (dog.vaccines ?? [])
+      .filter((vaccine) => vaccine.expiresOn <= shiftDate(selectedDate, 30))
+      .map((vaccine) => ({ dog, vaccine })),
+  );
 
   return (
     <>
@@ -4234,7 +4612,13 @@ function TodayView({
           <div className="alert-list">
             {birthdays.map((customer) => <p key={`customer-${customer.id}`}>🎂 Aniversário de {customer.name}</p>)}
             {dogBirthdays.map((dog) => <p key={`dog-${dog.id}`}>🎈 Aniversário de {dog.name}</p>)}
-            {vaccineAlerts.map(({ dog, vaccine }) => <p key={`${dog.id}-${vaccine.name}-${vaccine.expiresOn}`}>💉 {vaccine.name} de {dog.name} vence em {formatShortDate(vaccine.expiresOn)}</p>)}
+            {vaccineAlerts.map(({ dog, vaccine }) => (
+              <p key={`${dog.id}-${vaccine.name}-${vaccine.expiresOn}`}>
+                💉 {vaccine.name} de {dog.name}{" "}
+                {vaccine.expiresOn < selectedDate ? "venceu" : "vence"} em{" "}
+                {formatShortDate(vaccine.expiresOn)}
+              </p>
+            ))}
           </div>
         </section>
       ) : null}
@@ -4256,7 +4640,7 @@ function TodayView({
                 booking.status !== "completed",
             ).length
           }
-          label="transportes"
+          label="Taxi-dog"
         />
         <SummaryItem
           value={
@@ -4297,6 +4681,7 @@ function TodayView({
                     (receipt) => receipt.number === booking.receiptNumber,
                   )}
                   onOpenReceipt={onOpenReceipt}
+                  onLodgingInvoice={onLodgingInvoice}
                 />
               ))}
             {!filteredBookings.length && (
@@ -4435,7 +4820,7 @@ function TodayView({
               </strong>
               <p>{invoice.customerName} · vence hoje</p>
               <div className="inline-actions">
-                <button className="text-button" onClick={() => onOpenPix(invoice)}>
+                <button className="text-button" onClick={() => onOpenInvoice(invoice)}>
                   Ver cobrança
                 </button>
                 <button className="text-button muted" onClick={onViewBilling}>
@@ -4540,8 +4925,8 @@ function AgendaView({
   onEdit,
   onCancel,
   onOpenReceipt,
+  onLodgingInvoice,
   receipts,
-  onNewService,
 }: {
   bookings: Booking[];
   dogs: Dog[];
@@ -4557,8 +4942,11 @@ function AgendaView({
   onEdit: (booking: Booking) => void;
   onCancel: (booking: Booking) => void;
   onOpenReceipt: (receipt: ServiceReceipt) => void;
+  onLodgingInvoice: (
+    booking: Booking,
+    kind: "deposit" | "balance",
+  ) => void;
   receipts: ServiceReceipt[];
-  onNewService: () => void;
 }) {
   const dayBookings = bookings.filter(
     (booking) => booking.date === selectedDate,
@@ -4577,9 +4965,6 @@ function AgendaView({
           </div>
           <div className="heading-actions">
             <AgendaFilters value={agendaFilter} onChange={setAgendaFilter} />
-            <button className="primary-button compact-button" onClick={onNewService}>
-              + Novo serviço
-            </button>
           </div>
         </div>
         <div className="agenda-day-divider">
@@ -4612,6 +4997,7 @@ function AgendaView({
                 (receipt) => receipt.number === booking.receiptNumber,
               )}
               onOpenReceipt={onOpenReceipt}
+              onLodgingInvoice={onLodgingInvoice}
             />
           ))}
           {!filtered.filter((booking) => booking.status !== "cancelled").length && (
@@ -4644,6 +5030,7 @@ function AgendaView({
                 onMenu={() => undefined}
                 onEdit={onEdit}
                 onCancel={onCancel}
+                onLodgingInvoice={onLodgingInvoice}
               />
             ))}
           </details>
@@ -4712,6 +5099,7 @@ function AgendaCard({
   onCancel,
   receipt,
   onOpenReceipt,
+  onLodgingInvoice,
 }: {
   booking: Booking;
   dog?: Dog;
@@ -4722,6 +5110,10 @@ function AgendaCard({
   onCancel: (booking: Booking) => void;
   receipt?: ServiceReceipt;
   onOpenReceipt?: (receipt: ServiceReceipt) => void;
+  onLodgingInvoice?: (
+    booking: Booking,
+    kind: "deposit" | "balance",
+  ) => void;
 }) {
   const action =
     booking.date > operationalToday &&
@@ -4758,11 +5150,68 @@ function AgendaCard({
             Quitado com 1 crédito · sem nova fatura
           </span>
         )}
-        {booking.settlementStatus === "pix_pending" && (
-          <span className="settlement-note pix">
+        {booking.settlementStatus === "invoice_pending" && (
+          <span className="settlement-note invoice">
             Serviço pronto para faturamento
           </span>
         )}
+        {booking.serviceType === "hotel" && booking.depositPercent && (
+          <div className="lodging-billing-status">
+            <strong>Hospedagem com sinal de {booking.depositPercent}%</strong>
+            {booking.depositInvoice ? (
+              <span>
+                Sinal {formatCurrency(booking.depositInvoice.amountCents)} ·{" "}
+                {booking.depositInvoice.status === "paid"
+                  ? "pago"
+                  : "aguardando pagamento"}
+              </span>
+            ) : ["confirmed", "present", "in_service"].includes(
+                booking.status,
+              ) && onLodgingInvoice ? (
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => onLodgingInvoice(booking, "deposit")}
+              >
+                Gerar fatura do sinal
+              </button>
+            ) : (
+              <span>Disponível após confirmar a hospedagem</span>
+            )}
+            {booking.balanceInvoice ? (
+              <span>
+                Saldo {formatCurrency(booking.balanceInvoice.amountCents)} ·{" "}
+                {booking.balanceInvoice.status === "paid"
+                  ? "pago"
+                  : "aguardando pagamento"}
+              </span>
+            ) : booking.status === "completed" && onLodgingInvoice ? (
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => onLodgingInvoice(booking, "balance")}
+              >
+                Gerar fatura do saldo
+              </button>
+            ) : null}
+          </div>
+        )}
+        {booking.serviceType === "hotel" &&
+          !booking.depositPercent &&
+          booking.status === "completed" &&
+          !booking.balanceInvoice &&
+          onLodgingInvoice && (
+            <div className="lodging-billing-status">
+              <strong>Pagamento integral no checkout</strong>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => onLodgingInvoice(booking, "balance")}
+              >
+                Gerar fatura da hospedagem
+              </button>
+            </div>
+          )}
         {booking.note && <span className="care-note">{booking.note}</span>}
       </div>
       <div className="agenda-actions">
@@ -4879,6 +5328,7 @@ function DogProfile({
     daycare: 0,
     bath: 0,
     grooming: 0,
+    transport: 0,
   };
   const hasCredits = totalCredits(creditBalances, dog.customerId) > 0;
   return (
@@ -4971,7 +5421,7 @@ function DogProfile({
                   <strong>{balances.bath}</strong>
                 </div>
                 <div>
-                  <span>Tosa higiênica</span>
+                  <span>Banho e tosa</span>
                   <strong>{balances.grooming}</strong>
                 </div>
               </div>
@@ -5167,7 +5617,7 @@ function CustomerProfile({
   onBack,
   onEdit,
   onOpenDog,
-  onOpenPix,
+  onOpenInvoice,
   onAddCredits,
   onOpenReceipt,
   onNewService,
@@ -5182,7 +5632,7 @@ function CustomerProfile({
   onBack: () => void;
   onEdit: () => void;
   onOpenDog: (id: string) => void;
-  onOpenPix: (invoice: Invoice) => void;
+  onOpenInvoice: (invoice: Invoice) => void;
   onAddCredits: () => void;
   onOpenReceipt: (receipt: ServiceReceipt) => void;
   onNewService: () => void;
@@ -5192,6 +5642,7 @@ function CustomerProfile({
     daycare: 0,
     bath: 0,
     grooming: 0,
+    transport: 0,
   };
   return (
     <div className="profile-page">
@@ -5266,6 +5717,22 @@ function CustomerProfile({
                 <strong>{customer.email}</strong>
               </div>
               <div>
+                <span>Endereço</span>
+                <strong>{customer.address || "Não informado"}</strong>
+              </div>
+              <div>
+                <span>CPF</span>
+                <strong>{customer.cpf || "Não informado"}</strong>
+              </div>
+              <div>
+                <span>Data de nascimento</span>
+                <strong>
+                  {customer.birthDate
+                    ? formatShortDate(customer.birthDate)
+                    : "Não informada"}
+                </strong>
+              </div>
+              <div>
                 <span>Créditos</span>
                 <strong>{customer.creditsLabel}</strong>
               </div>
@@ -5316,7 +5783,7 @@ function CustomerProfile({
                       {invoice.status === "pending" && (
                         <button
                           className="text-button"
-                          onClick={() => onOpenPix(invoice)}
+                          onClick={() => onOpenInvoice(invoice)}
                         >
                           Ver fatura
                         </button>
@@ -5352,8 +5819,12 @@ function CustomerProfile({
                 <strong>{balances.bath}</strong>
               </div>
               <div>
-                <span>Tosa higiênica</span>
+                <span>Banho e tosa</span>
                 <strong>{balances.grooming}</strong>
+              </div>
+              <div>
+                <span>Taxi-dog</span>
+                <strong>{balances.transport ?? 0}</strong>
               </div>
             </div>
             <p className="ledger-note">
@@ -5381,7 +5852,7 @@ function CustomerProfile({
                         {purchase.createdAt} ·{" "}
                         {purchase.status === "paid"
                           ? "Créditos liberados"
-                          : purchase.status === "awaiting_pix"
+                          : purchase.status === "awaiting_payment"
                             ? "Fatura pendente"
                             : "Cancelado"}
                       </small>
@@ -5459,8 +5930,8 @@ function BillingView({
   creditPurchases,
   receipts,
   onToggleBillable,
-  onCreatePix,
-  onOpenPix,
+  onCreateInvoice,
+  onOpenInvoice,
   onAddCredits,
   onOpenReceipt,
 }: {
@@ -5474,8 +5945,8 @@ function BillingView({
   creditPurchases: CreditPurchase[];
   receipts: ServiceReceipt[];
   onToggleBillable: (service: BillableService) => void;
-  onCreatePix: () => void;
-  onOpenPix: (invoice: Invoice) => void;
+  onCreateInvoice: () => void;
+  onOpenInvoice: (invoice: Invoice) => void;
   onAddCredits: () => void;
   onOpenReceipt: (receipt: ServiceReceipt) => void;
 }) {
@@ -5498,7 +5969,7 @@ function BillingView({
     0,
   );
   const awaitingPackages = creditPurchases.filter(
-    (purchase) => purchase.status === "awaiting_pix",
+    (purchase) => purchase.status === "awaiting_payment",
   ).length;
 
   return (
@@ -5543,7 +6014,7 @@ function BillingView({
 
       <div className="tabs billing-tabs" role="tablist" aria-label="Financeiro">
         {[
-          ["pix", "Faturas"],
+          ["invoice", "Faturas"],
           ["credits", "Pacotes e créditos"],
           ["receipts", "Recibos"],
         ].map(([id, label]) => (
@@ -5559,7 +6030,7 @@ function BillingView({
         ))}
       </div>
 
-      {tab === "pix" && (
+      {tab === "invoice" && (
         <>
           <section className="panel full-panel">
             <div className="panel-heading">
@@ -5567,7 +6038,7 @@ function BillingView({
                 <p className="section-kicker">Aguardando faturamento</p>
                 <h2>Serviços concluídos</h2>
               </div>
-              <span className="pix-only-badge">
+              <span className="invoice-only-badge">
                 Faturas para compartilhamento
               </span>
             </div>
@@ -5652,7 +6123,7 @@ function BillingView({
                       <td>
                         <button
                           className="row-link"
-                          onClick={() => onOpenPix(invoice)}
+                          onClick={() => onOpenInvoice(invoice)}
                         >
                           {invoice.status === "pending" ? "Ver fatura" : "Detalhes"}
                         </button>
@@ -5661,6 +6132,29 @@ function BillingView({
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className="mobile-card-list invoice-mobile-list">
+              {invoices.map((invoice) => (
+                <button
+                  className="mobile-data-card"
+                  key={`mobile-${invoice.id}`}
+                  onClick={() => onOpenInvoice(invoice)}
+                >
+                  <span>
+                    <strong>#{invoice.number} · {invoice.customerName}</strong>
+                    <small>{invoice.items}</small>
+                  </span>
+                  <strong>{formatCurrency(invoice.amountCents)}</strong>
+                  <span className="mobile-data-detail">
+                    {invoice.due} ·{" "}
+                    {invoice.status === "paid"
+                      ? "Pago"
+                      : invoice.status === "overdue"
+                        ? "Vencido"
+                        : "Pendente"}
+                  </span>
+                </button>
+              ))}
             </div>
           </section>
         </>
@@ -5696,6 +6190,7 @@ function BillingView({
                   daycare: 0,
                   bath: 0,
                   grooming: 0,
+                  transport: 0,
                 };
                 return (
                   <article key={customer.id}>
@@ -5715,7 +6210,7 @@ function BillingView({
                         <strong>{balance.bath}</strong>
                       </div>
                       <div>
-                        <span>Tosa higiênica</span>
+                        <span>Banho e tosa</span>
                         <strong>{balance.grooming}</strong>
                       </div>
                     </div>
@@ -5761,14 +6256,14 @@ function BillingView({
                           className={`status-pill ${
                             purchase.status === "paid"
                               ? "success"
-                              : purchase.status === "awaiting_pix"
+                              : purchase.status === "awaiting_payment"
                                 ? "pending"
                                 : "neutral"
                           }`}
                         >
                           {purchase.status === "paid"
                             ? "Liberado"
-                            : purchase.status === "awaiting_pix"
+                            : purchase.status === "awaiting_payment"
                               ? "Fatura pendente"
                               : "Cancelado"}
                         </span>
@@ -5820,7 +6315,7 @@ function BillingView({
         </section>
       )}
 
-      {tab === "pix" && selectedBillables.length > 0 && (
+      {tab === "invoice" && selectedBillables.length > 0 && (
         <div className="selection-bar">
           <span>
             <strong>
@@ -5831,7 +6326,7 @@ function BillingView({
             </strong>
             <small>{formatCurrency(selectedTotal)}</small>
           </span>
-          <button className="primary-button" onClick={onCreatePix}>
+          <button className="primary-button" onClick={onCreateInvoice}>
             Criar fatura
           </button>
         </div>
@@ -5842,9 +6337,13 @@ function BillingView({
 
 function SettingsView({
   prices,
+  daycareStartTime,
+  daycareEndTime,
   onSave,
 }: {
   prices: Record<ServiceType, number>;
+  daycareStartTime: string;
+  daycareEndTime: string;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const settings: {
@@ -5899,7 +6398,10 @@ function SettingsView({
             ainda pode aplicar um valor diferente em um atendimento específico
             sem mudar o padrão.
           </p>
-          <p><strong>Creche:</strong> horário padrão de 07:30 às 19:30.</p>
+          <p>
+            <strong>Creche:</strong> configure abaixo o horário que será
+            preenchido nos novos agendamentos.
+          </p>
         </div>
       </section>
 
@@ -5909,7 +6411,7 @@ function SettingsView({
             <p className="section-kicker">Tabela principal</p>
             <h2>Valores sugeridos</h2>
           </div>
-          <span className="pix-only-badge">Valores em reais</span>
+          <span className="invoice-only-badge">Valores em reais</span>
         </div>
         <div className="price-settings-grid">
           {settings.map((setting) => (
@@ -5933,13 +6435,53 @@ function SettingsView({
             </label>
           ))}
         </div>
+        <div className="daycare-hours-settings">
+          <div>
+            <p className="section-kicker">Horário padrão da creche</p>
+            <h3>Entrada e saída sugeridas</h3>
+            <span>
+              Estes horários poderão ser ajustados em cada atendimento.
+            </span>
+          </div>
+          <label className="field">
+            <span>Entrada</span>
+            <input
+              name="daycareStartTime"
+              type="time"
+              defaultValue={daycareStartTime}
+              required
+            />
+          </label>
+          <label className="field">
+            <span>Saída</span>
+            <input
+              name="daycareEndTime"
+              type="time"
+              defaultValue={daycareEndTime}
+              required
+            />
+          </label>
+        </div>
+        <div className="manual-download">
+          <span>
+            <strong>Manual dos administradores</strong>
+            Aprenda o essencial primeiro e avance no seu ritmo.
+          </span>
+          <a
+            className="secondary-button"
+            href="/manual-hospet-quintal.pdf"
+            download
+          >
+            Baixar manual
+          </a>
+        </div>
         <div className="settings-actions">
           <span>
             A alteração vale para novos lançamentos. Serviços já salvos mantêm
             o valor original.
           </span>
           <button className="primary-button" type="submit">
-            Salvar preços padrão
+            Salvar configurações
           </button>
         </div>
       </form>
@@ -5996,287 +6538,6 @@ function ActivityView({ activities }: { activities: AuditActivity[] }) {
         </p>
       </div>
     </section>
-  );
-}
-
-function CustomerPortal({
-  dogs,
-  invoice,
-  portalTab,
-  setPortalTab,
-  onExit,
-  onOpenPix,
-  dialog,
-  pixState,
-  setDialog,
-  issuePix,
-  simulatePixPayment,
-  setToast,
-  liveMode,
-}: {
-  dogs: Dog[];
-  invoice?: Invoice;
-  portalTab: string;
-  setPortalTab: (value: string) => void;
-  onExit: () => void;
-  onOpenPix: (invoice: Invoice) => void;
-  dialog: DialogKind;
-  pixState: PixState | null;
-  setDialog: (value: DialogKind) => void;
-  issuePix: () => void;
-  simulatePixPayment: () => void;
-  setToast: (toast: ToastState) => void;
-  liveMode: boolean;
-}) {
-  const tabs = ["Início", "Meus cães", "Serviços", "Pagamentos", "Minha conta"];
-  return (
-    <div className="portal-root">
-      <div className="portal-preview-banner">
-        <span>
-          <strong>Prévia do portal do cliente.</strong> Dados fictícios e acesso
-          ainda não conectado.
-        </span>
-        <button onClick={onExit}>Voltar à administração</button>
-      </div>
-      <header className="portal-header">
-        <div className="brand">
-          <span className="brand-mark">GC</span>
-          <span>
-            <strong>Hospet Quintal <small>HQ</small></strong>
-            <small>Portal do cliente</small>
-          </span>
-        </div>
-        <nav aria-label="Portal do cliente">
-          {tabs.map((tab) => (
-            <button
-              key={tab}
-              className={portalTab === tab ? "active" : ""}
-              onClick={() => setPortalTab(tab)}
-            >
-              {tab}
-            </button>
-          ))}
-        </nav>
-        <span className="portal-account">
-          <span className="avatar avatar-neutral">MC</span>
-          Marina
-        </span>
-      </header>
-      <main className="portal-content">
-        <section className="portal-welcome">
-          <p className="eyebrow">Sua família canina</p>
-          <h1>Olá, Marina.</h1>
-          <p>
-            Acompanhe os próximos cuidados e pagamentos da sua família canina.
-          </p>
-        </section>
-        {portalTab === "Início" && (
-          <>
-            {invoice && (
-              <section className="portal-invoice">
-                <div>
-                  <p className="section-kicker">Pagamento pendente</p>
-                  <strong>{formatCurrency(invoice.amountCents)} em fatura</strong>
-                  <span>{invoice.due}</span>
-                  <small>{invoice.items}</small>
-                </div>
-                <button className="light-button" onClick={() => onOpenPix(invoice)}>
-                  Ver cobrança
-                </button>
-              </section>
-            )}
-            <div className="portal-grid">
-              <section className="portal-card next-care">
-                <div className="panel-heading">
-                  <div>
-                    <p className="section-kicker">Agenda</p>
-                    <h2>Próximos cuidados</h2>
-                  </div>
-                </div>
-                <div className="portal-care-row">
-                  <span className="portal-date">
-                    <strong>30</strong>
-                    JUL
-                  </span>
-                  <DogAvatar dog={dogs[0]} size="small" />
-                  <span>
-                    <strong>Bento · Creche</strong>
-                    <small>08:30–17:30 · Transporte de ida</small>
-                  </span>
-                  <span className="status-pill confirmed">Confirmado</span>
-                </div>
-                <div className="portal-care-row">
-                  <span className="portal-date">
-                    <strong>30</strong>
-                    JUL
-                  </span>
-                  <DogAvatar dog={dogs[1]} size="small" />
-                  <span>
-                    <strong>Lola · Tosa higiênica</strong>
-                    <small>10:00–10:40</small>
-                  </span>
-                  <span className="status-pill scheduled">Agendado</span>
-                </div>
-              </section>
-              <section className="portal-card">
-                <div className="panel-heading">
-                  <div>
-                    <p className="section-kicker">Família</p>
-                    <h2>Meus cães</h2>
-                  </div>
-                </div>
-                <div className="portal-dogs">
-                  {dogs.map((dog) => (
-                    <button key={dog.id} onClick={() => setPortalTab("Meus cães")}>
-                      <DogAvatar dog={dog} size="large" />
-                      <strong>{dog.name}</strong>
-                      <small>{dog.breed}</small>
-                    </button>
-                  ))}
-                </div>
-              </section>
-              <section className="portal-card">
-                <div className="panel-heading">
-                  <div>
-                    <p className="section-kicker">Pré-pagos</p>
-                    <h2>Créditos disponíveis</h2>
-                  </div>
-                </div>
-                <div className="credit-list portal-credits">
-                  <div>
-                    <span>Creche</span>
-                    <strong>4</strong>
-                  </div>
-                  <div>
-                    <span>Tosa higiênica</span>
-                    <strong>2</strong>
-                  </div>
-                  <div>
-                    <span>Banho</span>
-                    <strong>1</strong>
-                  </div>
-                </div>
-              </section>
-            </div>
-          </>
-        )}
-        {portalTab === "Meus cães" && (
-          <section className="portal-card portal-wide">
-            <div className="panel-heading">
-              <div>
-                <p className="section-kicker">Perfis compartilhados</p>
-                <h2>Bento e Lola</h2>
-              </div>
-            </div>
-            <div className="portal-dog-profiles">
-              {dogs.map((dog) => (
-                <div key={dog.id}>
-                  <DogAvatar dog={dog} size="large" />
-                  <span>
-                    <strong>{dog.name}</strong>
-                    <small>
-                      {dog.breed} · {dog.age}
-                    </small>
-                  </span>
-                  <span className="status-pill success">Vacinas em dia</span>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-        {portalTab === "Serviços" && (
-          <section className="portal-card portal-wide">
-            <div className="panel-heading">
-              <div>
-                <p className="section-kicker">Histórico recente</p>
-                <h2>Serviços</h2>
-              </div>
-            </div>
-            <div className="timeline">
-              {demoBookings
-                .filter((booking) => ["dog-bento", "dog-lola"].includes(booking.dogId))
-                .map((booking) => (
-                  <div className="timeline-item" key={booking.id}>
-                    <DogAvatar
-                      dog={dogs.find((dog) => dog.id === booking.dogId)}
-                      size="small"
-                    />
-                    <div>
-                      <small>{formatShortDate(booking.date)}</small>
-                      <strong>
-                        {booking.dogName} · {booking.service}
-                      </strong>
-                      <p>{statusLabels[booking.status]}</p>
-                    </div>
-                    <span>{formatCurrency(booking.priceCents)}</span>
-                  </div>
-                ))}
-            </div>
-          </section>
-        )}
-        {portalTab === "Pagamentos" && (
-          <section className="portal-card portal-wide">
-            <div className="panel-heading">
-              <div>
-                <p className="section-kicker">Cobranças</p>
-                <h2>Faturas e pagamentos</h2>
-              </div>
-            </div>
-            {invoice && (
-              <div className="portal-payment-row">
-                <span>
-                  <strong>Cobrança #{invoice.number}</strong>
-                  <small>{invoice.items}</small>
-                </span>
-                <strong>{formatCurrency(invoice.amountCents)}</strong>
-                <InvoiceStatus invoice={invoice} />
-                <button className="text-button" onClick={() => onOpenPix(invoice)}>
-                  Ver cobrança
-                </button>
-              </div>
-            )}
-          </section>
-        )}
-        {portalTab === "Minha conta" && (
-          <section className="portal-card portal-wide account-details">
-            <div>
-              <span>Nome</span>
-              <strong>Marina Costa</strong>
-            </div>
-            <div>
-              <span>WhatsApp</span>
-              <strong>(11) 90000-1001</strong>
-            </div>
-            <div>
-              <span>E-mail</span>
-              <strong>marina.costa@example.com</strong>
-            </div>
-            <button
-              className="secondary-button"
-              onClick={() =>
-                setToast({
-                  message:
-                    "Solicitação preparada. Nenhuma mensagem foi enviada na demonstração.",
-                })
-              }
-            >
-              Solicitar alteração
-            </button>
-          </section>
-        )}
-      </main>
-      {dialog === "pix" && pixState && (
-        <PixDialog
-          state={pixState}
-          onClose={() => setDialog(null)}
-          onIssue={issuePix}
-          onSimulatePayment={simulatePixPayment}
-          onFeedback={(message) => setToast({ message })}
-          liveMode={liveMode}
-          busy={false}
-        />
-      )}
-    </div>
   );
 }
 
@@ -6499,28 +6760,28 @@ function ReceiptDialog({
   );
 }
 
-function PixDialog({
+function InvoiceDialog({
   state,
   onClose,
   onIssue,
-  onSimulatePayment,
+  onRegisterPayment,
+  onVoid,
   onFeedback,
   liveMode,
   busy,
 }: {
-  state: PixState;
+  state: InvoiceState;
   onClose: () => void;
   onIssue: () => void;
-  onSimulatePayment: () => void;
+  onRegisterPayment: (paidAt: string) => void | Promise<void>;
+  onVoid: () => void | Promise<void>;
   onFeedback: (message: string) => void;
   liveMode: boolean;
   busy: boolean;
 }) {
   const [deliveryBusy, setDeliveryBusy] =
     useState<InvoiceDeliveryChannel | null>(null);
-  const demoCode = `DEMONSTRACAO-PIX-NAO-VALIDO-${
-    state.invoice?.number ?? "NOVA-COBRANCA"
-  }`;
+  const [paidAt, setPaidAt] = useState(operationalToday);
 
   async function handleDelivery(channel: InvoiceDeliveryChannel) {
     if (deliveryBusy) return;
@@ -6597,7 +6858,7 @@ function PixDialog({
             <span>Total</span>
             <strong>{formatCurrency(state.amountCents)}</strong>
           </div>
-          <div className="pix-notice">
+          <div className="invoice-notice">
             <span className="attention-mark">i</span>
             <p>
               <strong>Fatura pronta para compartilhamento.</strong>
@@ -6656,6 +6917,7 @@ function PixDialog({
 
   if (state.step === "code") {
     const rows = invoiceDescriptionLines(state);
+    const isPaid = state.invoice?.status === "paid";
     return (
       <Dialog
         title={`Fatura nº ${state.invoice?.number ?? "—"}`}
@@ -6671,7 +6933,9 @@ function PixDialog({
               <small>Cliente</small>
               <strong>{state.customerName}</strong>
             </span>
-            <span className="status-pill pending">Fatura pendente</span>
+            <span className={`status-pill ${isPaid ? "paid" : "pending"}`}>
+              {isPaid ? "Fatura paga" : "Fatura pendente"}
+            </span>
           </header>
 
           <div className="invoice-share-items">
@@ -6742,209 +7006,49 @@ function PixDialog({
             </p>
           </div>
 
+          {!isPaid && (
+            <div className="invoice-payment-register">
+              <label>
+                Data do pagamento
+                <input
+                  type="date"
+                  value={paidAt}
+                  max={operationalToday}
+                  onChange={(event) => setPaidAt(event.target.value)}
+                />
+              </label>
+              <span>
+                Use esta ação somente depois de confirmar o recebimento do valor.
+              </span>
+            </div>
+          )}
+
           <div className="dialog-actions">
+            {!isPaid && (
+              <button className="danger-button" type="button" onClick={onVoid}>
+                Cancelar fatura
+              </button>
+            )}
             <button className="secondary-button" type="button" onClick={onClose}>
               Fechar
             </button>
-          </div>
-        </div>
-      </Dialog>
-    );
-  }
-
-  if (liveMode) {
-    return (
-      <Dialog
-        title={`Cobrança nº ${state.invoice?.number ?? "—"}`}
-        description={
-          state.kind === "credit_package"
-            ? "Pacote de créditos · aguardando pagamento"
-            : "Aguardando pagamento"
-        }
-        onClose={onClose}
-      >
-        <div className="pix-charge">
-          <div className="pix-charge-summary">
-            <span>
-              <small>Total</small>
-              <strong>{formatCurrency(state.amountCents)}</strong>
-            </span>
-            <span>
-              <small>Vencimento</small>
-              <strong>Hoje</strong>
-            </span>
-            <span className="status-pill pending">Fatura pendente</span>
-          </div>
-
-          {state.copyPasteCode ? (
-            <>
-              <div className="pix-body live-pix-body">
-                <div className="live-pix-mark" aria-hidden="true">
-                  PIX
-                </div>
-                <div className="pix-code">
-                  <label htmlFor="pix-live-code">Pix Copia e Cola</label>
-                  <div>
-                    <input
-                      id="pix-live-code"
-                      readOnly
-                      value={state.copyPasteCode}
-                    />
-                    <button
-                      className="secondary-button"
-                      onClick={async () => {
-                        await navigator.clipboard?.writeText(
-                          state.copyPasteCode ?? "",
-                        );
-                        onFeedback("Código Pix copiado.");
-                      }}
-                    >
-                      Copiar código
-                    </button>
-                  </div>
-                  <p>
-                    Os créditos, quando houver, serão liberados somente após a
-                    confirmação bancária.
-                  </p>
-                </div>
-              </div>
-              <div className="share-actions">
-                <button
-                  className="secondary-button"
-                  onClick={() =>
-                    onFeedback(
-                      "Código pronto para compartilhar pelo WhatsApp.",
-                    )
-                  }
-                >
-                  Preparar WhatsApp
-                </button>
-                <button
-                  className="secondary-button"
-                  onClick={() =>
-                    onFeedback("Código pronto para compartilhar por e-mail.")
-                  }
-                >
-                  Preparar e-mail
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="provider-state" role="status">
-              <span className="attention-mark">i</span>
-              <div>
-                <strong>Cobrança registrada com segurança.</strong>
-                <p>
-                  {state.providerMessage ||
-                    "Conecte o provedor Pix para gerar o código de pagamento."}
-                </p>
-                <button
-                  className="secondary-button"
-                  onClick={onIssue}
-                  disabled={busy}
-                >
-                  {busy ? "Tentando…" : "Tentar gerar o código Pix"}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </Dialog>
-    );
-  }
-
-  return (
-    <Dialog
-      title={`Cobrança nº ${state.invoice?.number ?? "—"}`}
-      description={
-        state.kind === "credit_package"
-          ? "Pacote de créditos · aguardando pagamento"
-          : "Aguardando pagamento"
-      }
-      onClose={onClose}
-    >
-      <div className="pix-charge">
-        <div className="pix-charge-summary">
-          <span>
-            <small>Total</small>
-            <strong>{formatCurrency(state.amountCents)}</strong>
-          </span>
-          <span>
-            <small>Vencimento</small>
-            <strong>Hoje</strong>
-          </span>
-            <span className="status-pill pending">Fatura pendente</span>
-        </div>
-        <div className="demo-warning">
-          Demonstração — este código não é válido para pagamento.
-        </div>
-        <div className="pix-body">
-          <DemoQr />
-          <div className="pix-code">
-            <label htmlFor="pix-demo-code">Pix Copia e Cola</label>
-            <div>
-              <input id="pix-demo-code" readOnly value={demoCode} />
+            {!isPaid && (
               <button
-                className="secondary-button"
-                onClick={async () => {
-                  await navigator.clipboard?.writeText(demoCode);
-                  onFeedback("Código Pix demonstrativo copiado.");
-                }}
+                className="primary-button"
+                type="button"
+                disabled={busy || !paidAt}
+                onClick={() => onRegisterPayment(paidAt)}
               >
-                Copiar código
+                {busy ? "Registrando…" : "Registrar pagamento"}
               </button>
-            </div>
-            <p>
-              O código real será criado pelo banco ou provedor Pix escolhido e
-              nunca ficará no GitHub.
-            </p>
+            )}
           </div>
         </div>
-        <div className="share-actions">
-          <button
-            className="secondary-button"
-            onClick={() =>
-              onFeedback(
-                "Mensagem preparada. Nada foi enviado na demonstração.",
-              )
-            }
-          >
-            Preparar WhatsApp
-          </button>
-          <button
-            className="secondary-button"
-            onClick={() =>
-              onFeedback("E-mail preparado. Nada foi enviado na demonstração.")
-            }
-          >
-            Preparar e-mail
-          </button>
-        </div>
-        <div className="simulation-strip">
-          <span>
-            <strong>Ferramenta de desenvolvimento</strong>
-            Use apenas para validar a experiência.
-          </span>
-          <button className="text-button" onClick={onSimulatePayment}>
-            Simular pagamento confirmado
-          </button>
-        </div>
-      </div>
-    </Dialog>
-  );
-}
+      </Dialog>
+    );
+  }
 
-function DemoQr() {
-  const pattern =
-    "11111110010111111110000010011100000110111010110101110110111010001010110110111010111101110110000010010100000111111110101011111110000000011100000010101011100101101001011010011110110110101100100011100010101110110111000101111001010010101010011110110101110100110110000000110110101111111010101111111100010010101000000110110100111111110111100101100010111110011110000110000010000100010110111010111011100110111010101010111110111010110111101110000010011001000111111110110110101111111";
-  return (
-    <div className="demo-qr" aria-label="QR Pix de demonstração não escaneável">
-      {pattern.split("").map((cell, index) => (
-        <span className={cell === "1" ? "filled" : ""} key={index} />
-      ))}
-      <strong>PIX<br />DEMO</strong>
-    </div>
-  );
+  return null;
 }
 
 function Dialog({
@@ -6961,6 +7065,7 @@ function Dialog({
   children: React.ReactNode;
 }) {
   const dialogRef = useRef<HTMLElement>(null);
+  const closeDialog = useEffectEvent(onClose);
   const titleId = useId();
   const descriptionId = useId();
 
@@ -6974,6 +7079,11 @@ function Dialog({
     focusable?.focus();
 
     function keepFocusInside(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeDialog();
+        return;
+      }
       if (event.key !== "Tab" || !dialogRef.current) return;
       const items = Array.from(
         dialogRef.current.querySelectorAll<HTMLElement>(
@@ -7039,6 +7149,9 @@ function DogAvatar({
   size?: "small" | "regular" | "large" | "xlarge";
 }) {
   if (dog?.photoUrl) {
+    // Uploaded dog photos use private, short-lived application URLs; a plain
+    // image avoids sending those URLs through an external optimization service.
+    // eslint-disable-next-line @next/next/no-img-element
     return <img className={`avatar dog-avatar avatar-${size}`} src={dog.photoUrl} alt="" />;
   }
   return (

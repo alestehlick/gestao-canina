@@ -23,7 +23,8 @@ import {
 const creditServiceCodes = new Set([
   "daycare",
   "bath",
-  "hygienic_grooming",
+  "bath_grooming",
+  "taxi_dog",
 ]);
 
 function receiptNumber() {
@@ -110,11 +111,11 @@ export async function POST(request: Request) {
         "Não é possível usar crédito em um serviço cancelado.",
       );
     }
-    if (item.activeInvoiceId || item.settlementMethod === "pix") {
+    if (item.activeInvoiceId || item.settlementMethod === "invoice") {
       throw new HttpError(
         409,
         "service_already_invoiced",
-        "Este serviço já está vinculado a uma cobrança Pix.",
+        "Este serviço já está vinculado a uma fatura.",
       );
     }
     if (item.paymentPreference !== "credit") {

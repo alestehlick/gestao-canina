@@ -29,10 +29,15 @@ const nextConfig: NextConfig = {
         key: "Permissions-Policy",
         value: "camera=(), geolocation=(), microphone=(), payment=()",
       },
-      { key: "Cache-Control", value: "private, no-store" },
     ];
 
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      {
+        source: "/api/:path*",
+        headers: [{ key: "Cache-Control", value: "private, no-store" }],
+      },
+    ];
   },
 };
 

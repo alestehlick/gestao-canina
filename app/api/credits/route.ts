@@ -15,7 +15,8 @@ import {
 const creditServiceCodes = [
   "daycare",
   "bath",
-  "hygienic_grooming",
+  "bath_grooming",
+  "taxi_dog",
 ] as const;
 
 export const dynamic = "force-dynamic";

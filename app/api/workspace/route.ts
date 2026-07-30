@@ -21,6 +21,7 @@ import {
   dogs,
   dogTutors,
   establishments,
+  invoiceItems,
   invoices,
   serviceCatalog,
   tasks,
@@ -143,6 +144,7 @@ export async function GET(request: Request) {
       scheduleRows,
       taskRows,
       invoiceRows,
+      invoiceItemRows,
       packageRows,
       purchaseRows,
       balanceRows,
@@ -253,6 +255,20 @@ export async function GET(request: Request) {
         .limit(300),
       db
         .select({
+          id: invoiceItems.id,
+          invoiceId: invoiceItems.invoiceId,
+          dogNameSnapshot: invoiceItems.dogNameSnapshot,
+          serviceNameSnapshot: invoiceItems.serviceNameSnapshot,
+          serviceDateSnapshot: invoiceItems.serviceDateSnapshot,
+          descriptionSnapshot: invoiceItems.descriptionSnapshot,
+          amountCents: invoiceItems.amountCents,
+        })
+        .from(invoiceItems)
+        .innerJoin(invoices, eq(invoices.id, invoiceItems.invoiceId))
+        .where(eq(invoices.establishmentId, establishmentId))
+        .orderBy(asc(invoiceItems.serviceDateSnapshot)),
+      db
+        .select({
           id: creditPackages.id,
           serviceCatalogId: creditPackages.serviceCatalogId,
           serviceCode: serviceCatalog.code,
@@ -359,8 +375,8 @@ export async function GET(request: Request) {
         quantity: number;
         totalCents: number;
         status: "scheduled" | "completed" | "cancelled";
-        paymentPreference: "pix" | "credit";
-        settlementMethod: "unsettled" | "pix" | "credit";
+        paymentPreference: "invoice" | "credit";
+        settlementMethod: "unsettled" | "invoice" | "credit";
         settledAt: string | null;
         activeInvoiceId: string | null;
       }>;
@@ -440,7 +456,10 @@ export async function GET(request: Request) {
       agenda: [...agendaById.values()],
       tasks: taskRows,
       billing: {
-        invoices: invoiceRows,
+        invoices: invoiceRows.map((invoice) => ({
+          ...invoice,
+          items: invoiceItemRows.filter((item) => item.invoiceId === invoice.id),
+        })),
         creditPackages: packageRows,
         creditPurchases: purchaseRows,
         creditBalances: balanceRows.map((balance) => ({

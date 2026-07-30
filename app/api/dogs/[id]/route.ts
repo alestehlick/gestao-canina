@@ -49,11 +49,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     const storage = getRuntimeBindings().FILES;
     if (!storage) throw new HttpError(503, "photo_storage_unavailable", "O armazenamento de fotos não está disponível.");
-    const [dog] = await getDb().select({ id: dogs.id }).from(dogs).where(and(eq(dogs.id, id), eq(dogs.establishmentId, identity.establishmentId!))).limit(1);
+    const [dog] = await getDb().select({
+      id: dogs.id,
+      photoObjectKey: dogs.photoObjectKey,
+    }).from(dogs).where(and(eq(dogs.id, id), eq(dogs.establishmentId, identity.establishmentId!))).limit(1);
     if (!dog) throw new HttpError(404, "dog_not_found", "O cão não foi encontrado.");
     const key = `dogs/${identity.establishmentId}/${id}/${crypto.randomUUID()}`;
     await storage.put(key, photo.stream(), { httpMetadata: { contentType: photo.type } });
     await getDb().update(dogs).set({ photoObjectKey: key }).where(eq(dogs.id, id));
+    if (dog.photoObjectKey && dog.photoObjectKey !== key) {
+      await storage.delete(dog.photoObjectKey);
+    }
     return json({ photoUrl: `/api/dogs/${id}?photo=1` });
   } catch (error) { return errorResponse(error, requestId); }
 }

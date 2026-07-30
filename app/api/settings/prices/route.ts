@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditEvents, serviceCatalog } from "@/db/schema";
+import { auditEvents, establishments, serviceCatalog } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
 import {
   assertSameOrigin,
@@ -14,8 +14,8 @@ const editableServiceCodes = [
   "hotel",
   "daycare",
   "bath",
-  "hygienic_grooming",
-  "transport",
+  "bath_grooming",
+  "taxi_dog",
 ] as const;
 
 type EditableServiceCode = (typeof editableServiceCodes)[number];
@@ -48,8 +48,22 @@ export async function GET(request: Request) {
         ),
       )
       .orderBy(asc(serviceCatalog.name));
+    const [establishment] = await db
+      .select({
+        daycareStartTime: establishments.daycareStartTime,
+        daycareEndTime: establishments.daycareEndTime,
+      })
+      .from(establishments)
+      .where(eq(establishments.id, identity.establishmentId!))
+      .limit(1);
 
-    return json({ prices: services });
+    return json({
+      prices: services,
+      daycareHours: establishment ?? {
+        daycareStartTime: "07:30",
+        daycareEndTime: "19:30",
+      },
+    });
   } catch (error) {
     return errorResponse(error, requestId);
   }
@@ -93,6 +107,25 @@ export async function PATCH(request: Request) {
         "Informe ao menos um preço para atualizar.",
       );
     }
+    const daycareStartTime =
+      typeof body.daycareStartTime === "string"
+        ? body.daycareStartTime
+        : "07:30";
+    const daycareEndTime =
+      typeof body.daycareEndTime === "string"
+        ? body.daycareEndTime
+        : "19:30";
+    if (
+      !/^\d{2}:\d{2}$/.test(daycareStartTime) ||
+      !/^\d{2}:\d{2}$/.test(daycareEndTime) ||
+      daycareEndTime <= daycareStartTime
+    ) {
+      throw new HttpError(
+        400,
+        "invalid_daycare_hours",
+        "Informe um horário final de creche posterior ao horário inicial.",
+      );
+    }
 
     const establishmentId = identity.establishmentId!;
     const db = getDb();
@@ -133,6 +166,14 @@ export async function PATCH(request: Request) {
     await db.batch([
       priceUpdateStatements[0]!,
       ...priceUpdateStatements.slice(1),
+      db
+        .update(establishments)
+        .set({
+          daycareStartTime,
+          daycareEndTime,
+          updatedAt: sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+        })
+        .where(eq(establishments.id, establishmentId)),
       db.insert(auditEvents).values({
         id: crypto.randomUUID(),
         establishmentId,
@@ -142,7 +183,11 @@ export async function PATCH(request: Request) {
         entityType: "service_catalog",
         entityId: establishmentId,
         requestId,
-        metadataJson: JSON.stringify({ updates }),
+        metadataJson: JSON.stringify({
+          updates,
+          daycareStartTime,
+          daycareEndTime,
+        }),
       }),
     ]);
 
@@ -150,6 +195,7 @@ export async function PATCH(request: Request) {
       prices: Object.fromEntries(
         updates.map(({ code, priceCents }) => [code, priceCents]),
       ),
+      daycareHours: { daycareStartTime, daycareEndTime },
     });
   } catch (error) {
     return errorResponse(error, requestId);

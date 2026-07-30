@@ -35,7 +35,7 @@ function isAppointmentStatus(value: string): value is AppointmentStatus {
 
 const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
 
-async function hasActivePixBilling(
+async function hasActiveInvoiceBilling(
   appointmentId: string,
   establishmentId: string,
 ) {
@@ -46,17 +46,13 @@ async function hasActivePixBilling(
       FROM appointment_items ai
       LEFT JOIN invoice_items ii ON ii.appointment_item_id = ai.id
       LEFT JOIN invoices i ON i.id = ii.invoice_id
-      LEFT JOIN payments p ON p.invoice_id = i.id
-      LEFT JOIN pix_charges pc ON pc.invoice_id = i.id
       INNER JOIN appointments a ON a.id = ai.appointment_id
       WHERE ai.appointment_id = ?
         AND a.establishment_id = ?
         AND (
           ai.active_invoice_id IS NOT NULL
-          OR ai.settlement_method = 'pix'
+          OR ai.settlement_method = 'invoice'
           OR (i.id IS NOT NULL AND i.status <> 'void')
-          OR p.id IS NOT NULL
-          OR pc.status IN ('pending', 'paid')
         )
       LIMIT 1`,
     )
@@ -78,11 +74,11 @@ async function reopenCompletedAppointment({
   requestId: string;
   items: (typeof appointmentItems.$inferSelect)[];
 }) {
-  if (await hasActivePixBilling(appointmentId, establishmentId)) {
+  if (await hasActiveInvoiceBilling(appointmentId, establishmentId)) {
     throw new HttpError(
       409,
-      "appointment_has_pix_billing",
-      "Este atendimento possui cobrança ou pagamento Pix e não pode ser reaberto. Resolva ou estorne a parte financeira primeiro.",
+      "appointment_has_invoice",
+      "Este atendimento possui fatura ou pagamento e não pode ser reaberto. Anule a fatura primeiro.",
     );
   }
 
@@ -166,7 +162,7 @@ async function reopenCompletedAppointment({
             WHERE invalid_ai.appointment_id = a.id
               AND (
                 invalid_ai.active_invoice_id IS NOT NULL
-                OR invalid_ai.settlement_method = 'pix'
+                OR invalid_ai.settlement_method = 'invoice'
                 OR (
                   invalid_ai.status <> 'completed'
                   AND invalid_ai.status <> 'cancelled'
@@ -179,15 +175,8 @@ async function reopenCompletedAppointment({
             INNER JOIN invoice_items billed_ii
               ON billed_ii.appointment_item_id = billed_ai.id
             INNER JOIN invoices billed_i ON billed_i.id = billed_ii.invoice_id
-            LEFT JOIN payments billed_p ON billed_p.invoice_id = billed_i.id
-            LEFT JOIN pix_charges billed_pc
-              ON billed_pc.invoice_id = billed_i.id
             WHERE billed_ai.appointment_id = a.id
-              AND (
-                billed_i.status <> 'void'
-                OR billed_p.id IS NOT NULL
-                OR billed_pc.status IN ('pending', 'paid')
-              )
+              AND billed_i.status <> 'void'
           )
           ${creditPairGuards}`,
       )
@@ -409,11 +398,11 @@ async function reopenCompletedAppointment({
         reversedCredits: 0,
       };
     }
-    if (await hasActivePixBilling(appointmentId, establishmentId)) {
+    if (await hasActiveInvoiceBilling(appointmentId, establishmentId)) {
       throw new HttpError(
         409,
-        "appointment_has_pix_billing",
-        "Este atendimento passou a ter uma cobrança ou pagamento Pix e não pode ser reaberto.",
+        "appointment_has_invoice",
+        "Este atendimento passou a ter uma fatura ou pagamento e não pode ser reaberto.",
       );
     }
     throw new HttpError(
@@ -590,13 +579,13 @@ export async function PATCH(
         );
       }
       if (
-        paymentPreference !== "pix" &&
+        paymentPreference !== "invoice" &&
         paymentPreference !== "credit"
       ) {
         throw new HttpError(
           400,
           "invalid_payment_preference",
-          "Escolha Pix ou crédito para o pagamento.",
+          "Escolha fatura ou crédito para o pagamento.",
         );
       }
       if (
@@ -632,7 +621,7 @@ export async function PATCH(
       }
       if (
         paymentPreference === "credit" &&
-        !["daycare", "bath", "hygienic_grooming", "transport"].includes(service.code)
+        !["daycare", "bath", "bath_grooming", "taxi_dog"].includes(service.code)
       ) {
         throw new HttpError(
           400,

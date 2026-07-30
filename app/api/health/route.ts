@@ -11,7 +11,6 @@ export async function GET() {
     capabilities: {
       database: Boolean(bindings.DB),
       privateFiles: Boolean(bindings.FILES),
-      pixProvider: Boolean(bindings.PIX_PROVIDER),
     },
   });
 }

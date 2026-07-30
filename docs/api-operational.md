@@ -149,7 +149,7 @@ Status aceitos: `scheduled`, `confirmed`, `in_transit`, `present`,
 - Um item marcado para pagamento com crédito deve ser liquidado antes da
   conclusão. Nesse caso, use `POST /api/credits/consume` com
   `appointmentItemId`; esse endpoint consome o crédito, conclui o item e
-  prepara o recibo sem criar Pix.
+  prepara o recibo sem criar uma nova fatura.
 - Repetir o status atual é seguro e devolve `idempotent: true`.
 
 ## Concluir ou reabrir tarefa

@@ -1,8 +1,8 @@
-# Gestão Canina
+# Hospet Quintal
 
-Ferramenta de operação para creche, hospedagem, banho, tosa higiênica e
-transporte de cães. A interface está em português brasileiro e foi pensada para
-uso diário por uma equipe pequena.
+Ferramenta de operação para creche, hospedagem, banho, banho e tosa e Taxi-dog.
+A interface está em português brasileiro e foi pensada para o uso diário dos
+dois administradores.
 
 ## Estado atual
 
@@ -11,16 +11,15 @@ Este repositório entrega:
 - painel responsivo com agenda, presença, alertas e tarefas;
 - consulta de datas futuras diretamente na tela principal;
 - cadastros e perfis editáveis de cães e clientes;
-- preços padrão administráveis para hospedagem, creche, banho e tosa
-  higiênica;
+- preços e horários padrão administráveis;
 - venda de pacotes, saldos de créditos por serviço e recibos sem nova cobrança;
-- visão financeira e seleção de serviços concluídos para cobrança Pix;
+- faturas em PDF detalhadas por cão, compartilháveis pelo menu do aparelho;
+- sinal e saldo de hospedagem, com abatimento automático do valor recebido;
 - ambiente operacional conectado ao D1 privado, com demonstração fictícia
   apenas como apoio no desenvolvimento local;
 - configuração inicial protegida para exatamente dois administradores e login
   obrigatório nas visitas seguintes;
-- prévia separada do portal do cliente;
-- modelo D1 para agenda, recorrências, créditos, faturas, Pix, pagamentos,
+- modelo D1 para agenda, recorrências, créditos, faturas, pagamentos,
   auditoria e metadados de arquivos privados;
 - APIs iniciais com autorização no servidor, proteção de origem, limites de
   payload e respostas sem cache;
@@ -30,16 +29,11 @@ Todos os dados visíveis na demonstração são sintéticos. Eles ficam no códi
 apenas para mostrar a experiência e nunca devem ser substituídos por dados
 reais.
 
-## Regra de pagamento
+## Regra de cobrança
 
-O produto aceita **somente Pix**. Não há cartão de crédito, parcelamento nem
-outra escolha de meio de pagamento.
-
-O sistema registra a fatura e mantém o pacote aguardando pagamento, mas não
-inventa um código. Cobranças reais são liberadas somente depois da escolha de
-um banco ou provedor Pix e da configuração segura das credenciais e do webhook
-oficial. Até lá, nenhuma cobrança bancária é criada e nenhum crédito é
-concedido.
+O sistema gera a fatura em PDF, mas não processa o pagamento. Depois de receber
+o valor pelo meio combinado com o cliente, um administrador registra a data do
+pagamento. Pacotes de créditos são liberados somente nessa confirmação.
 
 ## Onde cada informação fica
 
@@ -48,7 +42,7 @@ concedido.
 | Código, estilos e migrações | GitHub público |
 | Clientes, cães, agenda e financeiro | Cloudflare D1 privado |
 | Fotos e documentos | Cloudflare R2 privado |
-| Credenciais e chaves Pix | Secrets da Cloudflare |
+| Segredos de acesso | Secrets da Cloudflare |
 | Dados fictícios do protótipo | `lib/demo-data.ts` |
 
 Dados de clientes, exports, bancos locais, uploads, backups e arquivos de
@@ -94,8 +88,6 @@ nunca em arquivos versionados:
 |---|---|
 | `INITIAL_SETUP_KEY` | Chave secreta usada uma única vez no primeiro acesso |
 | `AUTH_PASSWORD_PEPPER` | Segredo adicional da derivação das senhas |
-| `PIX_PROVIDER` | Adaptador Pix escolhido |
-| `PIX_WEBHOOK_SECRET` | Segredo ou referência de validação do webhook |
 
 O endereço do site pode ser público porque as páginas de gestão exigem a sessão
 própria. Cabeçalhos externos de identidade não são aceitos nesta versão: o
@@ -126,9 +118,8 @@ Antes de usar dados reais, confirme no ambiente implantado:
 2. manter ambientes de produção, prévia e desenvolvimento separados;
 3. aplicar as migrações ao D1 e testar restauração;
 4. configurar R2 privado e validação de upload;
-5. escolher o provedor Pix e implementar assinatura ou mTLS do webhook;
-6. habilitar proteção de secrets e push protection no GitHub;
-7. revisar retenção, avisos e solicitações de titulares conforme a LGPD.
+5. habilitar proteção de secrets e push protection no GitHub;
+6. revisar retenção, avisos e solicitações de titulares conforme a LGPD.
 
 Consulte [SECURITY.md](./SECURITY.md) para os limites atuais e o procedimento
 em caso de segredo publicado.
@@ -138,7 +129,7 @@ em caso de segredo publicado.
 ```text
 app/
   api/                 APIs protegidas
-  components/          interface administrativa e portal
+  components/          interface administrativa
 db/
   schema.ts            modelo D1/Drizzle
 lib/

@@ -33,9 +33,9 @@ export async function POST(request: Request) {
     const endTime = optionalString(body, "endTime", 5);
     const internalNotes = optionalString(body, "internalNotes", 2_000);
     const paymentPreference =
-      body.paymentPreference === undefined ? "pix" : body.paymentPreference;
+      body.paymentPreference === undefined ? "invoice" : body.paymentPreference;
     if (
-      paymentPreference !== "pix" &&
+      paymentPreference !== "invoice" &&
       paymentPreference !== "credit"
     ) {
       throw new HttpError(
@@ -112,7 +112,7 @@ export async function POST(request: Request) {
     }
     if (
       paymentPreference === "credit" &&
-      !["daycare", "bath", "hygienic_grooming", "transport"].includes(service.code)
+      !["daycare", "bath", "bath_grooming", "taxi_dog"].includes(service.code)
     ) {
       throw new HttpError(
         400,
@@ -135,7 +135,7 @@ export async function POST(request: Request) {
     const appointmentId = crypto.randomUUID();
     const itemId = crypto.randomUUID();
     const auditId = crypto.randomUUID();
-    const priceCents = customPriceCents ?? (service.code === "transport" ? (direction === "round_trip" ? 1_000 : 500) : service.code === "hotel" ? service.basePriceCents * (lodgingNights ?? 1) : service.basePriceCents);
+    const priceCents = customPriceCents ?? (service.code === "taxi_dog" ? (direction === "round_trip" ? 1_000 : 500) : service.code === "hotel" ? Math.round(service.basePriceCents * (lodgingNights ?? 1)) : service.basePriceCents);
     await db.batch([
       db.insert(appointments).values({
         id: appointmentId,
@@ -159,7 +159,7 @@ export async function POST(request: Request) {
         unitPriceCents: priceCents,
         quantity: 1,
         totalCents: priceCents,
-        descriptionSnapshot: service.code === "transport" ? (direction === "round_trip" ? "Ida e volta" : "Ida") : service.code === "hotel" && depositPercent ? `Sinal de ${depositPercent}% no check-in; saldo no check-out.` : null,
+        descriptionSnapshot: service.code === "taxi_dog" ? (direction === "round_trip" ? "Ida e volta" : "Ida") : service.code === "hotel" && depositPercent ? `Sinal de ${depositPercent}% no check-in; saldo no check-out.` : null,
         paymentPreference,
       }),
       db.insert(auditEvents).values({
@@ -175,7 +175,7 @@ export async function POST(request: Request) {
           dogId: dog.id,
           serviceCatalogId: service.id,
           paymentPreference,
-          transportDirection: service.code === "transport" ? direction : null,
+          transportDirection: service.code === "taxi_dog" ? direction : null,
           lodgingNights: service.code === "hotel" ? lodgingNights : null,
           depositPercent: service.code === "hotel" ? depositPercent : null,
         }),

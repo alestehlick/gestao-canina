@@ -22,13 +22,13 @@ const defaultServices = [
   ["hotel", "Hospedagem", "night", 18_000, "#FF8200"],
   ["bath", "Banho", "service", 9_500, "#E31C79"],
   [
-    "hygienic_grooming",
+    "bath_grooming",
     "Banho e tosa",
     "service",
     9_000,
     "#E31C79",
   ],
-  ["transport", "Taxi-dog", "leg", 500, "#FFA300"],
+  ["taxi_dog", "Taxi-dog", "leg", 500, "#FFA300"],
   ["other", "Outro", "service", 5_000, "other"],
 ] as const;
 

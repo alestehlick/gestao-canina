@@ -7,10 +7,9 @@ privada, autenticada e com o D1 correto ligado. Os dados operacionais não são
 gravados no GitHub nem incluídos no pacote de código. A demonstração local
 continua usando apenas registros fictícios.
 
-O recebimento bancário por Pix permanece desativado enquanto não houver um
-adaptador oficial e credenciais configuradas. Nesse estado, o sistema pode
-registrar uma fatura pendente, mas não gera código pagável e não libera
-créditos antecipadamente.
+O sistema não recebe nem processa pagamentos bancários. Ele gera faturas em
+PDF e um administrador registra o recebimento somente depois de confirmá-lo
+fora do sistema. Créditos antecipados não são liberados antes desse registro.
 
 ## Controles já presentes
 
@@ -26,7 +25,6 @@ créditos antecipadamente.
 - headers de segurança no aplicativo;
 - trilha de auditoria no modelo de dados;
 - R2 previsto como privado;
-- Pix real desativado sem adaptador oficial.
 - primeiro acesso protegido por chave secreta fora do repositório;
 - exatamente duas contas administrativas criadas de forma atômica;
 - senhas derivadas com PBKDF2-SHA256, salt individual, pepper externo e
@@ -36,7 +34,8 @@ créditos antecipadamente.
 - identificadores do limitador protegidos com HMAC; IP e e-mail não são
   armazenados em texto no contador;
 - sessões opacas de 12 horas com cookie `HttpOnly`, `Secure` e `SameSite=Lax`;
-- pacotes de créditos concedidos apenas depois de confirmação Pix autenticada;
+- pacotes de créditos concedidos apenas depois do registro administrativo do
+  pagamento da fatura;
 - consumo de crédito e emissão de recibo realizados de forma atômica, sem nova
   cobrança;
 
@@ -49,16 +48,16 @@ créditos antecipadamente.
 - política de upload com limite, MIME real, magic bytes, checksum, remoção de
   EXIF/GPS e quarentena;
 - recuperação D1 testada e backups conforme a retenção definida;
-- adaptador Pix com assinatura ou mTLS, idempotência e conciliação;
-- testes de autorização por registro para equipe e clientes;
+- confirmação operacional e conciliação periódica dos pagamentos registrados;
+- testes de autorização por registro para os administradores;
 - política de retenção, atendimento de direitos e contratos LGPD.
 
-## Pix
+## Registro de pagamentos
 
-O retorno do navegador nunca pode marcar uma cobrança como paga. Apenas um
-webhook autenticado e conciliado com `txid`, `endToEndId`, recebedor, valor e
-estado pode confirmar o pagamento. Eventos repetidos ou fora de ordem não
-podem duplicar um recebimento nem fazer o estado regredir.
+Somente um administrador autenticado pode marcar uma fatura como paga. Essa
+ação deve ocorrer depois da confirmação do recebimento no canal usado pelo
+estabelecimento. A operação é idempotente e não pode conceder o mesmo pacote de
+créditos duas vezes.
 
 ## Arquivos
 

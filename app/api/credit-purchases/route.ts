@@ -24,7 +24,8 @@ import {
 const creditServiceCodes = [
   "daycare",
   "bath",
-  "hygienic_grooming",
+  "bath_grooming",
+  "taxi_dog",
 ] as const;
 
 type CreditServiceCode = (typeof creditServiceCodes)[number];
@@ -214,7 +215,7 @@ export async function POST(request: Request) {
         throw new HttpError(
           400,
           "service_not_credit_eligible",
-          "Créditos podem ser vendidos somente para creche, banho ou tosa higiênica.",
+          "Créditos podem ser vendidos somente para creche, banho e tosa ou Taxi-dog.",
         );
       }
       serviceCode = rawServiceCode;
@@ -349,11 +350,7 @@ export async function POST(request: Request) {
           status: "issued",
           dueDate,
           totalCents: amountCents,
-        },
-        nextAction: {
-          method: "pix",
-          createChargeAt: "/api/pix/charges",
-          body: { invoiceId },
+          sourceType: "credit_package",
         },
       },
       { status: 201 },

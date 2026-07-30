@@ -28,7 +28,10 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.match(app, /invoice-delivery-button/);
   assert.match(app, /navigator\.share/);
   assert.match(app, /Salvar/);
-  assert.doesNotMatch(app, /\/api\/pix\/charges/);
+  assert.match(app, /Registrar pagamento/);
+  assert.match(app, /Gerar fatura do sinal/);
+  assert.match(app, /Gerar fatura do saldo/);
+  assert.doesNotMatch(app, /pix/i);
   assert.match(data, /@example\.com/);
   assert.doesNotMatch(app, /Mastercard|VISA|cart[aã]o de cr[eé]dito/);
   assert.match(styles, /\.billing-page\s*\{[^}]*min-width:\s*0;/s);
@@ -36,20 +39,21 @@ test("mantém a experiência em português, privada e com demonstração segura"
 });
 
 test("mantém dados operacionais fora do repositório público", async () => {
-  const [gitignore, schema, pixRoute, hosting] = await Promise.all([
+  const [gitignore, schema, hosting, runtime] = await Promise.all([
     readFile(new URL("../.gitignore", import.meta.url), "utf8"),
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/api/pix/charges/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
+    readFile(new URL("../lib/server/runtime.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(gitignore, /\.dev\.vars\*/);
   assert.match(gitignore, /\*\.sqlite/);
   assert.match(gitignore, /\/exports\//);
   assert.match(schema, /sqliteTable\(\s*"audit_events"/);
-  assert.match(schema, /sqliteTable\(\s*"pix_charges"/);
+  assert.match(schema, /sqliteTable\(\s*"invoice_payments"/);
   assert.match(schema, /amount_cents/);
-  assert.match(pixRoute, /pix_provider_not_configured/);
+  assert.doesNotMatch(schema, /pix/i);
+  assert.doesNotMatch(runtime, /pix/i);
   const hostingConfig = JSON.parse(hosting);
   assert.equal(hostingConfig.d1, "DB");
   assert.equal(hostingConfig.r2, "FILES");
@@ -115,9 +119,22 @@ test("mantém o primeiro acesso e o login protegidos sem bloqueio global da cont
   assert.match(schema, /sqliteTable\(\s*"auth_login_rate_limits"/);
 });
 
-test("preserva as regras financeiras de Pix e créditos", async () => {
-  const [invoices, consume, purchases, prices] = await Promise.all([
+test("preserva as regras de faturas, sinais e créditos", async () => {
+  const [invoices, payments, deposit, balance, lodgingHelper, consume, purchases, prices] = await Promise.all([
     readFile(new URL("../app/api/invoices/route.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../app/api/invoices/[id]/payments/route.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/api/appointments/[id]/deposit-invoice/route.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/api/appointments/[id]/balance-invoice/route.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../lib/server/lodging-invoice.ts", import.meta.url), "utf8"),
     readFile(
       new URL("../app/api/credits/consume/route.ts", import.meta.url),
       "utf8",
@@ -134,8 +151,40 @@ test("preserva as regras financeiras de Pix e créditos", async () => {
 
   assert.match(invoices, /active_invoice_id = \?/);
   assert.match(invoices, /results\[0\]\.meta\.changes/);
+  assert.match(invoices, /FAT-/);
+  assert.doesNotMatch(invoices, /pix/i);
+  assert.match(payments, /invoice\.payment_recorded/);
+  assert.match(payments, /Créditos liberados após pagamento da fatura/);
+  assert.match(payments, /settlement_method = 'invoice'/);
+  assert.match(deposit, /kind: "deposit"/);
+  assert.match(balance, /kind: "balance"/);
+  assert.match(lodgingHelper, /deposit_payment_pending/);
+  assert.match(lodgingHelper, /lodging\.totalCents - depositPaidCents/);
   assert.match(consume, /payment_preference = 'credit'/);
   assert.match(consume, /credit_not_selected/);
+  assert.match(consume, /taxi_dog/);
   assert.match(purchases, /default_price_required/);
   assert.match(prices, /value < 1/);
+  assert.match(prices, /daycareStartTime/);
+});
+
+test("mantém o manual e os detalhes das faturas disponíveis", async () => {
+  const [app, workspace, manual, migration] = await Promise.all([
+    readFile(
+      new URL("../app/components/management-app.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../app/api/workspace/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../docs/manual-administradores.md", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0005_final_invoice_workflow.sql", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(app, /fatura-\$\{customer/);
+  assert.match(app, /line\.dogName/);
+  assert.match(app, /manual-hospet-quintal\.pdf/);
+  assert.match(workspace, /invoiceItemRows/);
+  assert.match(workspace, /dogNameSnapshot/);
+  assert.match(manual, /Fluxo recomendado/);
+  assert.match(migration, /DROP TABLE IF EXISTS `pix_charges`/);
+  assert.match(migration, /CREATE TABLE `invoice_payments`/);
 });

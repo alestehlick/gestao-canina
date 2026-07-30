@@ -21,8 +21,8 @@ export type WorkspaceServiceCode =
   | "daycare"
   | "hotel"
   | "bath"
-  | "hygienic_grooming"
-  | "transport"
+  | "bath_grooming"
+  | "taxi_dog"
   | "other";
 
 export type WorkspaceRole = "owner" | "staff" | "finance" | "customer";
@@ -132,8 +132,8 @@ export type WorkspaceAppointmentItem = {
   quantity: number;
   totalCents: number;
   status: "scheduled" | "completed" | "cancelled";
-  paymentPreference: "pix" | "credit";
-  settlementMethod: "unsettled" | "pix" | "credit";
+  paymentPreference: "invoice" | "credit";
+  settlementMethod: "unsettled" | "invoice" | "credit";
   settledAt: string | null;
   activeInvoiceId?: string | null;
 };
@@ -197,7 +197,11 @@ export type WorkspaceInvoice = {
   issuedAt: string | null;
   dueDate: string;
   totalCents: number;
-  sourceType: "services" | "credit_package";
+  sourceType:
+    | "services"
+    | "credit_package"
+    | "lodging_deposit"
+    | "lodging_balance";
   sourceId: string | null;
   voidedAt: string | null;
   voidReason: string | null;
@@ -292,6 +296,8 @@ export type WorkspaceReadyPayload = {
     id: string;
     name: string;
     timezone: string;
+    daycareStartTime: string;
+    daycareEndTime: string;
     createdAt: string;
     updatedAt: string;
   };
@@ -351,13 +357,18 @@ export function isReadyWorkspacePayload(
 export function toUiServiceType(
   code: WorkspaceServiceCode | string | null | undefined,
 ): ServiceType {
-  if (code === "hygienic_grooming" || code === "grooming") {
+  if (
+    code === "bath_grooming" ||
+    code === "grooming"
+  ) {
     return "grooming";
+  }
+  if (code === "taxi_dog" || code === "transport") {
+    return "transport";
   }
   if (
     code === "daycare" ||
     code === "bath" ||
-    code === "transport" ||
     code === "hotel" ||
     code === "other"
   ) {
@@ -369,9 +380,9 @@ export function toUiServiceType(
 export function toWorkspaceServiceCode(
   serviceType: ServiceType,
 ): WorkspaceServiceCode {
-  return serviceType === "grooming"
-    ? "hygienic_grooming"
-    : serviceType;
+  if (serviceType === "grooming") return "bath_grooming";
+  if (serviceType === "transport") return "taxi_dog";
+  return serviceType;
 }
 
 export function formatPhoneForDisplay(phoneE164: string | null | undefined) {
@@ -526,15 +537,25 @@ export function mapWorkspaceBookings(
     const usesCredit = displayItems.some(
       (item) => item.settlementMethod === "credit",
     );
-    const awaitingPix =
+    const awaitingInvoice =
       appointment.status === "completed" &&
       !usesCredit &&
       displayItems.some(
         (item) =>
-          item.paymentPreference === "pix" &&
+          item.paymentPreference === "invoice" &&
           item.settlementMethod === "unsettled" &&
           !item.activeInvoiceId,
       );
+    const appointmentInvoices = payload.billing.invoices.filter(
+      (invoice) =>
+        invoice.sourceId === appointment.id && invoice.status !== "void",
+    );
+    const depositInvoice = appointmentInvoices.find(
+      (invoice) => invoice.sourceType === "lodging_deposit",
+    );
+    const balanceInvoice = appointmentInvoices.find(
+      (invoice) => invoice.sourceType === "lodging_balance",
+    );
 
     return {
       id: appointment.id,
@@ -563,12 +584,28 @@ export function mapWorkspaceBookings(
         displayItems.length > 0 &&
         displayItems.every((item) => item.paymentPreference === "credit")
           ? "credit"
-          : "pix",
+          : "invoice",
       settlementStatus: usesCredit
         ? "credit_used"
-        : awaitingPix
-          ? "pix_pending"
+        : awaitingInvoice
+          ? "invoice_pending"
           : "pending",
+      depositInvoice: depositInvoice
+        ? {
+            id: depositInvoice.id,
+            number: depositInvoice.invoiceNumber,
+            amountCents: depositInvoice.totalCents,
+            status: invoiceStatus(depositInvoice, payload.range.from),
+          }
+        : undefined,
+      balanceInvoice: balanceInvoice
+        ? {
+            id: balanceInvoice.id,
+            number: balanceInvoice.invoiceNumber,
+            amountCents: balanceInvoice.totalCents,
+            status: invoiceStatus(balanceInvoice, payload.range.from),
+          }
+        : undefined,
       receiptNumber: matchingReceipt?.receiptNumber,
       note:
         appointment.internalNotes ??
@@ -582,15 +619,19 @@ export function mapWorkspaceBookings(
 export function mapWorkspaceBillableServices(
   payload: WorkspaceReadyPayload,
 ): BillableService[] {
+  const servicesById = new Map(
+    payload.serviceCatalog.map((service) => [service.id, service]),
+  );
   return payload.agenda.flatMap((appointment) =>
     appointment.items
       .filter(
         (item) =>
           appointment.status === "completed" &&
           item.status === "completed" &&
-          item.paymentPreference === "pix" &&
+          item.paymentPreference === "invoice" &&
           item.settlementMethod === "unsettled" &&
-          !item.activeInvoiceId,
+          !item.activeInvoiceId &&
+          servicesById.get(item.serviceCatalogId)?.code !== "hotel",
       )
       .map((item) => ({
         id: item.id,
@@ -651,6 +692,32 @@ export function mapWorkspaceInvoices(
         due: invoiceDueLabel(invoice, referenceDate),
         status,
         items: invoiceItemsLabel(invoice, purchase, service),
+        sourceType: invoice.sourceType,
+        periodStart: invoice.items?.length
+          ? invoice.items
+              .map((item) => item.serviceDateSnapshot)
+              .sort()[0]
+          : undefined,
+        periodEnd: invoice.items?.length
+          ? invoice.items
+              .map((item) => item.serviceDateSnapshot)
+              .sort()
+              .at(-1)
+          : undefined,
+        lines:
+          invoice.items?.map((item) => ({
+            dogName: item.dogNameSnapshot || "Sem cão informado",
+            service: item.serviceNameSnapshot,
+            date: item.serviceDateSnapshot,
+            amountCents: Math.max(0, item.amountCents),
+          })) ?? [
+            {
+              dogName: "Não se aplica",
+              service: invoiceItemsLabel(invoice, purchase, service),
+              date: invoice.issuedAt?.slice(0, 10) ?? invoice.createdAt.slice(0, 10),
+              amountCents: Math.max(0, invoice.totalCents),
+            },
+          ],
       };
     });
 }
@@ -684,7 +751,7 @@ export function mapWorkspaceCreditPurchases(
         standardValueCents: Math.max(0, purchase.standardValueCents),
         status:
           purchase.status === "awaiting_payment"
-            ? "awaiting_pix"
+            ? "awaiting_payment"
             : purchase.status === "paid"
               ? "paid"
               : "cancelled",
@@ -904,7 +971,7 @@ function activityActionLabel(action: string) {
     "credit_receipt.sent": "Recibo marcado como enviado",
     "credit_receipt.failed": "Falha no envio do recibo registrada",
     "invoice.created": "Cobrança preparada",
-    "pix.payment_confirmed": "Pagamento Pix confirmado",
+    "invoice.payment_recorded": "Pagamento registrado",
   };
   return labels[action] ?? "Ação administrativa registrada";
 }
@@ -1029,7 +1096,11 @@ function invoiceItemsLabel(
 
   return invoice.sourceType === "credit_package"
     ? "Pacote de créditos"
-    : "Serviços cobrados por Pix";
+    : invoice.sourceType === "lodging_deposit"
+      ? "Sinal da hospedagem"
+      : invoice.sourceType === "lodging_balance"
+        ? "Saldo da hospedagem"
+        : "Serviços faturados";
 }
 
 function formatBrazilianDate(value: string) {

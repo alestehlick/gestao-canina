@@ -15,6 +15,8 @@ export const establishments = sqliteTable("establishments", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   timezone: text("timezone").notNull().default("America/Sao_Paulo"),
+  daycareStartTime: text("daycare_start_time").notNull().default("07:30"),
+  daycareEndTime: text("daycare_end_time").notNull().default("19:30"),
   createdAt: text("created_at").notNull().default(now),
   updatedAt: text("updated_at").notNull().default(now),
 });
@@ -292,8 +294,8 @@ export const serviceCatalog = sqliteTable(
         "daycare",
         "hotel",
         "bath",
-        "hygienic_grooming",
-        "transport",
+        "bath_grooming",
+        "taxi_dog",
         "other",
       ],
     }).notNull(),
@@ -448,12 +450,12 @@ export const appointmentItems = sqliteTable(
     detailsJson: text("details_json"),
     activeInvoiceId: text("active_invoice_id"),
     paymentPreference: text("payment_preference", {
-      enum: ["pix", "credit"],
+      enum: ["invoice", "credit"],
     })
       .notNull()
-      .default("pix"),
+      .default("invoice"),
     settlementMethod: text("settlement_method", {
-      enum: ["unsettled", "pix", "credit"],
+      enum: ["unsettled", "invoice", "credit"],
     })
       .notNull()
       .default("unsettled"),
@@ -545,7 +547,12 @@ export const invoices = sqliteTable(
     dueDate: text("due_date").notNull(),
     totalCents: integer("total_cents").notNull(),
     sourceType: text("source_type", {
-      enum: ["services", "credit_package"],
+      enum: [
+        "services",
+        "credit_package",
+        "lodging_deposit",
+        "lodging_balance",
+      ],
     })
       .notNull()
       .default("services"),
@@ -807,8 +814,8 @@ export const invoiceItems = sqliteTable(
   ],
 );
 
-export const pixCharges = sqliteTable(
-  "pix_charges",
+export const invoicePayments = sqliteTable(
+  "invoice_payments",
   {
     id: text("id").primaryKey(),
     establishmentId: text("establishment_id")
@@ -817,76 +824,22 @@ export const pixCharges = sqliteTable(
     invoiceId: text("invoice_id")
       .notNull()
       .references(() => invoices.id, { onDelete: "restrict" }),
-    provider: text("provider").notNull(),
-    txid: text("txid").notNull(),
-    externalId: text("external_id"),
     amountCents: integer("amount_cents").notNull(),
-    status: text("status", {
-      enum: ["pending", "paid", "expired", "cancelled", "refunded"],
-    })
-      .notNull()
-      .default("pending"),
-    copyPasteCode: text("copy_paste_code"),
-    idempotencyKey: text("idempotency_key").notNull(),
-    expiresAt: text("expires_at").notNull(),
-    paidAt: text("paid_at"),
-    createdAt: text("created_at").notNull().default(now),
-    updatedAt: text("updated_at").notNull().default(now),
-  },
-  (table) => [
-    uniqueIndex("pix_charges_txid_unique").on(table.txid),
-    uniqueIndex("pix_charges_external_id_unique").on(table.externalId),
-    uniqueIndex("pix_charges_idempotency_unique").on(table.idempotencyKey),
-    index("pix_charges_invoice_status_idx").on(table.invoiceId, table.status),
-    check("pix_charges_amount_positive", sql`${table.amountCents} > 0`),
-  ],
-);
-
-export const payments = sqliteTable(
-  "payments",
-  {
-    id: text("id").primaryKey(),
-    establishmentId: text("establishment_id")
-      .notNull()
-      .references(() => establishments.id, { onDelete: "restrict" }),
-    invoiceId: text("invoice_id")
-      .notNull()
-      .references(() => invoices.id, { onDelete: "restrict" }),
-    pixChargeId: text("pix_charge_id")
-      .notNull()
-      .references(() => pixCharges.id, { onDelete: "restrict" }),
-    kind: text("kind", { enum: ["receipt", "refund"] }).notNull(),
-    amountCents: integer("amount_cents").notNull(),
-    endToEndId: text("end_to_end_id").notNull(),
-    reversesPaymentId: text("reverses_payment_id"),
-    confirmedAt: text("confirmed_at").notNull(),
+    method: text("method", { enum: ["manual"] }).notNull().default("manual"),
+    note: text("note"),
+    paidAt: text("paid_at").notNull(),
+    recordedByUserId: text("recorded_by_user_id").references(() => appUsers.id, {
+      onDelete: "set null",
+    }),
     createdAt: text("created_at").notNull().default(now),
   },
   (table) => [
-    uniqueIndex("payments_end_to_end_id_unique").on(table.endToEndId),
-    index("payments_invoice_confirmed_idx").on(
+    uniqueIndex("invoice_payments_invoice_unique").on(table.invoiceId),
+    index("invoice_payments_invoice_paid_idx").on(
       table.invoiceId,
-      table.confirmedAt,
+      table.paidAt,
     ),
-    check("payments_amount_positive", sql`${table.amountCents} > 0`),
-  ],
-);
-
-export const paymentAllocations = sqliteTable(
-  "payment_allocations",
-  {
-    paymentId: text("payment_id")
-      .notNull()
-      .references(() => payments.id, { onDelete: "restrict" }),
-    invoiceItemId: text("invoice_item_id")
-      .notNull()
-      .references(() => invoiceItems.id, { onDelete: "restrict" }),
-    amountCents: integer("amount_cents").notNull(),
-    createdAt: text("created_at").notNull().default(now),
-  },
-  (table) => [
-    primaryKey({ columns: [table.paymentId, table.invoiceItemId] }),
-    check("payment_allocations_amount_positive", sql`${table.amountCents} > 0`),
+    check("invoice_payments_amount_positive", sql`${table.amountCents} > 0`),
   ],
 );
 

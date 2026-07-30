@@ -18,16 +18,16 @@
   --danger-soft: #f7e8e5;
   --success: #426957;
   --success-soft: #e6efe9;
-  --daycare: #49657d;
-  --daycare-soft: #e8eef3;
-  --bath: #6e91aa;
-  --bath-soft: #edf4f7;
-  --grooming: #9a8244;
-  --grooming-soft: #faf4df;
-  --transport: #737a78;
-  --transport-soft: #eff0ef;
-  --hotel: #786c8c;
-  --hotel-soft: #f1edf4;
+  --daycare: #009cde;
+  --daycare-soft: #e4f6fd;
+  --bath: #e31c79;
+  --bath-soft: #fde8f2;
+  --grooming: #e31c79;
+  --grooming-soft: #fde8f2;
+  --transport: #ffa300;
+  --transport-soft: #fff3d9;
+  --hotel: #ff8200;
+  --hotel-soft: #fff0df;
   --other: #a16e48;
   --other-soft: #f7ede5;
   --radius: 12px;
@@ -1219,6 +1219,97 @@ h3 {
   --service-soft: var(--other-soft);
 }
 
+.lodging-billing-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 9px;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--hotel) 28%, var(--line));
+  border-radius: var(--radius-small);
+  background: var(--hotel-soft);
+  color: var(--ink);
+}
+
+.lodging-billing-status strong {
+  flex-basis: 100%;
+  font-size: 12px;
+}
+
+.lodging-billing-status span,
+.lodging-billing-status button {
+  font-size: 11px;
+}
+
+.invoice-payment-register,
+.daycare-hours-settings,
+.manual-download {
+  display: flex;
+  align-items: end;
+  gap: 16px;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+}
+
+.invoice-payment-register label {
+  display: grid;
+  gap: 6px;
+  min-width: 180px;
+  font-weight: 700;
+}
+
+.invoice-payment-register input {
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+}
+
+.invoice-payment-register > span,
+.daycare-hours-settings > div > span {
+  color: var(--muted);
+}
+
+.daycare-hours-settings {
+  align-items: center;
+}
+
+.daycare-hours-settings > div {
+  flex: 1;
+}
+
+.daycare-hours-settings h3 {
+  margin: 2px 0 4px;
+}
+
+.daycare-hours-settings .field {
+  min-width: 145px;
+}
+
+.manual-download {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.manual-download > span {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+}
+
+.manual-download strong {
+  color: var(--ink);
+}
+
+.mobile-more-menu {
+  display: none;
+}
+
 .agenda-card.status-completed {
   background: #f9f8f5;
   color: #676b66;
@@ -1309,7 +1400,7 @@ h3 {
   color: var(--success);
 }
 
-.settlement-note.pix {
+.settlement-note.invoice {
   background: var(--daycare-soft);
   color: var(--daycare);
 }
@@ -2350,7 +2441,7 @@ h3 {
   font-size: 0.72rem;
 }
 
-.pix-only-badge,
+.invoice-only-badge,
 .audit-badge {
   border: 1px solid #ddd0b4;
   border-radius: 999px;
@@ -2625,7 +2716,7 @@ h3 {
 .field input,
 .field select,
 .field textarea,
-.pix-code input {
+.invoice-code input {
   width: 100%;
   min-height: 44px;
   border: 1px solid var(--line);
@@ -2889,7 +2980,7 @@ h3 {
   font-size: 1.8rem;
 }
 
-.pix-notice {
+.invoice-notice {
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -2899,42 +2990,42 @@ h3 {
   padding: 12px;
 }
 
-.pix-notice strong {
+.invoice-notice strong {
   display: block;
   color: #674e2b;
 }
 
-.pix-notice p {
+.invoice-notice p {
   color: #756344;
   font-size: 0.74rem;
 }
 
-.pix-charge {
+.invoice-charge {
   display: grid;
   gap: 17px;
 }
 
-.pix-charge-summary {
+.invoice-charge-summary {
   display: flex;
   align-items: center;
   gap: 28px;
 }
 
-.pix-charge-summary > span:not(.status-pill) {
+.invoice-charge-summary > span:not(.status-pill) {
   display: grid;
 }
 
-.pix-charge-summary small {
+.invoice-charge-summary small {
   color: var(--muted);
   font-size: 0.69rem;
 }
 
-.pix-charge-summary strong {
+.invoice-charge-summary strong {
   font-family: var(--font-serif);
   font-size: 1.3rem;
 }
 
-.pix-charge-summary .status-pill {
+.invoice-charge-summary .status-pill {
   margin-left: auto;
 }
 
@@ -2949,18 +3040,18 @@ h3 {
   text-align: center;
 }
 
-.pix-body {
+.invoice-body {
   display: grid;
   grid-template-columns: 180px minmax(0, 1fr);
   align-items: center;
   gap: 22px;
 }
 
-.live-pix-body {
+.live-invoice-body {
   grid-template-columns: 112px minmax(0, 1fr);
 }
 
-.live-pix-mark {
+.live-invoice-mark {
   display: grid;
   width: 112px;
   height: 112px;
@@ -3032,7 +3123,7 @@ h3 {
   text-align: center;
 }
 
-.pix-code > label {
+.invoice-code > label {
   display: block;
   margin-bottom: 6px;
   color: var(--muted);
@@ -3040,19 +3131,19 @@ h3 {
   font-weight: 700;
 }
 
-.pix-code > div {
+.invoice-code > div {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
 }
 
-.pix-code input {
+.invoice-code input {
   min-width: 0;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 0.68rem;
 }
 
-.pix-code p {
+.invoice-code p {
   margin-top: 8px;
   color: var(--muted);
   font-size: 0.69rem;
@@ -3716,6 +3807,53 @@ h3 {
 }
 
 @media (max-width: 760px) {
+  .mobile-more-menu {
+    position: fixed;
+    right: 12px;
+    bottom: 76px;
+    z-index: 80;
+    display: grid;
+    width: min(280px, calc(100vw - 24px));
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface);
+    box-shadow: 0 18px 50px rgb(25 36 30 / 20%);
+  }
+
+  .mobile-more-menu button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 52px;
+    padding: 12px 16px;
+    border: 0;
+    border-bottom: 1px solid var(--line-soft);
+    background: transparent;
+    color: var(--ink);
+    text-align: left;
+  }
+
+  .mobile-more-menu button:last-child {
+    border-bottom: 0;
+  }
+
+  .mobile-more-menu span {
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .invoice-payment-register,
+  .daycare-hours-settings,
+  .manual-download {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .invoice-payment-register label,
+  .daycare-hours-settings .field {
+    min-width: 0;
+  }
   .setup-screen {
     align-items: start;
   }
@@ -4058,12 +4196,7 @@ h3 {
   }
 
   .billing-page .table-wrap {
-    display: block;
-    padding-bottom: 4px;
-  }
-
-  .billing-page .data-table {
-    min-width: 680px;
+    display: none;
   }
 
   .credit-package-list > div,
@@ -4098,23 +4231,36 @@ h3 {
     width: 100%;
   }
 
-  .pix-only-badge {
+  .invoice-only-badge {
     display: none;
   }
 
   .billable-row {
-    min-height: 86px;
+    min-height: 100px;
     grid-template-columns: 24px 1fr auto;
     gap: 6px 10px;
     padding-block: 10px;
   }
 
+  .billable-row > input {
+    grid-row: 1 / span 3;
+    align-self: start;
+    margin-top: 2px;
+  }
+
   .billable-date {
     grid-column: 2;
+    grid-row: 1;
+  }
+
+  .billable-row > span:nth-of-type(2) {
+    grid-column: 2;
+    grid-row: 2;
   }
 
   .billable-row > span:nth-of-type(3) {
     grid-column: 2;
+    grid-row: 3;
   }
 
   .billable-row > strong {
@@ -4155,7 +4301,7 @@ h3 {
   .field input,
   .field select,
   .field textarea,
-  .pix-code input,
+  .invoice-code input,
   .date-nav-controls input,
   .currency-input input {
     font-size: 16px;
@@ -4183,25 +4329,25 @@ h3 {
     width: 44px;
   }
 
-  .pix-body {
+  .invoice-body {
     grid-template-columns: 1fr;
     justify-items: center;
   }
 
-  .pix-code {
+  .invoice-code {
     width: 100%;
   }
 
-  .pix-code > div {
+  .invoice-code > div {
     grid-template-columns: 1fr;
   }
 
-  .pix-charge-summary {
+  .invoice-charge-summary {
     flex-wrap: wrap;
     gap: 12px 24px;
   }
 
-  .pix-charge-summary .status-pill {
+  .invoice-charge-summary .status-pill {
     margin-left: 0;
   }
 

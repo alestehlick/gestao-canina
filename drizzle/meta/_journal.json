@@ -36,6 +36,13 @@
       "when": 1785361000000,
       "tag": "0004_hospet_quintal_update",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1785400000000,
+      "tag": "0005_final_invoice_workflow",
+      "breakpoints": true
     }
   ]
 }

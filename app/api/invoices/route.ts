@@ -19,7 +19,7 @@ import {
 
 function invoiceNumber() {
   const date = new Date().toISOString().slice(0, 10).replaceAll("-", "");
-  return `PIX-${date}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
+  return `FAT-${date}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
 }
 
 function todayInSaoPaulo() {
@@ -139,13 +139,13 @@ export async function POST(request: Request) {
     if (
       rows.some(
         (row) =>
-          row.paymentPreference !== "pix" ||
+          row.paymentPreference !== "invoice" ||
           row.settlementMethod !== "unsettled",
       )
     ) {
       throw new HttpError(
         409,
-        "service_not_available_for_pix",
+        "service_not_available_for_invoice",
         "Um dos serviços já foi pago ou está configurado para usar crédito.",
       );
     }
@@ -194,7 +194,7 @@ export async function POST(request: Request) {
           SET active_invoice_id = ?, updated_at = ${nowExpression}
           WHERE id IN (${placeholders})
             AND status = 'completed'
-            AND payment_preference = 'pix'
+            AND payment_preference = 'invoice'
             AND settlement_method = 'unsettled'
             AND active_invoice_id IS NULL
             AND EXISTS (
@@ -334,11 +334,15 @@ export async function POST(request: Request) {
           status: "issued",
           dueDate,
           totalCents,
-        },
-        nextAction: {
-          method: "pix",
-          createChargeAt: "/api/pix/charges",
-          body: { invoiceId },
+          sourceType: "services",
+          items: rows.map((row) => ({
+            dogNameSnapshot: row.dogName,
+            serviceNameSnapshot: row.serviceName,
+            serviceDateSnapshot: row.serviceDate,
+            descriptionSnapshot:
+              row.description || `${row.serviceName} de ${row.dogName}`,
+            amountCents: row.amountCents,
+          })),
         },
       },
       { status: 201 },

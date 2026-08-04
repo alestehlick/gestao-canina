@@ -89,8 +89,6 @@ async function getPasswordSessionIdentity(
     )
     .limit(1);
   if (!session) return null;
-  const configuration = await getAdminConfigurationState();
-  if (!configuration.valid) return null;
   return {
     provider: "password",
     subject: session.externalSubject,

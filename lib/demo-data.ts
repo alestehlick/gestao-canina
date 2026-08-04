@@ -24,6 +24,8 @@ export type Dog = {
   breed: string;
   age: string;
   birthDate?: string;
+  sex?: "female" | "male" | "unknown";
+  neutered?: boolean | null;
   feedingNotes?: string;
   temperamentNotes?: string;
   medicationNotes?: string;

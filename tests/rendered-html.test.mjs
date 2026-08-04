@@ -236,7 +236,10 @@ test("mostra datas brasileiras e limita as diárias ao período escolhido", asyn
     ]);
 
   assert.match(dateInput, /dd\/mm\/aaaa/);
-  assert.match(dateInput, /type="date"/);
+  assert.match(dateInput, /Janeiro/);
+  assert.match(dateInput, /inputMode="numeric"/);
+  assert.match(dateInput, /date-picker-popover/);
+  assert.doesNotMatch(dateInput, /type="date"/);
   assert.doesNotMatch(app, /type="date"/);
   assert.doesNotMatch(portal, /type="date"/);
   assert.match(app, /function lodgingNightOptions/);
@@ -247,6 +250,28 @@ test("mostra datas brasileiras e limita as diárias ao período escolhido", asyn
     /lodgingNights !== durationDays \+ 0\.5/,
   );
   assert.match(lodgingInvoice, /displayDate\(lodging\.startDate\)/);
+});
+
+test("mantém cadastros seguros, práticos e sem menus redundantes", async () => {
+  const [app, dogRoute, customerRoute, taskRoute] =
+    await Promise.all([
+      readFile(new URL("../app/components/management-app.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/dogs/[id]/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/customers/[id]/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/tasks/route.ts", import.meta.url), "utf8"),
+    ]);
+
+  assert.match(app, /formatNearbyDate/);
+  assert.match(app, /Inativar/);
+  assert.doesNotMatch(app, /Importar CSV/);
+  assert.doesNotMatch(app, /id: "agenda", label: "Agenda"/);
+  assert.match(app, /Limpar concluídas/);
+  assert.match(app, /name="sex"/);
+  assert.match(app, /name="neutered"/);
+  assert.match(dogRoute, /dog_has_history/);
+  assert.match(dogRoute, /requireIdentity\(request, \["owner"\]\)/);
+  assert.match(customerRoute, /customer_has_history/);
+  assert.match(taskRoute, /tasks\.completed_cleared/);
 });
 
 test("mantém o primeiro acesso e o login protegidos sem bloqueio global da conta", async () => {

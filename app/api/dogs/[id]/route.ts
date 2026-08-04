@@ -1,6 +1,13 @@
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { appUsers, auditEvents, dogs, tutors } from "@/db/schema";
+import {
+  appUsers,
+  appointments,
+  auditEvents,
+  dogs,
+  recurringSchedules,
+  tutors,
+} from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
 import { getRuntimeBindings } from "@/lib/server/runtime";
 import {
@@ -147,6 +154,33 @@ export async function PATCH(
       changeCount += 1;
     }
 
+    if (body.sex !== undefined) {
+      if (!["female", "male", "unknown"].includes(String(body.sex))) {
+        throw new HttpError(400, "invalid_sex", "Informe fêmea, macho ou não informado.");
+      }
+      updates.sex = body.sex as "female" | "male" | "unknown";
+      changeCount += 1;
+    }
+
+    if (body.neutered !== undefined) {
+      if (body.neutered !== null && typeof body.neutered !== "boolean") {
+        throw new HttpError(400, "invalid_neutered", "A informação de castração é inválida.");
+      }
+      updates.neutered = body.neutered;
+      changeCount += 1;
+    }
+
+    if (body.status !== undefined) {
+      if (identity.role !== "owner") {
+        throw new HttpError(403, "permission_denied", "Somente administradores podem inativar um cadastro.");
+      }
+      if (!["active", "archived", "deceased"].includes(String(body.status))) {
+        throw new HttpError(400, "invalid_status", "A situação do cadastro é inválida.");
+      }
+      updates.status = body.status as "active" | "archived" | "deceased";
+      changeCount += 1;
+    }
+
     if (body.vaccinesCurrent !== undefined) {
       if (
         body.vaccinesCurrent !== null &&
@@ -186,7 +220,6 @@ export async function PATCH(
         and(
           eq(dogs.id, id),
           eq(dogs.establishmentId, establishmentId),
-          eq(dogs.status, "active"),
         ),
       )
       .limit(1);
@@ -205,7 +238,7 @@ export async function PATCH(
         establishmentId,
         actorUserId: identity.userId,
         actorRole: identity.role,
-        action: "dog.updated",
+        action: body.status === "archived" ? "dog.archived" : "dog.updated",
         entityType: "dog",
         entityId: id,
         requestId,
@@ -218,6 +251,69 @@ export async function PATCH(
       .where(eq(dogs.id, id))
       .limit(1);
     return json({ dog: updated });
+  } catch (error) {
+    return errorResponse(error, requestId);
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const requestId = crypto.randomUUID();
+  try {
+    assertSameOrigin(request);
+    const identity = await requireIdentity(request, ["owner"]);
+    const { id } = await context.params;
+    const establishmentId = identity.establishmentId!;
+    const db = getDb();
+    const [dog] = await db
+      .select({ id: dogs.id, photoObjectKey: dogs.photoObjectKey })
+      .from(dogs)
+      .where(
+        and(
+          eq(dogs.id, id),
+          eq(dogs.establishmentId, establishmentId),
+        ),
+      )
+      .limit(1);
+    if (!dog) {
+      throw new HttpError(404, "dog_not_found", "O cão não foi encontrado.");
+    }
+    const [appointment] = await db
+      .select({ id: appointments.id })
+      .from(appointments)
+      .where(eq(appointments.dogId, id))
+      .limit(1);
+    const [recurrence] = await db
+      .select({ id: recurringSchedules.id })
+      .from(recurringSchedules)
+      .where(eq(recurringSchedules.dogId, id))
+      .limit(1);
+    if (appointment || recurrence) {
+      throw new HttpError(
+        409,
+        "dog_has_history",
+        "Este cão possui histórico operacional. Use Inativar para preservar os registros.",
+      );
+    }
+    await db.batch([
+      db.delete(dogs).where(eq(dogs.id, id)),
+      db.insert(auditEvents).values({
+        id: crypto.randomUUID(),
+        establishmentId,
+        actorUserId: identity.userId,
+        actorRole: identity.role,
+        action: "dog.deleted",
+        entityType: "dog",
+        entityId: id,
+        requestId,
+      }),
+    ]);
+    if (dog.photoObjectKey) {
+      await getRuntimeBindings().FILES?.delete(dog.photoObjectKey);
+    }
+    return json({ deleted: true });
   } catch (error) {
     return errorResponse(error, requestId);
   }

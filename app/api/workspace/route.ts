@@ -162,17 +162,32 @@ export async function GET(request: Request) {
       db
         .select()
         .from(customerAccounts)
-        .where(eq(customerAccounts.establishmentId, establishmentId))
+        .where(
+          and(
+            eq(customerAccounts.establishmentId, establishmentId),
+            eq(customerAccounts.status, "active"),
+          ),
+        )
         .orderBy(asc(customerAccounts.normalizedName)),
       db
         .select()
         .from(tutors)
-        .where(eq(tutors.establishmentId, establishmentId))
+        .where(
+          and(
+            eq(tutors.establishmentId, establishmentId),
+            eq(tutors.status, "active"),
+          ),
+        )
         .orderBy(desc(tutors.isFinancialContact), asc(tutors.normalizedName)),
       db
         .select()
         .from(dogs)
-        .where(eq(dogs.establishmentId, establishmentId))
+        .where(
+          and(
+            eq(dogs.establishmentId, establishmentId),
+            eq(dogs.status, "active"),
+          ),
+        )
         .orderBy(asc(dogs.normalizedName)),
       db
         .select({
@@ -185,7 +200,12 @@ export async function GET(request: Request) {
         })
         .from(dogTutors)
         .innerJoin(dogs, eq(dogs.id, dogTutors.dogId))
-        .where(eq(dogs.establishmentId, establishmentId)),
+        .where(
+          and(
+            eq(dogs.establishmentId, establishmentId),
+            eq(dogs.status, "active"),
+          ),
+        ),
       db
         .select({
           id: appointments.id,
@@ -370,6 +390,15 @@ export async function GET(request: Request) {
     const paymentByInvoice = new Map(
       invoicePaymentRows.map((payment) => [payment.invoiceId, payment]),
     );
+    const itemsByInvoice = new Map<
+      string,
+      (typeof invoiceItemRows)[number][]
+    >();
+    for (const item of invoiceItemRows) {
+      const items = itemsByInvoice.get(item.invoiceId) ?? [];
+      items.push(item);
+      itemsByInvoice.set(item.invoiceId, items);
+    }
 
     type ScheduleRow = (typeof scheduleRows)[number];
     type AppointmentPayload = Omit<
@@ -489,9 +518,7 @@ export async function GET(request: Request) {
                   paymentByInvoice.get(invoice.id)?.cashEntryId ?? null,
                 cashIncluded:
                   paymentByInvoice.get(invoice.id)?.cashStatus === "included",
-                items: invoiceItemRows.filter(
-                  (item) => item.invoiceId === invoice.id,
-                ),
+                items: itemsByInvoice.get(invoice.id) ?? [],
               })),
         creditPackages: identity.role === "staff" ? [] : packageRows,
         creditPurchases: identity.role === "staff" ? [] : purchaseRows,

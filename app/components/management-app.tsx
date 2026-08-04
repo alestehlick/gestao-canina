@@ -55,7 +55,6 @@ import {
 
 type View =
   | "today"
-  | "agenda"
   | "requests"
   | "dogs"
   | "customers"
@@ -120,7 +119,6 @@ type AuthStatusPayload = {
 
 const navItems: { id: View; label: string; shortLabel: string }[] = [
   { id: "today", label: "Hoje", shortLabel: "Hoje" },
-  { id: "agenda", label: "Agenda", shortLabel: "Agenda" },
   { id: "requests", label: "Pedidos", shortLabel: "Pedidos" },
   { id: "dogs", label: "Cães", shortLabel: "Cães" },
   { id: "customers", label: "Clientes", shortLabel: "Clientes" },
@@ -139,11 +137,6 @@ const pageCopy: Record<
     eyebrow: "Operação de hoje",
     title: "Um dia bem cuidado começa aqui.",
     description: "Agenda, presença e tarefas essenciais em uma única visão.",
-  },
-  agenda: {
-    eyebrow: "Agenda operacional",
-    title: "Todos os cuidados programados",
-    description: "Acompanhe chegadas, atendimentos, hospedagens e rotas.",
   },
   requests: {
     eyebrow: "Portal do cliente",
@@ -319,6 +312,25 @@ function formatSelectedDate(value: string, compact = false) {
 
 function formatShortDate(value: string) {
   return formatBrazilianDate(value);
+}
+
+function formatNearbyDate(value: string) {
+  const date = dateFromIso(value);
+  const month = [
+    "Jan",
+    "Fev",
+    "Mar",
+    "Abr",
+    "Mai",
+    "Jun",
+    "Jul",
+    "Ago",
+    "Set",
+    "Out",
+    "Nov",
+    "Dez",
+  ][date.getUTCMonth()];
+  return `${String(date.getUTCDate()).padStart(2, "0")}-${month}`;
 }
 
 type InvoiceDeliveryChannel = "whatsapp" | "email" | "save";
@@ -703,6 +715,10 @@ export function ManagementApp() {
 
   const titleRef = useRef<HTMLHeadingElement>(null);
   const selectedDateRef = useRef(operationalToday);
+  const workspaceRefreshRef = useRef<{
+    key: string;
+    promise: Promise<WorkspaceReadyPayload | null>;
+  } | null>(null);
 
   const clearOperationalData = useCallback(() => {
     setWorkspacePayload(null);
@@ -796,47 +812,61 @@ export function ManagementApp() {
   }, []);
 
   const refreshWorkspace = useCallback(
-    async (
+    (
       options: {
         allowDemoFallback?: boolean;
         referenceDate?: string;
       } = {},
     ): Promise<WorkspaceReadyPayload | null> => {
-      try {
-        const payload = await requestJson<WorkspacePayload>(
-          workspaceRequestUrl(
-            options.referenceDate ?? selectedDateRef.current,
-          ),
-        );
-        if (isReadyWorkspacePayload(payload)) {
-          applyReadyWorkspace(payload);
-          return payload;
-        }
-        setWorkspacePayload(null);
-        setOnboardingPayload(payload);
-        setRuntimeMode("onboarding");
-        setLoadError("");
-        return null;
-      } catch (error) {
-        if (isSessionError(error)) {
-          endSession();
-          return null;
-        }
-        if (
-          options.allowDemoFallback &&
-          process.env.NODE_ENV !== "production"
-        ) {
-          activateDemo();
-          return null;
-        }
-        setRuntimeMode("error");
-        setLoadError(
-          error instanceof Error
-            ? error.message
-            : "Não foi possível abrir a área administrativa.",
-        );
-        return null;
+      const referenceDate =
+        options.referenceDate ?? selectedDateRef.current;
+      const key = `${referenceDate}:${options.allowDemoFallback ? "demo" : "live"}`;
+      if (workspaceRefreshRef.current?.key === key) {
+        return workspaceRefreshRef.current.promise;
       }
+
+      const promise = (async () => {
+        try {
+          const payload = await requestJson<WorkspacePayload>(
+            workspaceRequestUrl(referenceDate),
+          );
+          if (isReadyWorkspacePayload(payload)) {
+            applyReadyWorkspace(payload);
+            return payload;
+          }
+          setWorkspacePayload(null);
+          setOnboardingPayload(payload);
+          setRuntimeMode("onboarding");
+          setLoadError("");
+          return null;
+        } catch (error) {
+          if (isSessionError(error)) {
+            endSession();
+            return null;
+          }
+          if (
+            options.allowDemoFallback &&
+            process.env.NODE_ENV !== "production"
+          ) {
+            activateDemo();
+            return null;
+          }
+          setRuntimeMode("error");
+          setLoadError(
+            error instanceof Error
+              ? error.message
+              : "Não foi possível abrir a área administrativa.",
+          );
+          return null;
+        }
+      })();
+      workspaceRefreshRef.current = { key, promise };
+      void promise.finally(() => {
+        if (workspaceRefreshRef.current?.promise === promise) {
+          workspaceRefreshRef.current = null;
+        }
+      });
+      return promise;
     },
     [activateDemo, applyReadyWorkspace, endSession],
   );
@@ -1664,6 +1694,13 @@ export function ManagementApp() {
       birthDate:
         String(form.get("birthDate") ?? "").trim() ||
         dogToEdit.birthDate,
+      sex: String(form.get("sex") ?? "unknown") as Dog["sex"],
+      neutered:
+        String(form.get("neutered") ?? "") === "yes"
+          ? true
+          : String(form.get("neutered") ?? "") === "no"
+            ? false
+            : null,
       alert: String(form.get("alert") ?? "").trim() || undefined,
       vaccinesCurrent: form.get("vaccinesCurrent") === "on",
       feedingNotes: String(form.get("feedingNotes") ?? "").trim() || undefined,
@@ -1692,6 +1729,8 @@ export function ManagementApp() {
                 emergencyNotes: updated.alert ?? null,
                 vaccinesCurrent: updated.vaccinesCurrent,
                 birthDate: updated.birthDate ?? null,
+                sex: updated.sex,
+                neutered: updated.neutered,
                 feedingNotes: updated.feedingNotes ?? null,
                 temperamentNotes: updated.temperamentNotes ?? null,
                 medicationNotes: updated.medicationNotes ?? null,
@@ -1863,6 +1902,123 @@ export function ManagementApp() {
     setToast({ message: "Cadastro do cliente atualizado." });
   }
 
+  async function archiveDogProfile() {
+    if (!dogToEdit || !window.confirm(`Inativar ${dogToEdit.name}? Ele deixará de aparecer nos novos agendamentos.`)) {
+      return;
+    }
+    if (runtimeMode === "ready") {
+      const result = await runLiveAction(
+        `archive-dog:${dogToEdit.id}`,
+        () =>
+          requestJson(`/api/dogs/${dogToEdit.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ status: "archived" }),
+          }),
+        { refresh: true, successMessage: `${dogToEdit.name} foi inativado.` },
+      );
+      if (result) {
+        setDialog(null);
+        setDogToEdit(null);
+        setSelectedDogId(null);
+      }
+      return;
+    }
+    setDogs((current) => current.filter((dog) => dog.id !== dogToEdit.id));
+    setDialog(null);
+    setDogToEdit(null);
+    setSelectedDogId(null);
+    setToast({ message: `${dogToEdit.name} foi inativado.` });
+  }
+
+  async function deleteDogProfile() {
+    if (!dogToEdit || !window.confirm(`Excluir definitivamente ${dogToEdit.name}? Essa ação só funciona quando não há histórico.`)) {
+      return;
+    }
+    if (runtimeMode === "ready") {
+      const result = await runLiveAction(
+        `delete-dog:${dogToEdit.id}`,
+        () => requestJson(`/api/dogs/${dogToEdit.id}`, { method: "DELETE" }),
+        { refresh: true, successMessage: `${dogToEdit.name} foi excluído.` },
+      );
+      if (result) {
+        setDialog(null);
+        setDogToEdit(null);
+        setSelectedDogId(null);
+      }
+      return;
+    }
+    setDogs((current) => current.filter((dog) => dog.id !== dogToEdit.id));
+    setDialog(null);
+    setDogToEdit(null);
+    setSelectedDogId(null);
+    setToast({ message: `${dogToEdit.name} foi excluído.` });
+  }
+
+  async function archiveCustomerProfile() {
+    if (!customerToEdit || !window.confirm(`Inativar ${customerToEdit.name} e seus cães? Eles deixarão de aparecer nos novos agendamentos.`)) {
+      return;
+    }
+    if (runtimeMode === "ready") {
+      const result = await runLiveAction(
+        `archive-customer:${customerToEdit.id}`,
+        () =>
+          requestJson(`/api/customers/${customerToEdit.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ status: "archived" }),
+          }),
+        { refresh: true, successMessage: "Cliente inativado." },
+      );
+      if (result) {
+        setDialog(null);
+        setCustomerToEdit(null);
+        setSelectedCustomerId(null);
+      }
+      return;
+    }
+    setCustomers((current) =>
+      current.filter((customer) => customer.id !== customerToEdit.id),
+    );
+    setDogs((current) =>
+      current.filter((dog) => dog.customerId !== customerToEdit.id),
+    );
+    setDialog(null);
+    setCustomerToEdit(null);
+    setSelectedCustomerId(null);
+    setToast({ message: "Cliente inativado." });
+  }
+
+  async function deleteCustomerProfile() {
+    if (!customerToEdit || !window.confirm(`Excluir definitivamente ${customerToEdit.name}? Essa ação só funciona quando não há histórico.`)) {
+      return;
+    }
+    if (runtimeMode === "ready") {
+      const result = await runLiveAction(
+        `delete-customer:${customerToEdit.id}`,
+        () =>
+          requestJson(`/api/customers/${customerToEdit.id}`, {
+            method: "DELETE",
+          }),
+        { refresh: true, successMessage: "Cliente excluído." },
+      );
+      if (result) {
+        setDialog(null);
+        setCustomerToEdit(null);
+        setSelectedCustomerId(null);
+      }
+      return;
+    }
+    setCustomers((current) =>
+      current.filter((customer) => customer.id !== customerToEdit.id),
+    );
+    setDogs((current) =>
+      current.filter((dog) => dog.customerId !== customerToEdit.id),
+    );
+    setDialog(null);
+    setCustomerToEdit(null);
+    setSelectedCustomerId(null);
+    setToast({ message: "Cliente excluído." });
+  }
+
   async function submitCancellation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!bookingToCancel) return;
@@ -2009,7 +2165,7 @@ export function ManagementApp() {
       if (result) {
         setDialog(null);
         selectAgendaDate(date);
-        setView("agenda");
+        setView("today");
       }
       return;
     }
@@ -2058,7 +2214,7 @@ export function ManagementApp() {
     );
     setDialog(null);
     selectAgendaDate(date);
-    setView("agenda");
+    setView("today");
     setToast({
       message:
         newBookings.length === 1
@@ -2203,6 +2359,14 @@ export function ManagementApp() {
     }
     const breed = String(form.get("breed") ?? "").trim();
     const alert = String(form.get("alert") ?? "").trim();
+    const birthDate = String(form.get("birthDate") ?? "").trim();
+    const sex = String(form.get("sex") ?? "unknown") as Dog["sex"];
+    const neutered =
+      String(form.get("neutered") ?? "") === "yes"
+        ? true
+        : String(form.get("neutered") ?? "") === "no"
+          ? false
+          : null;
     if (runtimeMode === "ready") {
       const result = await runLiveAction(
         "new-dog",
@@ -2213,6 +2377,9 @@ export function ManagementApp() {
               accountId: customerId,
               name,
               breed: breed || undefined,
+              birthDate: birthDate || undefined,
+              sex,
+              neutered,
               emergencyNotes: alert || undefined,
               vaccinesCurrent: false,
             }),
@@ -2237,6 +2404,9 @@ export function ManagementApp() {
       initials: initials(name),
       breed: breed || "Raça não informada",
       age: "Idade não informada",
+      birthDate: birthDate || undefined,
+      sex,
+      neutered,
       customerId,
       customerName: customer.name,
       color: "forest",
@@ -2283,6 +2453,27 @@ export function ManagementApp() {
         task.id === taskId ? { ...task, completed: !task.completed } : task,
       ),
     );
+  }
+
+  async function clearCompletedTasks() {
+    const completedCount = tasks.filter((task) => task.completed).length;
+    if (!completedCount) {
+      setToast({ message: "Não há tarefas concluídas para limpar." });
+      return;
+    }
+    if (!window.confirm(`Limpar ${completedCount} tarefa(s) concluída(s) do quadro?`)) {
+      return;
+    }
+    if (runtimeMode === "ready") {
+      await runLiveAction(
+        "clear-completed-tasks",
+        () => requestJson("/api/tasks", { method: "DELETE" }),
+        { refresh: true, successMessage: "Tarefas concluídas removidas do quadro." },
+      );
+      return;
+    }
+    setTasks((current) => current.filter((task) => !task.completed));
+    setToast({ message: "Tarefas concluídas removidas do quadro." });
   }
 
   function toggleBillable(service: BillableService) {
@@ -3292,7 +3483,7 @@ export function ManagementApp() {
     signedInRole === "owner"
       ? navItems
       : navItems.filter((item) =>
-          ["today", "agenda", "requests", "dogs", "customers"].includes(
+          ["today", "requests", "dogs", "customers"].includes(
             item.id,
           ),
         );
@@ -3513,30 +3704,12 @@ export function ManagementApp() {
               onEdit={openBookingEditor}
               onCancel={askToCancel}
               onToggleTask={toggleTask}
-              onViewAgenda={() => navigate("agenda")}
+              onClearCompletedTasks={clearCompletedTasks}
               onViewBilling={() => navigate("billing")}
               onOpenInvoice={openExistingInvoice}
               onLodgingInvoice={issueLodgingInvoice}
               onOpenReceipt={openReceipt}
               invoice={invoices.find((item) => item.status !== "paid")}
-            />
-          )}
-          {view === "agenda" && (
-            <AgendaView
-              bookings={bookings}
-              dogs={dogs}
-              receipts={receipts}
-              selectedDate={selectedDate}
-              onDateChange={selectAgendaDate}
-              agendaFilter={agendaFilter}
-              setAgendaFilter={setAgendaFilter}
-              onAdvance={advanceBooking}
-              onMenu={setOpenMenuId}
-              openMenuId={openMenuId}
-              onEdit={openBookingEditor}
-              onCancel={askToCancel}
-              onOpenReceipt={openReceipt}
-              onLodgingInvoice={issueLodgingInvoice}
             />
           )}
           {view === "requests" && <CustomerRequestsView />}
@@ -3715,7 +3888,7 @@ export function ManagementApp() {
         onClick={() => openServiceDialog()}
         hidden={
           Boolean(selectedDog || selectedCustomer) ||
-          !["today", "agenda", "dogs", "customers"].includes(view)
+          !["today", "dogs", "customers"].includes(view)
         }
       >
         <span aria-hidden="true">+</span> Novo serviço
@@ -4335,6 +4508,31 @@ export function ManagementApp() {
                 <input name="age" defaultValue={dogToEdit.age} />
               </label>
             )}
+            <label className="field">
+              <span>Sexo</span>
+              <select name="sex" defaultValue={dogToEdit.sex ?? "unknown"}>
+                <option value="unknown">Não informado</option>
+                <option value="female">Fêmea</option>
+                <option value="male">Macho</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>É castrado?</span>
+              <select
+                name="neutered"
+                defaultValue={
+                  dogToEdit.neutered === true
+                    ? "yes"
+                    : dogToEdit.neutered === false
+                      ? "no"
+                      : ""
+                }
+              >
+                <option value="">Não informado</option>
+                <option value="yes">Sim</option>
+                <option value="no">Não</option>
+              </select>
+            </label>
             <label className="field full">
               <span>Alerta essencial</span>
               <textarea
@@ -4381,6 +4579,16 @@ export function ManagementApp() {
               <span>Vacinas conferidas e em dia</span>
             </label>
             <div className="dialog-actions full">
+              {signedInRole === "owner" && (
+                <>
+                  <button className="text-button danger" type="button" onClick={() => void archiveDogProfile()}>
+                    Inativar
+                  </button>
+                  <button className="text-button danger" type="button" onClick={() => void deleteDogProfile()}>
+                    Excluir
+                  </button>
+                </>
+              )}
               <button
                 className="secondary-button"
                 type="button"
@@ -4460,6 +4668,16 @@ export function ManagementApp() {
               />
             </label>
             <div className="dialog-actions full">
+              {signedInRole === "owner" && (
+                <>
+                  <button className="text-button danger" type="button" onClick={() => void archiveCustomerProfile()}>
+                    Inativar
+                  </button>
+                  <button className="text-button danger" type="button" onClick={() => void deleteCustomerProfile()}>
+                    Excluir
+                  </button>
+                </>
+              )}
               <button
                 className="secondary-button"
                 type="button"
@@ -4633,6 +4851,29 @@ export function ManagementApp() {
               <label className="field full">
                 <span>Raça</span>
                 <input name="breed" />
+              </label>
+              <label className="field">
+                <span>Data de nascimento</span>
+                <BrazilianDateInput
+                  name="birthDate"
+                  ariaLabel="Data de nascimento do cão"
+                />
+              </label>
+              <label className="field">
+                <span>Sexo</span>
+                <select name="sex" defaultValue="unknown">
+                  <option value="unknown">Não informado</option>
+                  <option value="female">Fêmea</option>
+                  <option value="male">Macho</option>
+                </select>
+              </label>
+              <label className="field full">
+                <span>É castrado?</span>
+                <select name="neutered" defaultValue="">
+                  <option value="">Não informado</option>
+                  <option value="yes">Sim</option>
+                  <option value="no">Não</option>
+                </select>
               </label>
               <label className="field full">
                 <span>Alerta essencial</span>
@@ -5105,7 +5346,7 @@ function TodayView({
   onEdit,
   onCancel,
   onToggleTask,
-  onViewAgenda,
+  onClearCompletedTasks,
   onViewBilling,
   onOpenInvoice,
   onLodgingInvoice,
@@ -5129,7 +5370,7 @@ function TodayView({
   onEdit: (booking: Booking) => void;
   onCancel: (booking: Booking) => void;
   onToggleTask: (id: string) => void;
-  onViewAgenda: () => void;
+  onClearCompletedTasks: () => void;
   onViewBilling: () => void;
   onOpenInvoice: (invoice: Invoice) => void;
   onLodgingInvoice: (
@@ -5178,9 +5419,6 @@ function TodayView({
           <p>{isToday ? formatToday() : formatSelectedDate(selectedDate)}</p>
           <span>São Paulo · horário local</span>
         </div>
-        <button className="quiet-button" onClick={onViewAgenda}>
-          Ver agenda completa
-        </button>
       </section>
 
       <DateNavigator value={selectedDate} onChange={onDateChange} />
@@ -5363,6 +5601,11 @@ function TodayView({
                 {tasks.filter((task) => !task.completed).length}
               </span>
             </div>
+            {tasks.some((task) => task.completed) && (
+              <button className="text-button muted" onClick={onClearCompletedTasks}>
+                Limpar concluídas
+              </button>
+            )}
             <div className="task-list">
               {tasks.map((task) => (
                 <label
@@ -5474,140 +5717,12 @@ function DateNavigator({
               aria-pressed={value === date}
             >
               <span>{index === 0 ? "Hoje" : index === 1 ? "Amanhã" : weekday}</span>
-              <strong>{formatShortDate(date)}</strong>
+              <strong>{formatNearbyDate(date)}</strong>
             </button>
           );
         })}
       </div>
     </section>
-  );
-}
-
-function AgendaView({
-  bookings,
-  dogs,
-  selectedDate,
-  onDateChange,
-  agendaFilter,
-  setAgendaFilter,
-  onAdvance,
-  onMenu,
-  openMenuId,
-  onEdit,
-  onCancel,
-  onOpenReceipt,
-  onLodgingInvoice,
-  receipts,
-}: {
-  bookings: Booking[];
-  dogs: Dog[];
-  selectedDate: string;
-  onDateChange: (value: string) => void;
-  agendaFilter: "all" | "upcoming" | "active" | "completed";
-  setAgendaFilter: (
-    value: "all" | "upcoming" | "active" | "completed",
-  ) => void;
-  onAdvance: (booking: Booking) => void;
-  onMenu: (id: string | null) => void;
-  openMenuId: string | null;
-  onEdit: (booking: Booking) => void;
-  onCancel: (booking: Booking) => void;
-  onOpenReceipt: (receipt: ServiceReceipt) => void;
-  onLodgingInvoice: (
-    booking: Booking,
-    kind: "deposit" | "balance",
-  ) => void;
-  receipts: ServiceReceipt[];
-}) {
-  const dayBookings = bookings.filter((booking) =>
-    bookingOccursOn(booking, selectedDate),
-  );
-  const filtered = filterBookings(dayBookings, agendaFilter);
-  return (
-    <div className="agenda-page">
-      <DateNavigator value={selectedDate} onChange={onDateChange} />
-      <section className="panel full-panel">
-        <div className="panel-heading agenda-heading">
-          <div>
-            <p className="section-kicker">
-              {selectedDate === operationalToday ? "Hoje" : "Dia selecionado"}
-            </p>
-            <h2>{formatSelectedDate(selectedDate)}</h2>
-          </div>
-          <div className="heading-actions">
-            <AgendaFilters value={agendaFilter} onChange={setAgendaFilter} />
-          </div>
-        </div>
-        <div className="agenda-day-divider">
-          <span>Atendimentos do dia</span>
-          <span>
-            {
-              dayBookings.filter(
-                (booking) => booking.status !== "cancelled",
-              ).length
-            }{" "}
-            itens
-          </span>
-        </div>
-        <div className="agenda-list spacious">
-          {filtered
-            .filter((booking) => booking.status !== "cancelled")
-            .map((booking) => (
-            <AgendaCard
-              key={booking.id}
-              booking={booking}
-              dog={dogs.find((dog) => dog.id === booking.dogId)}
-              onAdvance={onAdvance}
-              openMenu={openMenuId === booking.id}
-              onMenu={() =>
-                onMenu(openMenuId === booking.id ? null : booking.id)
-              }
-              onEdit={onEdit}
-              onCancel={onCancel}
-              receipt={receipts.find(
-                (receipt) => receipt.number === booking.receiptNumber,
-              )}
-              onOpenReceipt={onOpenReceipt}
-              onLodgingInvoice={onLodgingInvoice}
-            />
-          ))}
-          {!filtered.filter((booking) => booking.status !== "cancelled").length && (
-            <EmptyState
-              title="Dia livre"
-              description="Não há serviços com este filtro para o dia selecionado."
-            />
-          )}
-        </div>
-        {dayBookings.some((booking) => booking.status === "cancelled") && (
-          <details className="cancelled-section">
-            <summary>
-              Cancelados (
-              {
-                dayBookings.filter(
-                  (booking) => booking.status === "cancelled",
-                ).length
-              }
-              )
-            </summary>
-            {dayBookings
-              .filter((booking) => booking.status === "cancelled")
-              .map((booking) => (
-              <AgendaCard
-                key={booking.id}
-                booking={booking}
-                dog={dogs.find((dog) => dog.id === booking.dogId)}
-                onAdvance={onAdvance}
-                openMenu={false}
-                onMenu={() => undefined}
-                onEdit={onEdit}
-                onCancel={onCancel}
-                onLodgingInvoice={onLodgingInvoice}
-              />
-            ))}
-          </details>
-        )}
-      </section>
-    </div>
   );
 }
 
@@ -6135,6 +6250,26 @@ function DogProfile({
                 <span>Alimentação</span>
                 <strong>{dog.feedingNotes || "Não informada"}</strong>
               </div>
+              <div>
+                <span>Sexo</span>
+                <strong>
+                  {dog.sex === "female"
+                    ? "Fêmea"
+                    : dog.sex === "male"
+                      ? "Macho"
+                      : "Não informado"}
+                </strong>
+              </div>
+              <div>
+                <span>Castrado</span>
+                <strong>
+                  {dog.neutered === true
+                    ? "Sim"
+                    : dog.neutered === false
+                      ? "Não"
+                      : "Não informado"}
+                </strong>
+              </div>
             </div>
           </section>
           <section className="panel">
@@ -6236,6 +6371,19 @@ function CustomersView({
   onSelect: (id: string) => void;
   onNew: () => void;
 }) {
+  const dogNamesByCustomer = useMemo(() => {
+    const dogNameById = new Map(dogs.map((dog) => [dog.id, dog.name]));
+    return new Map(
+      customers.map((customer) => [
+        customer.id,
+        customer.dogIds
+          .map((dogId) => dogNameById.get(dogId))
+          .filter((name): name is string => Boolean(name))
+          .join(", "),
+      ]),
+    );
+  }, [customers, dogs]);
+
   return (
     <section className="panel full-panel">
       <div className="panel-heading">
@@ -6243,9 +6391,11 @@ function CustomersView({
           <p className="section-kicker">Relacionamento</p>
           <h2>{customers.length} clientes ativos</h2>
         </div>
-        <button className="secondary-button" onClick={onNew}>
-          + Novo cliente
-        </button>
+        <div className="inline-actions">
+          <button className="secondary-button" onClick={onNew}>
+            + Novo cliente
+          </button>
+        </div>
       </div>
       <div className="table-wrap">
         <table className="data-table">
@@ -6279,10 +6429,7 @@ function CustomersView({
                   </span>
                 </td>
                 <td>
-                  {dogs
-                    .filter((dog) => customer.dogIds.includes(dog.id))
-                    .map((dog) => dog.name)
-                    .join(", ") || "Nenhum"}
+                  {dogNamesByCustomer.get(customer.id) || "Nenhum"}
                 </td>
                 <td>{customer.creditsLabel}</td>
                 <td>
@@ -6318,10 +6465,7 @@ function CustomersView({
             </span>
             <CustomerStatus customer={customer} />
             <span className="mobile-data-detail">
-              {dogs
-                .filter((dog) => customer.dogIds.includes(dog.id))
-                .map((dog) => dog.name)
-                .join(", ") || "Nenhum cão"}
+              {dogNamesByCustomer.get(customer.id) || "Nenhum cão"}
             </span>
           </button>
         ))}
@@ -6565,10 +6709,6 @@ function CustomerProfile({
               <div>
                 <span>Taxi-dog</span>
                 <strong>{balances.transport}</strong>
-              </div>
-              <div>
-                <span>Taxi-dog</span>
-                <strong>{balances.transport ?? 0}</strong>
               </div>
             </div>
             <p className="ledger-note">

@@ -1,8 +1,13 @@
 import { and, eq, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
+  appointments,
   auditEvents,
+  creditMovements,
+  creditPurchases,
   customerAccounts,
+  dogs,
+  invoices,
   tutors,
 } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
@@ -99,12 +104,24 @@ export async function PATCH(
         "Somente administradores podem alterar o CPF.",
       );
     }
+    if (body.status !== undefined) {
+      if (identity.role !== "owner" || !["active", "archived"].includes(String(body.status))) {
+        throw new HttpError(403, "permission_denied", "Somente administradores podem inativar um cadastro.");
+      }
+    }
     if (
       displayName === null &&
       fullName === null &&
       email === undefined &&
       phoneE164 === undefined &&
-      body.whatsappEnabled === undefined
+      body.whatsappEnabled === undefined &&
+      body.addressLine === undefined &&
+      body.addressCity === undefined &&
+      body.addressRegion === undefined &&
+      body.addressPostalCode === undefined &&
+      body.cpf === undefined &&
+      body.birthDate === undefined &&
+      body.status === undefined
     ) {
       throw new HttpError(
         400,
@@ -206,8 +223,7 @@ export async function PATCH(
     const nextDisplayName = displayName ?? account.displayName;
     const nextFullName = fullName ?? displayName ?? contact.fullName;
     const now = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
-    await db.batch([
-      db
+    const accountUpdate = db
         .update(customerAccounts)
         .set({
           displayName: nextDisplayName,
@@ -218,10 +234,14 @@ export async function PATCH(
           addressPostalCode: body.addressPostalCode === undefined ? account.addressPostalCode : addressPostalCode,
           cpf: body.cpf === undefined ? account.cpf : cpf,
           birthDate: body.birthDate === undefined ? account.birthDate : birthDate,
+          status:
+            body.status === undefined
+              ? account.status
+              : (body.status as "active" | "archived"),
           updatedAt: now,
         })
-        .where(eq(customerAccounts.id, id)),
-      db
+        .where(eq(customerAccounts.id, id));
+    const tutorUpdate = db
         .update(tutors)
         .set({
           fullName: nextFullName,
@@ -232,18 +252,39 @@ export async function PATCH(
           whatsappEnabled,
           updatedAt: now,
         })
-        .where(eq(tutors.id, contact.id)),
-      db.insert(auditEvents).values({
-        id: crypto.randomUUID(),
-        establishmentId,
-        actorUserId: identity.userId,
-        actorRole: identity.role,
-        action: "customer.updated",
-        entityType: "customer",
-        entityId: id,
-        requestId,
-      }),
-    ]);
+        .where(eq(tutors.id, contact.id));
+    const auditInsert = db.insert(auditEvents).values({
+      id: crypto.randomUUID(),
+      establishmentId,
+      actorUserId: identity.userId,
+      actorRole: identity.role,
+      action:
+        body.status === "archived"
+          ? "customer.archived"
+          : "customer.updated",
+      entityType: "customer",
+      entityId: id,
+      requestId,
+    });
+    if (body.status === "archived") {
+      await db.batch([
+        accountUpdate,
+        tutorUpdate,
+        db
+          .update(dogs)
+          .set({ status: "archived", updatedAt: now })
+          .where(
+            and(
+              eq(dogs.accountId, id),
+              eq(dogs.establishmentId, establishmentId),
+              eq(dogs.status, "active"),
+            ),
+          ),
+        auditInsert,
+      ]);
+    } else {
+      await db.batch([accountUpdate, tutorUpdate, auditInsert]);
+    }
 
     return json({
       customer: {
@@ -258,6 +299,64 @@ export async function PATCH(
         },
       },
     });
+  } catch (error) {
+    return errorResponse(error, requestId);
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const requestId = crypto.randomUUID();
+  try {
+    assertSameOrigin(request);
+    const identity = await requireIdentity(request, ["owner"]);
+    const { id } = await context.params;
+    const establishmentId = identity.establishmentId!;
+    const db = getDb();
+    const [account] = await db
+      .select({ id: customerAccounts.id })
+      .from(customerAccounts)
+      .where(
+        and(
+          eq(customerAccounts.id, id),
+          eq(customerAccounts.establishmentId, establishmentId),
+        ),
+      )
+      .limit(1);
+    if (!account) {
+      throw new HttpError(404, "customer_not_found", "O cliente não foi encontrado.");
+    }
+    const references = await Promise.all([
+      db.select({ id: dogs.id }).from(dogs).where(eq(dogs.accountId, id)).limit(1),
+      db.select({ id: appointments.id }).from(appointments).where(eq(appointments.accountId, id)).limit(1),
+      db.select({ id: invoices.id }).from(invoices).where(eq(invoices.accountId, id)).limit(1),
+      db.select({ id: creditPurchases.id }).from(creditPurchases).where(eq(creditPurchases.accountId, id)).limit(1),
+      db.select({ id: creditMovements.id }).from(creditMovements).where(eq(creditMovements.accountId, id)).limit(1),
+    ]);
+    if (references.some((items) => items.length > 0)) {
+      throw new HttpError(
+        409,
+        "customer_has_history",
+        "Este cliente possui histórico operacional. Use Inativar para preservar os registros.",
+      );
+    }
+    await db.batch([
+      db.delete(tutors).where(eq(tutors.accountId, id)),
+      db.delete(customerAccounts).where(eq(customerAccounts.id, id)),
+      db.insert(auditEvents).values({
+        id: crypto.randomUUID(),
+        establishmentId,
+        actorUserId: identity.userId,
+        actorRole: identity.role,
+        action: "customer.deleted",
+        entityType: "customer",
+        entityId: id,
+        requestId,
+      }),
+    ]);
+    return json({ deleted: true });
   } catch (error) {
     return errorResponse(error, requestId);
   }

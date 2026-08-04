@@ -831,11 +831,12 @@ export function mapWorkspaceDogs(
   payload: WorkspaceReadyPayload,
   creditBalances: CreditBalances,
   referenceDate = payload.range.from,
+  mappedBookings?: Booking[],
 ): Dog[] {
   const customersById = new Map(
     payload.customers.map((customer) => [customer.id, customer]),
   );
-  const bookings = mapWorkspaceBookings(payload);
+  const bookings = mappedBookings ?? mapWorkspaceBookings(payload);
   const bookingsByDog = new Map<string, Booking[]>();
   for (const booking of bookings) {
     if (booking.status === "cancelled" || booking.date < referenceDate) {
@@ -866,6 +867,8 @@ export function mapWorkspaceDogs(
         breed: dog.breed?.trim() || "Raça não informada",
         age: ageLabel(dog.birthDate, referenceDate),
         birthDate: dog.birthDate ?? undefined,
+        sex: dog.sex,
+        neutered: dog.neutered,
         feedingNotes: dog.feedingNotes ?? undefined,
         temperamentNotes: dog.temperamentNotes ?? undefined,
         medicationNotes: dog.medicationNotes ?? undefined,
@@ -942,6 +945,7 @@ export function transformWorkspacePayload(
 ): WorkspaceUiData {
   const operationalToday = options.referenceDate ?? payload.range.from;
   const creditBalances = mapWorkspaceCreditBalances(payload);
+  const bookings = mapWorkspaceBookings(payload);
 
   return {
     operationalToday,
@@ -950,8 +954,13 @@ export function transformWorkspacePayload(
       creditBalances,
       operationalToday,
     ),
-    dogs: mapWorkspaceDogs(payload, creditBalances, operationalToday),
-    bookings: mapWorkspaceBookings(payload),
+    dogs: mapWorkspaceDogs(
+      payload,
+      creditBalances,
+      operationalToday,
+      bookings,
+    ),
+    bookings,
     billableServices: mapWorkspaceBillableServices(payload),
     tasks: mapWorkspaceTasks(payload, operationalToday),
     invoices: mapWorkspaceInvoices(payload, operationalToday),

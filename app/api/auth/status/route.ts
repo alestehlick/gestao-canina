@@ -9,27 +9,26 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const requestId = crypto.randomUUID();
   try {
-    const [configuration, identity] = await Promise.all([
-      getAdminConfigurationState(),
-      getIdentity(request),
-    ]);
+    const identity = await getIdentity(request);
+    if (identity?.establishmentId) {
+      return json({
+        setupRequired: false,
+        authenticated: true,
+        identity: {
+          email: identity.email,
+          displayName: identity.displayName,
+          role: identity.role,
+        },
+        sessionExpiresAt: identity.sessionExpiresAt,
+      });
+    }
+
+    const configuration = await getAdminConfigurationState();
     const { setupRequired } = configuration;
-    const authenticated =
-      configuration.valid && Boolean(identity?.establishmentId);
 
     return json({
       setupRequired,
-      authenticated,
-      ...(authenticated && identity
-        ? {
-            identity: {
-              email: identity.email,
-              displayName: identity.displayName,
-              role: identity.role,
-            },
-            sessionExpiresAt: identity.sessionExpiresAt,
-          }
-        : {}),
+      authenticated: false,
       ...(!setupRequired && !configuration.valid
         ? { configurationError: true }
         : {}),

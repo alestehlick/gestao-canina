@@ -1,3 +1,4 @@
+import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditEvents, tasks } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
@@ -56,6 +57,52 @@ export async function POST(request: Request) {
     ]);
 
     return json({ task: { id, title, scheduledDate, scheduledTime, priority } }, { status: 201 });
+  } catch (error) {
+    return errorResponse(error, requestId);
+  }
+}
+
+export async function DELETE(request: Request) {
+  const requestId = crypto.randomUUID();
+  try {
+    assertSameOrigin(request);
+    const identity = await requireIdentity(request, ["owner", "staff"]);
+    const establishmentId = identity.establishmentId!;
+    const db = getDb();
+    const completed = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.establishmentId, establishmentId),
+          eq(tasks.status, "completed"),
+        ),
+      );
+    if (!completed.length) {
+      return json({ cleared: 0, idempotent: true });
+    }
+    await db.batch([
+      db
+        .delete(tasks)
+        .where(
+          and(
+            eq(tasks.establishmentId, establishmentId),
+            eq(tasks.status, "completed"),
+          ),
+        ),
+      db.insert(auditEvents).values({
+        id: crypto.randomUUID(),
+        establishmentId,
+        actorUserId: identity.userId,
+        actorRole: identity.role,
+        action: "tasks.completed_cleared",
+        entityType: "task",
+        entityId: "completed-tasks",
+        requestId,
+        metadataJson: JSON.stringify({ count: completed.length }),
+      }),
+    ]);
+    return json({ cleared: completed.length });
   } catch (error) {
     return errorResponse(error, requestId);
   }

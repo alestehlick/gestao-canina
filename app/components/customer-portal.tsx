@@ -324,35 +324,66 @@ export default function CustomerPortal() {
     try {
       const { jsPDF } = await import("jspdf");
       const pdf = new jsPDF({ unit: "mm", format: "a4" });
-      pdf.setTextColor(32, 62, 51);
+      pdf.setTextColor(30, 55, 46);
       pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(20);
+      pdf.setFontSize(15);
       pdf.text("Hospet Quintal", 18, 22);
-      pdf.setFontSize(11);
-      pdf.text(`Fatura ${invoice.invoiceNumber}`, 18, 31);
+      pdf.setFontSize(13);
+      pdf.text("Fatura", 192, 22, { align: "right" });
       pdf.setFont("helvetica", "normal");
-      pdf.setTextColor(60, 66, 62);
-      pdf.text(`Cliente: ${data?.account.displayName ?? ""}`, 18, 40);
-      pdf.text(`Emissão: ${shortDate(invoice.issuedAt)}`, 18, 47);
-      let y = 61;
+      pdf.setTextColor(104, 111, 107);
+      pdf.setFontSize(8);
+      pdf.text(`Nº ${invoice.invoiceNumber}`, 192, 29, { align: "right" });
+      pdf.setDrawColor(209, 213, 210);
+      pdf.line(18, 38, 192, 38);
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(38, 46, 41);
+      pdf.setFontSize(7.5);
+      pdf.text("CLIENTE", 18, 52);
+      pdf.text("EMISSÃO", 145, 52);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(10.5);
+      pdf.text(data?.account.displayName ?? "", 18, 60);
+      pdf.setFontSize(9);
+      pdf.text(shortDate(invoice.issuedAt), 145, 60);
+      let y = 79;
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(86, 93, 89);
+      pdf.setFontSize(7.5);
+      pdf.text("DESCRIÇÃO", 18, y);
+      pdf.text("VALOR", 192, y, { align: "right" });
+      pdf.setDrawColor(209, 213, 210);
+      pdf.line(18, y + 4, 192, y + 4);
+      y += 14;
       for (const item of invoice.items) {
         if (y > 260) {
           pdf.addPage();
           y = 22;
         }
+        pdf.setTextColor(38, 46, 41);
         pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(10);
         pdf.text(`${item.dogName ?? "Cliente"} · ${item.serviceName}`, 18, y);
         pdf.setFont("helvetica", "normal");
-        pdf.text(shortDate(item.serviceDate), 18, y + 6);
-        pdf.text(money(item.amountCents), 190, y, { align: "right" });
-        y += 15;
+        pdf.text(money(item.amountCents), 192, y, { align: "right" });
+        pdf.setTextColor(102, 108, 104);
+        pdf.setFontSize(8.5);
+        pdf.text(shortDate(item.serviceDate), 18, y + 5);
+        pdf.setDrawColor(232, 234, 232);
+        pdf.line(18, y + 11, 192, y + 11);
+        y += 19;
       }
-      pdf.setDrawColor(210, 206, 197);
-      pdf.line(18, y, 192, y);
+      y += 4;
+      pdf.setDrawColor(30, 55, 46);
+      pdf.line(145, y, 192, y);
+      pdf.setTextColor(91, 99, 94);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(8);
+      pdf.text("Total", 145, y + 8);
+      pdf.setTextColor(30, 55, 46);
       pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(14);
-      pdf.text("Total", 18, y + 11);
-      pdf.text(money(invoice.totalCents), 192, y + 11, { align: "right" });
+      pdf.setFontSize(13);
+      pdf.text(money(invoice.totalCents), 192, y + 8, { align: "right" });
       const safeName = (data?.account.displayName ?? "cliente")
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")

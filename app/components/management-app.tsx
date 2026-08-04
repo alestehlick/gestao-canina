@@ -410,47 +410,51 @@ async function createInvoicePdf(state: InvoiceState) {
     subject: `Fatura de serviços para ${state.customerName}`,
     author: "Hospet Quintal",
   });
-  document.setFillColor(24, 63, 49);
-  document.rect(0, 0, 210, 42, "F");
-  document.setTextColor(255, 255, 255);
+  document.setTextColor(30, 55, 46);
   document.setFont("helvetica", "bold");
-  document.setFontSize(22);
-  document.text("HOSPET QUINTAL", 18, 20);
-  document.setFontSize(9);
+  document.setFontSize(15);
+  document.text("Hospet Quintal", 18, 22);
+  document.setTextColor(104, 111, 107);
+  document.setFontSize(8);
   document.setFont("helvetica", "normal");
-  document.text("Cuidado, hospedagem e bem-estar canino", 18, 28);
+  document.text("Cuidado e bem-estar canino", 18, 29);
+  document.setTextColor(30, 55, 46);
   document.setFont("helvetica", "bold");
-  document.setFontSize(17);
-  document.text("FATURA", 192, 19, { align: "right" });
-  document.setFontSize(9);
+  document.setFontSize(13);
+  document.text("Fatura", 192, 22, { align: "right" });
+  document.setTextColor(104, 111, 107);
+  document.setFontSize(8);
   document.setFont("helvetica", "normal");
-  document.text(`No. ${invoiceNumber}`, 192, 27, { align: "right" });
+  document.text(`Nº ${invoiceNumber}`, 192, 29, { align: "right" });
+  document.setDrawColor(209, 213, 210);
+  document.setLineWidth(0.3);
+  document.line(18, 38, 192, 38);
 
   document.setTextColor(38, 46, 41);
   document.setFont("helvetica", "bold");
-  document.setFontSize(9);
-  document.text("CLIENTE", 18, 57);
-  document.text("EMISSÃO", 124, 57);
+  document.setFontSize(7.5);
+  document.text("CLIENTE", 18, 52);
+  document.text("EMISSÃO", 145, 52);
   document.setFont("helvetica", "normal");
-  document.setFontSize(12);
-  document.text(state.customerName, 18, 65);
-  document.setFontSize(10);
-  document.text(issuedAt, 124, 65);
+  document.setFontSize(10.5);
+  document.text(state.customerName, 18, 60);
+  document.setFontSize(9);
+  document.text(issuedAt, 145, 60);
   if (state.customerEmail) {
     document.setTextColor(91, 99, 94);
-    document.setFontSize(8.5);
-    document.text(state.customerEmail, 18, 71);
+    document.setFontSize(8);
+    document.text(state.customerEmail, 18, 66);
   }
 
-  let y = 88;
-  document.setFillColor(244, 241, 233);
-  document.rect(18, y - 7, 174, 10, "F");
-  document.setTextColor(62, 69, 64);
+  let y = 82;
+  document.setTextColor(86, 93, 89);
   document.setFont("helvetica", "bold");
-  document.setFontSize(8);
-  document.text("DESCRIÇÃO", 22, y);
-  document.text("VALOR", 187, y, { align: "right" });
-  y += 12;
+  document.setFontSize(7.5);
+  document.text("DESCRIÇÃO", 18, y);
+  document.text("VALOR", 192, y, { align: "right" });
+  document.setDrawColor(209, 213, 210);
+  document.line(18, y + 4, 192, y + 4);
+  y += 14;
 
   for (const row of rows) {
     if (y > 246) {
@@ -461,42 +465,44 @@ async function createInvoicePdf(state: InvoiceState) {
     document.setFont("helvetica", "bold");
     document.setFontSize(10);
     const titleLines = document.splitTextToSize(row.title, 125) as string[];
-    document.text(titleLines, 22, y);
+    document.text(titleLines, 18, y);
     document.setFont("helvetica", "normal");
-    document.text(formatCurrency(row.amountCents), 187, y, { align: "right" });
+    document.text(formatCurrency(row.amountCents), 192, y, { align: "right" });
     const detailY = y + titleLines.length * 5;
     document.setTextColor(102, 108, 104);
     document.setFontSize(8.5);
-    document.text(row.detail, 22, detailY);
-    document.setDrawColor(226, 222, 213);
-    document.line(18, detailY + 5, 192, detailY + 5);
-    y = detailY + 12;
+    document.text(row.detail, 18, detailY);
+    document.setDrawColor(232, 234, 232);
+    document.line(18, detailY + 6, 192, detailY + 6);
+    y = detailY + 14;
   }
 
-  y = Math.min(Math.max(y + 3, 118), 252);
-  document.setFillColor(24, 63, 49);
-  document.roundedRect(112, y, 80, 23, 2, 2, "F");
-  document.setTextColor(220, 232, 225);
+  y = Math.min(Math.max(y + 4, 118), 252);
+  document.setTextColor(91, 99, 94);
   document.setFont("helvetica", "normal");
   document.setFontSize(8);
-  document.text("VALOR TOTAL", 119, y + 8);
-  document.setTextColor(255, 255, 255);
+  document.text("Total", 145, y + 7);
+  document.setTextColor(30, 55, 46);
   document.setFont("helvetica", "bold");
-  document.setFontSize(16);
-  document.text(formatCurrency(state.amountCents), 185, y + 16, {
+  document.setFontSize(13);
+  document.text(formatCurrency(state.amountCents), 192, y + 7, {
     align: "right",
   });
+  document.setDrawColor(30, 55, 46);
+  document.line(145, y - 1, 192, y - 1);
 
   document.setTextColor(91, 99, 94);
   document.setFont("helvetica", "normal");
-  document.setFontSize(8.5);
+  document.setFontSize(8);
   document.text(
     "Esta fatura registra os serviços selecionados. Forma e confirmação do pagamento são combinadas diretamente com o cliente.",
     18,
     278,
     { maxWidth: 174 },
   );
-  document.setFont("helvetica", "bold");
+  document.setDrawColor(224, 227, 225);
+  document.line(18, 285, 192, 285);
+  document.setFont("helvetica", "normal");
   document.text("Hospet Quintal · hospetquintal.com.br", 18, 289);
 
   const blob = document.output("blob");

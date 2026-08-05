@@ -15,18 +15,21 @@ import { HttpError } from "@/lib/server/http";
 export type LodgingInvoiceKind = "deposit" | "balance";
 
 function invoiceNumber(kind: LodgingInvoiceKind) {
-  const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  const stamp = todayInSaoPaulo().replaceAll("-", "");
   const prefix = kind === "deposit" ? "FAT-SIN" : "FAT-SAL";
   return `${prefix}-${stamp}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
 }
 
 function todayInSaoPaulo() {
-  return new Intl.DateTimeFormat("en-CA", {
+  const parts = new Intl.DateTimeFormat("en", {
     timeZone: "America/Sao_Paulo",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(new Date());
+  }).formatToParts(new Date());
+  return ["year", "month", "day"]
+    .map((type) => parts.find((part) => part.type === type)?.value)
+    .join("-");
 }
 
 function displayDate(value: string) {

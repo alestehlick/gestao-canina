@@ -772,7 +772,7 @@ export function mapWorkspaceCreditPurchases(
             : purchase.status === "paid"
               ? "paid"
               : "cancelled",
-        createdAt: formatBrazilianDate(purchase.createdAt),
+        createdAt: formatBrazilianDate(purchase.paidAt ?? purchase.createdAt),
         invoiceId: purchase.invoiceId,
       },
     ];
@@ -1158,10 +1158,16 @@ function invoiceItemsLabel(
 }
 
 function formatBrazilianDate(value: string) {
-  const isoDate = value.slice(0, 10);
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
-  if (!match) return value;
-  return `${match[3]}/${match[2]}/${match[1]}`;
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (dateOnly) return `${dateOnly[3]}/${dateOnly[2]}/${dateOnly[1]}`;
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.valueOf())) return value;
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(timestamp);
 }
 
 function parseVaccines(value: string | null | undefined) {

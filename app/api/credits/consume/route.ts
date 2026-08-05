@@ -28,7 +28,15 @@ const creditServiceCodes = new Set([
 ]);
 
 function receiptNumber() {
-  const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const stamp = ["year", "month", "day"]
+    .map((type) => parts.find((part) => part.type === type)?.value)
+    .join("");
   return `REC-${stamp}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 }
 

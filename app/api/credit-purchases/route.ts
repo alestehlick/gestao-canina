@@ -35,16 +35,19 @@ function isCreditServiceCode(value: string): value is CreditServiceCode {
 }
 
 function todayInTimeZone(timeZone: string) {
-  return new Intl.DateTimeFormat("en-CA", {
+  const parts = new Intl.DateTimeFormat("en", {
     timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(new Date());
+  }).formatToParts(new Date());
+  return ["year", "month", "day"]
+    .map((type) => parts.find((part) => part.type === type)?.value)
+    .join("-");
 }
 
 function invoiceNumber() {
-  const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  const stamp = todayInTimeZone("America/Sao_Paulo").replaceAll("-", "");
   return `CRED-${stamp}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 }
 

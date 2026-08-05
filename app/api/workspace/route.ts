@@ -46,12 +46,15 @@ function isIsoDate(value: string) {
 }
 
 function todayInTimeZone(timeZone: string) {
-  return new Intl.DateTimeFormat("en-CA", {
+  const parts = new Intl.DateTimeFormat("en", {
     timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(new Date());
+  }).formatToParts(new Date());
+  return ["year", "month", "day"]
+    .map((type) => parts.find((part) => part.type === type)?.value)
+    .join("-");
 }
 
 function addDays(date: string, days: number) {

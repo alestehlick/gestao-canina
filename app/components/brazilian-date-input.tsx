@@ -44,9 +44,18 @@ function parseBrazilianDate(value: string) {
 
 export function formatBrazilianDate(value: string | null | undefined) {
   if (!value) return "";
-  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(value)) return value;
+  const timestamp = new Date(value);
+  if (!Number.isNaN(timestamp.valueOf())) {
+    return new Intl.DateTimeFormat("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(timestamp);
+  }
   return value;
 }
 

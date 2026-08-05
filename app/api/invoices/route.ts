@@ -18,17 +18,20 @@ import {
 } from "@/lib/server/http";
 
 function invoiceNumber() {
-  const date = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  const date = todayInSaoPaulo().replaceAll("-", "");
   return `FAT-${date}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
 }
 
 function todayInSaoPaulo() {
-  return new Intl.DateTimeFormat("en-CA", {
+  const parts = new Intl.DateTimeFormat("en", {
     timeZone: "America/Sao_Paulo",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(new Date());
+  }).formatToParts(new Date());
+  return ["year", "month", "day"]
+    .map((type) => parts.find((part) => part.type === type)?.value)
+    .join("-");
 }
 
 export async function POST(request: Request) {

@@ -181,6 +181,7 @@ export type WorkspaceTask = {
 
 export type WorkspaceInvoiceItem = {
   id: string;
+  appointmentItemId: string;
   dogNameSnapshot: string;
   serviceNameSnapshot: string;
   serviceDateSnapshot: string;
@@ -566,6 +567,17 @@ export function mapWorkspaceBookings(
     const balanceInvoice = appointmentInvoices.find(
       (invoice) => invoice.sourceType === "lodging_balance",
     );
+    const combinedInvoice = firstItem?.activeInvoiceId
+      ? payload.billing.invoices.find(
+          (invoice) =>
+            invoice.id === firstItem.activeInvoiceId &&
+            invoice.status !== "void",
+        )
+      : undefined;
+    const combinedInvoiceLine = combinedInvoice?.items?.find(
+      (invoiceItem) => invoiceItem.appointmentItemId === firstItem?.id,
+    );
+    const effectiveBalanceInvoice = balanceInvoice ?? combinedInvoice;
 
     return {
       id: appointment.id,
@@ -616,12 +628,14 @@ export function mapWorkspaceBookings(
             status: invoiceStatus(depositInvoice, payload.range.from),
           }
         : undefined,
-      balanceInvoice: balanceInvoice
+      balanceInvoice: effectiveBalanceInvoice
         ? {
-            id: balanceInvoice.id,
-            number: balanceInvoice.invoiceNumber,
-            amountCents: balanceInvoice.totalCents,
-            status: invoiceStatus(balanceInvoice, payload.range.from),
+            id: effectiveBalanceInvoice.id,
+            number: effectiveBalanceInvoice.invoiceNumber,
+            amountCents:
+              combinedInvoiceLine?.amountCents ??
+              effectiveBalanceInvoice.totalCents,
+            status: invoiceStatus(effectiveBalanceInvoice, payload.range.from),
           }
         : undefined,
       receiptNumber: matchingReceipt?.receiptNumber,
@@ -648,18 +662,49 @@ export function mapWorkspaceBillableServices(
           item.status === "completed" &&
           item.paymentPreference === "invoice" &&
           item.settlementMethod === "unsettled" &&
-          !item.activeInvoiceId &&
-          servicesById.get(item.serviceCatalogId)?.code !== "hotel",
+          !item.activeInvoiceId,
       )
-      .map((item) => ({
-        id: item.id,
-        customerId: appointment.accountId,
-        customerName: appointment.customerName,
-        dogName: appointment.dogName,
-        date: formatBrazilianDate(appointment.startDate),
-        service: item.serviceName,
-        amountCents: Math.max(0, item.totalCents),
-      })),
+      .map((item) => {
+        const isLodging = servicesById.get(item.serviceCatalogId)?.code === "hotel";
+        const depositInvoice = isLodging
+          ? payload.billing.invoices.find(
+              (invoice) =>
+                invoice.sourceType === "lodging_deposit" &&
+                invoice.sourceId === appointment.id &&
+                invoice.status !== "void",
+            )
+          : undefined;
+        const paidDepositCents =
+          depositInvoice?.status === "paid" ? depositInvoice.totalCents : 0;
+        const depositPending = depositInvoice?.status === "issued";
+        const amountCents = Math.max(0, item.totalCents - paidDepositCents);
+        return {
+          id: item.id,
+          customerId: appointment.accountId,
+          customerName: appointment.customerName,
+          dogName: appointment.dogName,
+          date: formatBrazilianDate(appointment.startDate),
+          service:
+            isLodging && paidDepositCents > 0
+              ? "Saldo da hospedagem"
+              : item.serviceName,
+          amountCents,
+          selectable: !depositPending && amountCents > 0,
+          billingNote: depositPending
+            ? "Aguardando pagamento ou cancelamento da fatura do sinal"
+            : paidDepositCents > 0
+              ? `Sinal de ${formatMoney(paidDepositCents)} já abatido`
+              : undefined,
+          lodging:
+            isLodging && appointment.lodgingNights !== null
+              ? {
+                  checkInDate: appointment.startDate,
+                  checkOutDate: appointment.endDate,
+                  nights: appointment.lodgingNights,
+                }
+              : undefined,
+        };
+      }),
   );
 }
 
@@ -1186,6 +1231,13 @@ function formatBrazilianDate(value: string) {
     month: "2-digit",
     year: "numeric",
   }).format(timestamp);
+}
+
+function formatMoney(valueCents: number) {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(valueCents / 100);
 }
 
 function parseVaccines(value: string | null | undefined) {

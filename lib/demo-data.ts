@@ -138,6 +138,13 @@ export type BillableService = {
   date: string;
   service: string;
   amountCents: number;
+  selectable?: boolean;
+  billingNote?: string;
+  lodging?: {
+    checkInDate: string;
+    checkOutDate: string;
+    nights: number;
+  };
 };
 
 export type CreditBalances = Record<

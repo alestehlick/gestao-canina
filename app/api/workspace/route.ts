@@ -284,6 +284,7 @@ export async function GET(request: Request) {
       db
         .select({
           id: invoiceItems.id,
+          appointmentItemId: invoiceItems.appointmentItemId,
           invoiceId: invoiceItems.invoiceId,
           dogNameSnapshot: invoiceItems.dogNameSnapshot,
           serviceNameSnapshot: invoiceItems.serviceNameSnapshot,

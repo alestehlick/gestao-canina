@@ -5,6 +5,8 @@ import {
   appointments,
   customerAccounts,
   dogs,
+  invoices,
+  serviceCatalog,
   tutors,
 } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
@@ -88,9 +90,13 @@ export async function POST(request: Request) {
         paymentPreference: appointmentItems.paymentPreference,
         settlementMethod: appointmentItems.settlementMethod,
         activeInvoiceId: appointmentItems.activeInvoiceId,
+        serviceCode: serviceCatalog.code,
         serviceName: appointmentItems.serviceNameSnapshot,
         description: appointmentItems.descriptionSnapshot,
         amountCents: appointmentItems.totalCents,
+        startDate: appointments.startDate,
+        endDate: appointments.endDate,
+        lodgingNights: appointments.lodgingNights,
         dogName: dogs.name,
         customerName: customerAccounts.displayName,
       })
@@ -100,6 +106,10 @@ export async function POST(request: Request) {
         eq(appointments.id, appointmentItems.appointmentId),
       )
       .innerJoin(dogs, eq(dogs.id, appointments.dogId))
+      .innerJoin(
+        serviceCatalog,
+        eq(serviceCatalog.id, appointmentItems.serviceCatalogId),
+      )
       .innerJoin(
         customerAccounts,
         eq(customerAccounts.id, appointments.accountId),
@@ -160,8 +170,67 @@ export async function POST(request: Request) {
       );
     }
 
-    const totalCents = rows.reduce(
-      (total, row) => total + Math.max(0, row.amountCents),
+    const lodgingAppointmentIds = rows
+      .filter((row) => row.serviceCode === "hotel")
+      .map((row) => row.appointmentId);
+    const depositInvoices = lodgingAppointmentIds.length
+      ? await db
+          .select()
+          .from(invoices)
+          .where(
+            and(
+              eq(invoices.establishmentId, establishmentId),
+              eq(invoices.sourceType, "lodging_deposit"),
+              inArray(invoices.sourceId, lodgingAppointmentIds),
+            ),
+          )
+      : [];
+    const depositByAppointment = new Map(
+      depositInvoices
+        .filter((invoice) => invoice.sourceId && invoice.status !== "void")
+        .map((invoice) => [invoice.sourceId!, invoice]),
+    );
+    const pendingDeposit = rows.find(
+      (row) =>
+        row.serviceCode === "hotel" &&
+        depositByAppointment.get(row.appointmentId)?.status === "issued",
+    );
+    if (pendingDeposit) {
+      throw new HttpError(
+        409,
+        "lodging_deposit_pending",
+        `Registre o pagamento ou cancele a fatura do sinal da hospedagem de ${pendingDeposit.dogName} antes de incluí-la em outra fatura.`,
+      );
+    }
+    const effectiveRows = rows.map((row) => {
+      if (row.serviceCode !== "hotel") {
+        return {
+          ...row,
+          invoiceAmountCents: row.amountCents,
+          invoiceServiceName: row.serviceName,
+          invoiceDescription:
+            row.description || `${row.serviceName} de ${row.dogName}`,
+        };
+      }
+      const depositInvoice = depositByAppointment.get(row.appointmentId);
+      const paidDepositCents =
+        depositInvoice?.status === "paid" ? depositInvoice.totalCents : 0;
+      const invoiceAmountCents = Math.max(0, row.amountCents - paidDepositCents);
+      const period = `${row.startDate} a ${row.endDate}`;
+      return {
+        ...row,
+        invoiceAmountCents,
+        invoiceServiceName:
+          paidDepositCents > 0 ? "Saldo da hospedagem" : row.serviceName,
+        invoiceDescription:
+          paidDepositCents > 0
+            ? `Saldo da hospedagem de ${row.dogName}, ${period}, com sinal já abatido`
+            : `Hospedagem de ${row.dogName}, ${period}, ${row.lodgingNights ?? 0} diárias`,
+      };
+    });
+
+    const totalCents = effectiveRows.reduce(
+      (total, row) => total + Math.max(0, row.invoiceAmountCents),
       0,
     );
     if (totalCents < 1) {
@@ -246,7 +315,7 @@ export async function POST(request: Request) {
           accountId,
           appointmentItemIds.length,
         ),
-      ...rows.map((row) =>
+      ...effectiveRows.map((row) =>
         d1
           .prepare(
             `INSERT INTO invoice_items (
@@ -266,10 +335,10 @@ export async function POST(request: Request) {
             invoiceId,
             row.itemId,
             row.dogName,
-            row.serviceName,
+            row.invoiceServiceName,
             row.serviceDate,
-            row.description || `${row.serviceName} de ${row.dogName}`,
-            row.amountCents,
+            row.invoiceDescription,
+            row.invoiceAmountCents,
             invoiceId,
             establishmentId,
           ),
@@ -338,13 +407,20 @@ export async function POST(request: Request) {
           dueDate,
           totalCents,
           sourceType: "services",
-          items: rows.map((row) => ({
+          items: effectiveRows.map((row) => ({
             dogNameSnapshot: row.dogName,
-            serviceNameSnapshot: row.serviceName,
+            serviceNameSnapshot: row.invoiceServiceName,
             serviceDateSnapshot: row.serviceDate,
-            descriptionSnapshot:
-              row.description || `${row.serviceName} de ${row.dogName}`,
-            amountCents: row.amountCents,
+            descriptionSnapshot: row.invoiceDescription,
+            amountCents: row.invoiceAmountCents,
+            lodging:
+              row.serviceCode === "hotel" && row.lodgingNights !== null
+                ? {
+                    checkInDate: row.startDate,
+                    checkOutDate: row.endDate,
+                    nights: row.lodgingNights,
+                  }
+                : null,
           })),
         },
       },

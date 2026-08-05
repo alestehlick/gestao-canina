@@ -385,7 +385,9 @@ function invoiceDescriptionLines(state: InvoiceState) {
   if (state.selectedServices.length) {
     return state.selectedServices.map((service) => ({
       title: `${service.dogName} · ${service.service}`,
-      detail: service.date,
+      detail: service.lodging
+        ? lodgingInvoiceDetail(service.lodging)
+        : service.date,
       amountCents: service.amountCents,
     }));
   }
@@ -2498,6 +2500,14 @@ export function ManagementApp() {
   }
 
   function toggleBillable(service: BillableService) {
+    if (service.selectable === false) {
+      setToast({
+        message:
+          service.billingNote ??
+          "Este serviço ainda não está disponível para faturamento.",
+      });
+      return;
+    }
     const selected = selectedBillables.includes(service.id);
     if (selected) {
       setSelectedBillables((current) =>
@@ -2973,6 +2983,17 @@ export function ManagementApp() {
                 accountId: string;
                 customerName: string;
                 totalCents: number;
+                items: Array<{
+                  dogNameSnapshot: string;
+                  serviceNameSnapshot: string;
+                  serviceDateSnapshot: string;
+                  amountCents: number;
+                  lodging: {
+                    checkInDate: string;
+                    checkOutDate: string;
+                    nights: number;
+                  } | null;
+                }>;
               };
             }>("/api/invoices", {
               method: "POST",
@@ -2993,11 +3014,12 @@ export function ManagementApp() {
               status: "pending",
               items: `${invoiceState.selectedServices.length} serviços selecionados`,
               sourceType: "services",
-              lines: invoiceState.selectedServices.map((service) => ({
-                dogName: service.dogName,
-                service: service.service,
-                date: service.date,
-                amountCents: service.amountCents,
+              lines: response.invoice.items.map((item) => ({
+                dogName: item.dogNameSnapshot,
+                service: item.serviceNameSnapshot,
+                date: item.serviceDateSnapshot,
+                amountCents: item.amountCents,
+                lodging: item.lodging ?? undefined,
               })),
             };
           }
@@ -3087,6 +3109,7 @@ export function ManagementApp() {
                 service: service.service,
                 date: service.date,
                 amountCents: service.amountCents,
+                lodging: service.lodging,
               })),
       };
     if (!invoiceState.invoice) {
@@ -6949,7 +6972,8 @@ function BillingView({
                     (item) => item.id === selectedBillables[0],
                   );
                   const disabled =
-                    Boolean(first) && first?.customerId !== service.customerId;
+                    service.selectable === false ||
+                    (Boolean(first) && first?.customerId !== service.customerId);
                   return (
                     <label
                       className={
@@ -6968,7 +6992,14 @@ function BillingView({
                         <strong>{service.dogName}</strong>
                         <small>{service.customerName}</small>
                       </span>
-                      <span>{service.service}</span>
+                      <span>
+                        {service.service}
+                        {service.billingNote && (
+                          <small className="billable-note">
+                            {service.billingNote}
+                          </small>
+                        )}
+                      </span>
                       <strong>{formatCurrency(service.amountCents)}</strong>
                     </label>
                   );

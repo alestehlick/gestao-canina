@@ -78,6 +78,13 @@
       "when": 1786010400000,
       "tag": "0010_lodging_pricing",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1786020000000,
+      "tag": "0011_invoice_compensation",
+      "breakpoints": true
     }
   ]
 }

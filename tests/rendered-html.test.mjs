@@ -28,6 +28,8 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.match(app, /navigator\.share/);
   assert.match(app, /Salvar/);
   assert.match(app, /Registrar pagamento/);
+  assert.match(app, /Em compensação/);
+  assert.match(app, /Confirmar disponibilidade/);
   assert.match(app, /Gerar fatura do sinal/);
   assert.match(app, /Gerar fatura do saldo/);
   assert.match(app, /Não aplicar desconto por longa estadia/);
@@ -106,6 +108,10 @@ test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () =
   assert.match(cashView, /Resultado acumulado do período/);
   assert.match(cashView, /Desconsiderar/);
   assert.match(cashView, /Configurar início do mês financeiro/);
+  assert.match(schema, /sqliteTable\(\s*"invoice_settlements"/);
+  assert.match(payments, /settlementMode/);
+  assert.match(payments, /invoice\.settlement_scheduled/);
+  assert.match(workspace, /compensationAvailableOn/);
   assert.match(app, /Considerar no Caixa/);
   assert.match(migration, /FROM `invoice_payments` ip/);
 });

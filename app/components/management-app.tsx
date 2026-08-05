@@ -3609,7 +3609,11 @@ export function ManagementApp() {
     });
   }
 
-  async function registerInvoicePayment(paidAt = operationalToday) {
+  async function registerInvoicePayment(
+    paidAt = operationalToday,
+    settlementMode: "immediate" | "schedule" | "confirm_scheduled" = "immediate",
+    availableOn?: string,
+  ) {
     if (!invoiceState?.invoice) return;
     const invoiceId = invoiceState.invoice.id;
     if (runtimeMode === "ready") {
@@ -3620,19 +3624,48 @@ export function ManagementApp() {
             invoice: { id: string; status: "paid"; paidAt: string };
             payment: { amountCents: number };
             creditsGranted: number;
+            settlement?: { availableOn: string; status: "scheduled" };
           }>(`/api/invoices/${invoiceId}/payments`, {
             method: "POST",
-            body: JSON.stringify({ paidAt }),
+            body: JSON.stringify({ paidAt, settlementMode, availableOn }),
           }),
         {
           refresh: true,
           successMessage:
-            invoiceState.kind === "credit_package"
+            settlementMode === "schedule"
+              ? "Recebimento registrado em compensação. O Caixa aguardará a confirmação."
+              : invoiceState.kind === "credit_package"
               ? "Pagamento registrado. Os créditos já estão disponíveis."
               : "Pagamento registrado e fatura concluída.",
         },
       );
       if (result) {
+        if (result.settlement) {
+          setInvoices((current) =>
+            current.map((invoice) =>
+              invoice.id === invoiceId
+                ? {
+                    ...invoice,
+                    compensationAvailableOn: result.settlement!.availableOn,
+                    due: `Em compensação · disponível em ${formatShortDate(result.settlement!.availableOn)}`,
+                  }
+                : invoice,
+            ),
+          );
+          setInvoiceState((current) =>
+            current?.invoice
+              ? {
+                  ...current,
+                  invoice: {
+                    ...current.invoice,
+                    compensationAvailableOn: result.settlement!.availableOn,
+                    due: `Em compensação · disponível em ${formatShortDate(result.settlement!.availableOn)}`,
+                  },
+                }
+              : current,
+          );
+          return;
+        }
         setInvoiceState((current) =>
           current
             ? {
@@ -7811,12 +7844,20 @@ function BillingView({
   const selectedTotal = billableServices
     .filter((item) => selectedBillables.includes(item.id))
     .reduce((total, item) => total + item.amountCents, 0);
-  const pendingTotal = invoices
-    .filter((invoice) => invoice.status !== "paid")
+  const compensationInvoices = invoices.filter(
+    (invoice) => Boolean(invoice.compensationAvailableOn),
+  );
+  const compensationTotal = compensationInvoices.reduce(
+    (total, invoice) => total + invoice.amountCents,
+    0,
+  );
+  const pendingInvoices = invoices.filter(
+    (invoice) =>
+      invoice.status !== "paid" && !invoice.compensationAvailableOn,
+  );
+  const pendingTotal = pendingInvoices
     .reduce((total, invoice) => total + invoice.amountCents, 0);
-  const openInvoiceCount = invoices.filter(
-    (invoice) => invoice.status !== "paid",
-  ).length;
+  const openInvoiceCount = pendingInvoices.length;
   const paidWindowStart = shiftDate(operationalToday, -29);
   const paidInvoices = invoices.filter(
     (invoice) =>
@@ -7850,6 +7891,8 @@ function BillingView({
           <small>
             {openInvoiceCount}{" "}
             {openInvoiceCount === 1 ? "cobrança aberta" : "cobranças abertas"}
+            {compensationTotal > 0 &&
+              ` · ${formatCurrency(compensationTotal)} em compensação`}
           </small>
         </div>
         <div>
@@ -8433,6 +8476,9 @@ function SettingsView({
 function InvoiceStatus({ invoice }: { invoice: Invoice }) {
   if (invoice.status === "paid") {
     return <span className="status-pill success">Pago</span>;
+  }
+  if (invoice.compensationAvailableOn) {
+    return <span className="status-pill pending">Em compensação</span>;
   }
   if (invoice.status === "overdue") {
     return <span className="status-pill overdue">Vencido</span>;
@@ -9376,7 +9422,11 @@ function InvoiceDialog({
   state: InvoiceState;
   onClose: () => void;
   onIssue: (applyLongStayDiscount?: boolean) => void;
-  onRegisterPayment: (paidAt: string) => void | Promise<void>;
+  onRegisterPayment: (
+    paidAt: string,
+    settlementMode?: "immediate" | "schedule" | "confirm_scheduled",
+    availableOn?: string,
+  ) => void | Promise<void>;
   onVoid: () => void | Promise<void>;
   onDeliveryConfirmed: (
     invoiceId: string,
@@ -9390,6 +9440,10 @@ function InvoiceDialog({
   const [deliveryBusy, setDeliveryBusy] =
     useState<InvoiceDeliveryChannel | null>(null);
   const [paidAt, setPaidAt] = useState(operationalToday);
+  const [paymentMode, setPaymentMode] = useState<"immediate" | "schedule">(
+    "immediate",
+  );
+  const [availableOn, setAvailableOn] = useState(shiftDate(operationalToday, 1));
   const [skipLongStayDiscount, setSkipLongStayDiscount] = useState(false);
 
   async function handleDelivery(channel: InvoiceDeliveryChannel) {
@@ -9582,6 +9636,7 @@ function InvoiceDialog({
       (row) => row.tableAmountCents !== undefined,
     );
     const isPaid = state.invoice?.status === "paid";
+    const compensationAvailableOn = state.invoice?.compensationAvailableOn;
     return (
       <Dialog
         title={`Fatura nº ${state.invoice?.number ?? "—"}`}
@@ -9598,7 +9653,11 @@ function InvoiceDialog({
               <strong>{state.customerName}</strong>
             </span>
             <span className={`status-pill ${isPaid ? "paid" : "pending"}`}>
-              {isPaid ? "Fatura paga" : "Fatura pendente"}
+              {isPaid
+                ? "Fatura paga"
+                : compensationAvailableOn
+                  ? "Em compensação"
+                  : "Fatura pendente"}
             </span>
           </header>
 
@@ -9691,20 +9750,52 @@ function InvoiceDialog({
             </p>
           </div>
 
+          {!isPaid && compensationAvailableOn && (
+            <div className="invoice-compensation-status">
+              <strong>Recebimento em compensação</strong>
+              <span>
+                Previsto para ficar disponível em {formatShortDate(compensationAvailableOn)}.
+              </span>
+            </div>
+          )}
+
           {!isPaid && (
             <div className="invoice-payment-register">
               <label>
-                Data do pagamento
+                {compensationAvailableOn
+                  ? "Data em que o valor ficou disponível"
+                  : paymentMode === "schedule"
+                    ? "Data prevista para disponibilidade"
+                    : "Data do pagamento"}
                 <BrazilianDateInput
-                  value={paidAt}
-                  max={operationalToday}
-                  onChange={setPaidAt}
-                  ariaLabel="Data do pagamento"
+                  value={compensationAvailableOn ? paidAt : paymentMode === "schedule" ? availableOn : paidAt}
+                  min={paymentMode === "schedule" ? operationalToday : undefined}
+                  max={paymentMode === "schedule" ? undefined : operationalToday}
+                  onChange={compensationAvailableOn ? setPaidAt : paymentMode === "schedule" ? setAvailableOn : setPaidAt}
+                  ariaLabel={compensationAvailableOn ? "Data de disponibilidade" : paymentMode === "schedule" ? "Data prevista para disponibilidade" : "Data do pagamento"}
                 />
               </label>
-              <span>
-                Use esta ação somente depois de confirmar o recebimento do valor.
-              </span>
+              {compensationAvailableOn ? (
+                <span>Confirme somente quando o valor estiver disponível na conta.</span>
+              ) : (
+                <label className="invoice-payment-mode">
+                  <span>Recebimento</span>
+                  <select
+                    value={paymentMode}
+                    onChange={(event) =>
+                      setPaymentMode(event.target.value as "immediate" | "schedule")
+                    }
+                  >
+                    <option value="immediate">Disponível agora</option>
+                    <option value="schedule">Em compensação</option>
+                  </select>
+                  <small>
+                    {paymentMode === "schedule"
+                      ? "A fatura permanece em aberto e o Caixa só recebe este valor após a confirmação."
+                      : "Use esta opção quando o valor já estiver disponível na conta."}
+                  </small>
+                </label>
+              )}
             </div>
           )}
 
@@ -9721,12 +9812,31 @@ function InvoiceDialog({
               <button
                 className="primary-button"
                 type="button"
-                disabled={busy || !paidAt}
-                onClick={() => onRegisterPayment(paidAt)}
+                disabled={
+                  busy ||
+                  !(compensationAvailableOn
+                    ? paidAt
+                    : paymentMode === "schedule"
+                      ? availableOn
+                      : paidAt)
+                }
+                onClick={() =>
+                  onRegisterPayment(
+                    paidAt,
+                    compensationAvailableOn
+                      ? "confirm_scheduled"
+                      : paymentMode,
+                    paymentMode === "schedule" ? availableOn : undefined,
+                  )
+                }
               >
                 {busy
                   ? "Registrando…"
-                  : "Registrar pagamento"}
+                  : compensationAvailableOn
+                    ? "Confirmar disponibilidade"
+                    : paymentMode === "schedule"
+                      ? "Registrar em compensação"
+                      : "Registrar pagamento"}
               </button>
             )}
           </div>

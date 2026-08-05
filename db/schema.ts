@@ -1011,6 +1011,45 @@ export const invoicePayments = sqliteTable(
   ],
 );
 
+export const invoiceSettlements = sqliteTable(
+  "invoice_settlements",
+  {
+    id: text("id").primaryKey(),
+    establishmentId: text("establishment_id")
+      .notNull()
+      .references(() => establishments.id, { onDelete: "restrict" }),
+    invoiceId: text("invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "restrict" }),
+    amountCents: integer("amount_cents").notNull(),
+    availableOn: text("available_on").notNull(),
+    note: text("note"),
+    status: text("status", { enum: ["scheduled", "cancelled"] })
+      .notNull()
+      .default("scheduled"),
+    createdByUserId: text("created_by_user_id").references(
+      () => appUsers.id,
+      { onDelete: "set null" },
+    ),
+    cancelledAt: text("cancelled_at"),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("invoice_settlements_invoice_unique").on(table.invoiceId),
+    index("invoice_settlements_establishment_available_idx").on(
+      table.establishmentId,
+      table.status,
+      table.availableOn,
+    ),
+    check("invoice_settlements_amount_positive", sql`${table.amountCents} > 0`),
+    check(
+      "invoice_settlements_cancelled_valid",
+      sql`(${table.status} = 'cancelled' and ${table.cancelledAt} is not null) or (${table.status} = 'scheduled' and ${table.cancelledAt} is null)`,
+    ),
+  ],
+);
+
 export const cashEntries = sqliteTable(
   "cash_entries",
   {

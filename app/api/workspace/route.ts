@@ -22,6 +22,7 @@ import {
   establishments,
   invoiceItems,
   invoicePayments,
+  invoiceSettlements,
   invoices,
   serviceCatalog,
   tasks,
@@ -150,6 +151,7 @@ export async function GET(request: Request) {
       invoiceRows,
       invoiceItemRows,
       invoicePaymentRows,
+      invoiceSettlementRows,
       invoicePaymentSummaryRows,
       packageRows,
       purchaseRows,
@@ -340,6 +342,14 @@ export async function GET(request: Request) {
         .where(eq(invoicePayments.establishmentId, establishmentId)),
       db
         .select({
+          invoiceId: invoiceSettlements.invoiceId,
+          status: invoiceSettlements.status,
+          availableOn: invoiceSettlements.availableOn,
+        })
+        .from(invoiceSettlements)
+        .where(eq(invoiceSettlements.establishmentId, establishmentId)),
+      db
+        .select({
           amountCents: sql<number>`coalesce(sum(${invoicePayments.amountCents}), 0)`,
           paymentCount: sql<number>`count(*)`,
         })
@@ -424,6 +434,11 @@ export async function GET(request: Request) {
 
     const paymentByInvoice = new Map(
       invoicePaymentRows.map((payment) => [payment.invoiceId, payment]),
+    );
+    const settlementByInvoice = new Map(
+      invoiceSettlementRows
+        .filter((settlement) => settlement.status === "scheduled")
+        .map((settlement) => [settlement.invoiceId, settlement]),
     );
     const itemsByInvoice = new Map<
       string,
@@ -563,6 +578,8 @@ export async function GET(request: Request) {
                   paymentByInvoice.get(invoice.id)?.cashEntryId ?? null,
                 cashIncluded:
                   paymentByInvoice.get(invoice.id)?.cashStatus === "included",
+                compensationAvailableOn:
+                  settlementByInvoice.get(invoice.id)?.availableOn ?? null,
                 items: itemsByInvoice.get(invoice.id) ?? [],
               })),
         creditPackages: identity.role === "staff" ? [] : packageRows,

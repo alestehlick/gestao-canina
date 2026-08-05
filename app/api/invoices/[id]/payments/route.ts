@@ -3,6 +3,7 @@ import { getD1Database, getDb } from "@/db";
 import {
   creditPurchases,
   invoices,
+  invoiceSettlements,
 } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
 import {
@@ -26,6 +27,24 @@ function paidAtTimestamp(value: string | null) {
   return `${value}T12:00:00.000Z`;
 }
 
+function todayInSaoPaulo() {
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  return ["year", "month", "day"]
+    .map((type) => parts.find((part) => part.type === type)?.value)
+    .join("-");
+}
+
+function validIsoDate(value: string | null) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
+}
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },
@@ -36,7 +55,27 @@ export async function POST(
     const identity = await requireIdentity(request, ["owner", "finance"]);
     const { id: invoiceId } = await context.params;
     const body = await readJsonObject(request);
-    const paidAt = paidAtTimestamp(optionalString(body, "paidAt", 10));
+    const settlementMode = body.settlementMode ?? "immediate";
+    if (
+      settlementMode !== "immediate" &&
+      settlementMode !== "schedule" &&
+      settlementMode !== "confirm_scheduled"
+    ) {
+      throw new HttpError(400, "invalid_settlement_mode", "A forma de recebimento é inválida.");
+    }
+    const rawPaidAt = optionalString(body, "paidAt", 10);
+    if (
+      settlementMode !== "schedule" &&
+      validIsoDate(rawPaidAt) &&
+      rawPaidAt! > todayInSaoPaulo()
+    ) {
+      throw new HttpError(
+        400,
+        "future_paid_date",
+        "Use a compensação para valores que ainda não estão disponíveis na conta.",
+      );
+    }
+    const paidAt = paidAtTimestamp(rawPaidAt);
     const note = optionalString(body, "note", 500);
     const establishmentId = identity.establishmentId!;
     const db = getDb();
@@ -76,6 +115,110 @@ export async function POST(
       );
     }
 
+    const [scheduledSettlement] = await db
+      .select()
+      .from(invoiceSettlements)
+      .where(
+        and(
+          eq(invoiceSettlements.invoiceId, invoiceId),
+          eq(invoiceSettlements.establishmentId, establishmentId),
+          eq(invoiceSettlements.status, "scheduled"),
+        ),
+      )
+      .limit(1);
+
+    if (settlementMode === "schedule") {
+      const availableOn = optionalString(body, "availableOn", 10);
+      if (!validIsoDate(availableOn) || availableOn! < todayInSaoPaulo()) {
+        throw new HttpError(
+          400,
+          "invalid_compensation_date",
+          "Informe uma data futura ou de hoje para a disponibilidade do valor.",
+        );
+      }
+      if (scheduledSettlement) {
+        throw new HttpError(
+          409,
+          "settlement_already_scheduled",
+          "Esta fatura já está em compensação.",
+        );
+      }
+      const settlementId = crypto.randomUUID();
+      const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
+      const d1 = getD1Database();
+      const results = await d1.batch([
+        d1
+          .prepare(
+            `INSERT INTO invoice_settlements (
+              id, establishment_id, invoice_id, amount_cents, available_on,
+              note, status, created_by_user_id, created_at, updated_at
+            )
+            SELECT ?, ?, id, total_cents, ?, ?, 'scheduled', ?, ${nowExpression}, ${nowExpression}
+            FROM invoices
+            WHERE id = ? AND establishment_id = ? AND status = 'issued'
+              AND NOT EXISTS (SELECT 1 FROM invoice_payments WHERE invoice_id = ?)
+              AND NOT EXISTS (
+                SELECT 1 FROM invoice_settlements WHERE invoice_id = ? AND status = 'scheduled'
+              )`,
+          )
+          .bind(
+            settlementId,
+            establishmentId,
+            availableOn,
+            note,
+            identity.userId,
+            invoiceId,
+            establishmentId,
+            invoiceId,
+            invoiceId,
+          ),
+        d1
+          .prepare(
+            `INSERT INTO audit_events (
+              id, establishment_id, actor_user_id, actor_role, action,
+              entity_type, entity_id, request_id, result, metadata_json, occurred_at
+            )
+            SELECT ?, ?, ?, ?, 'invoice.settlement_scheduled', 'invoice', ?, ?,
+              'success', ?, ${nowExpression}
+            WHERE EXISTS (
+              SELECT 1 FROM invoice_settlements WHERE id = ? AND status = 'scheduled'
+            )`,
+          )
+          .bind(
+            crypto.randomUUID(),
+            establishmentId,
+            identity.userId,
+            identity.role,
+            invoiceId,
+            requestId,
+            JSON.stringify({ availableOn, amountCents: invoice.totalCents, note }),
+            settlementId,
+          ),
+      ]);
+      if ((results[0].meta.changes ?? 0) !== 1) {
+        throw new HttpError(409, "settlement_conflict", "A fatura foi alterada. Atualize a página e tente novamente.");
+      }
+      return json({
+        invoice: { id: invoiceId, invoiceNumber: invoice.invoiceNumber, status: "issued", totalCents: invoice.totalCents },
+        settlement: { id: settlementId, availableOn, status: "scheduled" },
+      });
+    }
+
+    if (settlementMode === "confirm_scheduled" && !scheduledSettlement) {
+      throw new HttpError(
+        409,
+        "settlement_not_found",
+        "Esta fatura não possui um recebimento em compensação para confirmar.",
+      );
+    }
+    if (settlementMode === "immediate" && scheduledSettlement) {
+      throw new HttpError(
+        409,
+        "settlement_pending",
+        "Confirme o valor em compensação quando ele estiver disponível.",
+      );
+    }
+
     const paymentAmountCents = invoice.totalCents;
 
     const [purchase] =
@@ -104,6 +247,18 @@ export async function POST(
     const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
     const d1 = getD1Database();
     const statements = [] as ReturnType<typeof d1.prepare>[];
+    let settlementDeleteIndex: number | null = null;
+    if (scheduledSettlement) {
+      settlementDeleteIndex = statements.length;
+      statements.push(
+        d1
+          .prepare(
+            `DELETE FROM invoice_settlements
+            WHERE id = ? AND establishment_id = ? AND status = 'scheduled'`,
+          )
+          .bind(scheduledSettlement.id, establishmentId),
+      );
+    }
     const paymentStatementIndex = statements.length;
     statements.push(
       d1
@@ -279,6 +434,7 @@ export async function POST(
             amountCents: paymentAmountCents,
             paidAt,
             note,
+            settledFromCompensation: Boolean(scheduledSettlement),
           }),
           paymentId,
         ),
@@ -286,6 +442,8 @@ export async function POST(
 
     const results = await d1.batch(statements);
     if (
+      (settlementDeleteIndex !== null &&
+        (results[settlementDeleteIndex].meta.changes ?? 0) !== 1) ||
       (results[paymentStatementIndex].meta.changes ?? 0) !== 1 ||
       (results[paidStatementIndex].meta.changes ?? 0) !== 1 ||
       (results[cashEntryStatementIndex].meta.changes ?? 0) !== 1

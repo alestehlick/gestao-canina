@@ -124,6 +124,7 @@ export type Invoice = {
   sourceType?: "services" | "credit_package" | "lodging_deposit" | "lodging_balance";
   cashEntryId?: string;
   cashIncluded?: boolean;
+  compensationAvailableOn?: string;
   periodStart?: string;
   periodEnd?: string;
   lines: {

@@ -238,6 +238,7 @@ export type WorkspaceInvoice = {
   paidAt?: string | null;
   cashEntryId?: string | null;
   cashIncluded?: boolean;
+  compensationAvailableOn?: string | null;
   /**
    * The current workspace endpoint does not need this field to render a useful
    * fallback label, but the mapper accepts it when the endpoint includes invoice
@@ -903,6 +904,8 @@ export function mapWorkspaceInvoices(
         cashIncluded: invoice.cashEntryId
           ? invoice.cashIncluded !== false
           : undefined,
+        compensationAvailableOn:
+          invoice.compensationAvailableOn ?? undefined,
         periodStart: invoice.items?.length
           ? invoice.items
               .map((item) => item.serviceDateSnapshot)
@@ -1409,6 +1412,7 @@ function invoiceStatus(
   referenceDate: string,
 ): Invoice["status"] {
   if (invoice.status === "paid") return "paid";
+  if (invoice.compensationAvailableOn) return "pending";
   return invoice.dueDate < referenceDate ? "overdue" : "pending";
 }
 
@@ -1421,6 +1425,9 @@ function invoiceDueLabel(
     return invoice.paidAt
       ? `Pago em ${formatBrazilianDate(invoice.paidAt)}`
       : "Pago";
+  }
+  if (invoice.compensationAvailableOn) {
+    return `Em compensação · disponível em ${formatBrazilianDate(invoice.compensationAvailableOn)}`;
   }
   if (invoice.dueDate === referenceDate) return "Vence hoje";
   const date = formatBrazilianDate(invoice.dueDate);

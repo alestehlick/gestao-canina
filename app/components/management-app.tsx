@@ -96,6 +96,27 @@ type InvoiceState = {
   creditPurchase?: Omit<CreditPurchase, "id" | "status" | "createdAt">;
 };
 
+function billableLongStayDiscountCents(
+  service: BillableService,
+  discountPercent: number,
+) {
+  const lodging = service.lodging;
+  if (!lodging || lodging.nights < 10 || discountPercent < 1) return 0;
+
+  const lodgingTotalCents = lodging.dailyRateCents
+    ? Math.round(lodging.dailyRateCents * lodging.nights)
+    : service.amountCents;
+  const fullDiscountCents = Math.round(
+    (lodgingTotalCents * discountPercent) / 100,
+  );
+  if (service.billingKind === "lodging_deposit") {
+    return Math.round(
+      (fullDiscountCents * (lodging.depositPercent ?? 0)) / 100,
+    );
+  }
+  return Math.min(service.amountCents, fullDiscountCents);
+}
+
 type BillingTab = "invoice" | "credits" | "receipts";
 type RuntimeMode =
   | "loading"
@@ -559,6 +580,10 @@ async function createInvoicePdf(state: InvoiceState) {
     (total, row) => total + (row.tableAmountCents ?? row.amountCents),
     0,
   );
+  const longStayDiscountTotalCents = rows.reduce(
+    (total, row) => total + Math.max(0, row.longStayDiscountCents ?? 0),
+    0,
+  );
   const hasLodging = rows.some((row) => row.tableAmountCents !== undefined);
   const issuedAt = formatBrazilianDate(operationalToday);
 
@@ -635,27 +660,26 @@ async function createInvoicePdf(state: InvoiceState) {
         { align: "right" },
       );
     }
-    if ((row.longStayDiscountCents ?? 0) > 0) {
-      document.setTextColor(128, 134, 131);
-      document.setFontSize(7);
-      document.text(
-        `Longa estadia (${row.longStayDiscountPercent}%): −${formatCurrency(row.longStayDiscountCents!)}`,
-        192,
-        y + (row.tableAmountCents !== undefined ? 8 : 4),
-        { align: "right" },
-      );
-    }
     const detailY = y + titleLines.length * 5;
     document.setTextColor(102, 108, 104);
     document.setFontSize(8.5);
     const detailLines = document.splitTextToSize(row.detail, 145) as string[];
     document.text(detailLines, 18, detailY);
+    const discountY = detailY + detailLines.length * 4;
+    if ((row.longStayDiscountCents ?? 0) > 0) {
+      document.setTextColor(112, 118, 115);
+      document.setFontSize(7.3);
+      document.text(
+        `Desconto por longa estadia (${row.longStayDiscountPercent}%): -${formatCurrency(row.longStayDiscountCents!)}`,
+        18,
+        discountY,
+        { maxWidth: 125 },
+      );
+    }
     document.setDrawColor(232, 234, 232);
     const rowEnd = Math.max(
-      detailY + detailLines.length * 4 + 3,
-      row.tableAmountCents !== undefined || (row.longStayDiscountCents ?? 0) > 0
-        ? y + 12
-        : 0,
+      discountY + ((row.longStayDiscountCents ?? 0) > 0 ? 4 : 0) + 3,
+      row.tableAmountCents !== undefined ? y + 8 : 0,
     );
     document.line(18, rowEnd, 192, rowEnd);
     y = rowEnd + 8;
@@ -665,24 +689,36 @@ async function createInvoicePdf(state: InvoiceState) {
   document.setTextColor(91, 99, 94);
   document.setFont("helvetica", "normal");
   document.setFontSize(8);
-  document.text("Total", 145, y + 7);
+  const totalLabelX = 132;
+  document.text("Total", totalLabelX, y + 7);
   document.setTextColor(30, 55, 46);
   document.setFont("helvetica", "bold");
   document.setFontSize(13);
   document.text(formatCurrency(state.amountCents), 192, y + 7, {
     align: "right",
   });
+  let totalDetailY = y + 13;
+  if (longStayDiscountTotalCents > 0) {
+    document.setTextColor(112, 118, 115);
+    document.setFont("helvetica", "normal");
+    document.setFontSize(7.5);
+    document.text("Desconto por longa estadia", totalLabelX, totalDetailY);
+    document.text(`-${formatCurrency(longStayDiscountTotalCents)}`, 192, totalDetailY, {
+      align: "right",
+    });
+    totalDetailY += 6;
+  }
   if (hasLodging) {
     document.setTextColor(112, 118, 115);
     document.setFont("helvetica", "normal");
     document.setFontSize(7.5);
-    document.text("Total pela diária padrão", 145, y + 13);
-    document.text(formatCurrency(tableTotalCents), 192, y + 13, {
+    document.text("Total pela diária padrão", totalLabelX, totalDetailY);
+    document.text(formatCurrency(tableTotalCents), 192, totalDetailY, {
       align: "right",
     });
   }
   document.setDrawColor(30, 55, 46);
-  document.line(145, y - 1, 192, y - 1);
+  document.line(totalLabelX, y - 1, 192, y - 1);
 
   document.setTextColor(91, 99, 94);
   document.setFont("helvetica", "normal");
@@ -3195,99 +3231,39 @@ export function ManagementApp() {
     return true;
   }
 
-  async function issueLodgingInvoice(
+  function issueLodgingInvoice(
     booking: Booking,
     kind: "deposit" | "balance",
   ) {
-    if (runtimeMode === "ready") {
-      const response = await runLiveAction(
-        `lodging-${kind}-invoice`,
-        () =>
-          requestJson<{
-            invoice: {
-              id: string;
-              invoiceNumber: string;
-              accountId: string;
-              recipientNameSnapshot: string;
-              totalCents: number;
-              dueDate: string;
-              sourceType: "lodging_deposit" | "lodging_balance";
-              items?: Array<{
-                dogNameSnapshot: string;
-                serviceNameSnapshot: string;
-                serviceDateSnapshot: string;
-                amountCents: number;
-              }>;
-            };
-          }>(
-            `/api/appointments/${booking.id}/${
-              kind === "deposit" ? "deposit-invoice" : "balance-invoice"
-            }`,
-            {
-              method: "POST",
-              body: JSON.stringify({ dueDate: operationalToday }),
-            },
-          ),
-        {
-          refresh: true,
-          successMessage:
-            kind === "deposit"
-              ? "Fatura do sinal criada."
-              : "Fatura do saldo criada com o sinal pago já abatido.",
-        },
+    const billingKind =
+      kind === "deposit" ? "lodging_deposit" : "lodging_balance";
+    const matchingBillable = billableServices.find(
+      (service) =>
+        service.billingKind === billingKind &&
+        service.appointmentItemId === booking.itemId,
+    );
+    if (matchingBillable) {
+      const customer = customers.find(
+        (item) => item.id === matchingBillable.customerId,
       );
-      if (!response) return;
-      const invoice: Invoice = {
-        id: response.invoice.id,
-        number: response.invoice.invoiceNumber,
-        customerId: response.invoice.accountId,
-        customerName: response.invoice.recipientNameSnapshot,
-        amountCents: response.invoice.totalCents,
-        due:
-          response.invoice.dueDate === operationalToday
-            ? "Vence hoje"
-            : `Vence em ${formatShortDate(response.invoice.dueDate)}`,
-        status: "pending",
-        items:
-          kind === "deposit"
-            ? `Sinal da hospedagem de ${booking.dogName}`
-            : `Saldo da hospedagem de ${booking.dogName}`,
-        sourceType: response.invoice.sourceType,
-        periodStart: booking.date,
-        periodEnd: booking.endDate ?? booking.date,
-        lines:
-          response.invoice.items?.map((item) => ({
-            dogName: item.dogNameSnapshot,
-            service: item.serviceNameSnapshot,
-            date: item.serviceDateSnapshot,
-            amountCents: item.amountCents,
-            lodging: {
-              checkInDate: booking.date,
-              checkOutDate: booking.endDate ?? booking.date,
-              nights: booking.lodgingNights ?? 1,
-              dailyRateCents: servicePrices.hotel,
-              depositPercent: booking.depositPercent,
-            },
-          })) ?? [
-            {
-              dogName: booking.dogName,
-              service:
-                kind === "deposit"
-                  ? "Sinal da hospedagem"
-                  : "Saldo da hospedagem",
-              date: booking.date,
-              amountCents: response.invoice.totalCents,
-              lodging: {
-                checkInDate: booking.date,
-                checkOutDate: booking.endDate ?? booking.date,
-                nights: booking.lodgingNights ?? 1,
-                dailyRateCents: servicePrices.hotel,
-                depositPercent: booking.depositPercent,
-              },
-            },
-          ],
-      };
-      openExistingInvoice(invoice);
+      setInvoiceState({
+        step: "review",
+        kind: "services",
+        selectedServices: [matchingBillable],
+        customerName: matchingBillable.customerName,
+        customerPhone: customer?.phone,
+        customerEmail: customer?.email,
+        amountCents: matchingBillable.amountCents,
+      });
+      setDialog("invoice");
+      return;
+    }
+
+    if (runtimeMode === "ready") {
+      setToast({
+        message:
+          "Atualize a página antes de gerar esta fatura. Assim, o desconto poderá ser revisado com segurança.",
+      });
       return;
     }
 
@@ -3358,7 +3334,7 @@ export function ManagementApp() {
     openExistingInvoice(invoice);
   }
 
-  async function issueInvoice() {
+  async function issueInvoice(applyLongStayDiscount = true) {
     if (!invoiceState) return;
 
     if (runtimeMode === "ready") {
@@ -3386,6 +3362,7 @@ export function ManagementApp() {
                   serviceLabels[purchase.serviceType]
                 }`,
                 dueDate: operationalToday,
+                applyLongStayDiscount,
               }),
             });
             registeredInvoice = {
@@ -3432,6 +3409,10 @@ export function ManagementApp() {
                     nights: number;
                     dailyRateCents: number;
                     depositPercent: number | null;
+                    tableDailyRateCents?: number;
+                    rateProfile?: string;
+                    longStayDiscountPercent?: number;
+                    longStayDiscountCents?: number;
                   } | null;
                 }>;
               };
@@ -3480,6 +3461,8 @@ export function ManagementApp() {
             ? {
                 ...current,
                 invoice: registeredInvoice,
+                amountCents:
+                  registeredInvoice?.amountCents ?? current.amountCents,
                 step: "code",
               }
             : current,
@@ -3497,6 +3480,8 @@ export function ManagementApp() {
               ? {
                   ...current,
                   invoice: registeredInvoice,
+                  amountCents:
+                    registeredInvoice?.amountCents ?? current.amountCents,
                   step: "code",
                 }
               : current,
@@ -3514,6 +3499,17 @@ export function ManagementApp() {
       return;
     }
 
+    const demoLongStayDiscountCents = applyLongStayDiscount
+      ? invoiceState.selectedServices.reduce(
+          (total, service) =>
+            total +
+            billableLongStayDiscountCents(
+              service,
+              lodgingPricing.longStayDiscountPercent,
+            ),
+          0,
+        )
+      : 0;
     const invoice: Invoice =
       invoiceState.invoice ??
       {
@@ -3524,7 +3520,10 @@ export function ManagementApp() {
           invoiceState.selectedServices[0]?.customerId ??
           "",
         customerName: invoiceState.customerName,
-        amountCents: invoiceState.amountCents,
+        amountCents: Math.max(
+          0,
+          invoiceState.amountCents - demoLongStayDiscountCents,
+        ),
         due: "Vence hoje",
         status: "pending",
         items:
@@ -3556,8 +3555,31 @@ export function ManagementApp() {
                 dogName: service.dogName,
                 service: service.service,
                 date: service.date,
-                amountCents: service.amountCents,
-                lodging: service.lodging,
+                amountCents: Math.max(
+                  0,
+                  service.amountCents -
+                    (applyLongStayDiscount
+                      ? billableLongStayDiscountCents(
+                          service,
+                          lodgingPricing.longStayDiscountPercent,
+                        )
+                      : 0),
+                ),
+                lodging: service.lodging
+                  ? {
+                      ...service.lodging,
+                      longStayDiscountPercent:
+                        applyLongStayDiscount && service.lodging.nights >= 10
+                          ? lodgingPricing.longStayDiscountPercent
+                          : undefined,
+                      longStayDiscountCents: applyLongStayDiscount
+                        ? billableLongStayDiscountCents(
+                            service,
+                            lodgingPricing.longStayDiscountPercent,
+                          )
+                        : 0,
+                    }
+                  : undefined,
               })),
       };
     if (!invoiceState.invoice) {
@@ -3573,7 +3595,12 @@ export function ManagementApp() {
         setCreditPurchases((current) => [purchase, ...current]);
       }
     }
-    setInvoiceState({ ...invoiceState, invoice, step: "code" });
+    setInvoiceState({
+      ...invoiceState,
+      invoice,
+      amountCents: invoice.amountCents,
+      step: "code",
+    });
     setToast({
       message:
         invoiceState.kind === "credit_package"
@@ -3582,10 +3609,7 @@ export function ManagementApp() {
     });
   }
 
-  async function registerInvoicePayment(
-    paidAt = operationalToday,
-    withoutLongStayDiscount = false,
-  ) {
+  async function registerInvoicePayment(paidAt = operationalToday) {
     if (!invoiceState?.invoice) return;
     const invoiceId = invoiceState.invoice.id;
     if (runtimeMode === "ready") {
@@ -3598,16 +3622,14 @@ export function ManagementApp() {
             creditsGranted: number;
           }>(`/api/invoices/${invoiceId}/payments`, {
             method: "POST",
-            body: JSON.stringify({ paidAt, withoutLongStayDiscount }),
+            body: JSON.stringify({ paidAt }),
           }),
         {
           refresh: true,
           successMessage:
             invoiceState.kind === "credit_package"
               ? "Pagamento registrado. Os créditos já estão disponíveis."
-              : withoutLongStayDiscount
-                ? "Pagamento registrado sem o desconto de longa estadia."
-                : "Pagamento registrado e fatura concluída.",
+              : "Pagamento registrado e fatura concluída.",
         },
       );
       if (result) {
@@ -5795,6 +5817,7 @@ export function ManagementApp() {
           onVoid={voidInvoice}
           onDeliveryConfirmed={markInvoiceDelivered}
           onFeedback={(message) => setToast({ message })}
+          longStayDiscountPercent={lodgingPricing.longStayDiscountPercent}
           liveMode={runtimeMode === "ready"}
           busy={
             busyAction === "issue-invoice" ||
@@ -9346,30 +9369,28 @@ function InvoiceDialog({
   onVoid,
   onDeliveryConfirmed,
   onFeedback,
+  longStayDiscountPercent,
   liveMode,
   busy,
 }: {
   state: InvoiceState;
   onClose: () => void;
-  onIssue: () => void;
-  onRegisterPayment: (
-    paidAt: string,
-    withoutLongStayDiscount?: boolean,
-  ) => void | Promise<void>;
+  onIssue: (applyLongStayDiscount?: boolean) => void;
+  onRegisterPayment: (paidAt: string) => void | Promise<void>;
   onVoid: () => void | Promise<void>;
   onDeliveryConfirmed: (
     invoiceId: string,
     channel: "whatsapp" | "email",
   ) => Promise<boolean>;
   onFeedback: (message: string) => void;
+  longStayDiscountPercent: number;
   liveMode: boolean;
   busy: boolean;
 }) {
   const [deliveryBusy, setDeliveryBusy] =
     useState<InvoiceDeliveryChannel | null>(null);
   const [paidAt, setPaidAt] = useState(operationalToday);
-  const [registerWithoutLongStayDiscount, setRegisterWithoutLongStayDiscount] =
-    useState(false);
+  const [skipLongStayDiscount, setSkipLongStayDiscount] = useState(false);
 
   async function handleDelivery(channel: InvoiceDeliveryChannel) {
     if (deliveryBusy) return;
@@ -9407,6 +9428,26 @@ function InvoiceDialog({
   }
 
   if (state.step === "review") {
+    const availableLongStayDiscountCents =
+      state.kind === "services"
+        ? state.selectedServices.reduce(
+            (total, service) =>
+              total +
+              billableLongStayDiscountCents(
+                service,
+                longStayDiscountPercent,
+              ),
+            0,
+          )
+        : 0;
+    const hasLongStayDiscount = availableLongStayDiscountCents > 0;
+    const reviewTotalCents = Math.max(
+      0,
+      state.amountCents -
+        (hasLongStayDiscount && !skipLongStayDiscount
+          ? availableLongStayDiscountCents
+          : 0),
+    );
     return (
       <Dialog
         title="Revisar cobrança"
@@ -9451,9 +9492,28 @@ function InvoiceDialog({
               ))
             )}
           </div>
+          {hasLongStayDiscount && (
+            <div className="long-stay-choice">
+              <label className="check-field">
+                <input
+                  type="checkbox"
+                  checked={skipLongStayDiscount}
+                  onChange={(event) =>
+                    setSkipLongStayDiscount(event.target.checked)
+                  }
+                />
+                <span>Não aplicar desconto por longa estadia</span>
+              </label>
+              <p className={skipLongStayDiscount ? "not-applied" : "applied"}>
+                {skipLongStayDiscount
+                  ? `Desconto não aplicado. A fatura será criada pelo valor integral de ${formatCurrency(state.amountCents)}.`
+                  : `Desconto de longa estadia de ${longStayDiscountPercent}% aplicado: −${formatCurrency(availableLongStayDiscountCents)}.`}
+              </p>
+            </div>
+          )}
           <div className="review-total">
             <span>Total</span>
-            <strong>{formatCurrency(state.amountCents)}</strong>
+            <strong>{formatCurrency(reviewTotalCents)}</strong>
           </div>
           <div className="invoice-notice">
             <span className="attention-mark">i</span>
@@ -9470,7 +9530,7 @@ function InvoiceDialog({
             </button>
             <button
               className="primary-button"
-              onClick={onIssue}
+              onClick={() => onIssue(!skipLongStayDiscount)}
               autoFocus
               disabled={busy}
             >
@@ -9521,11 +9581,6 @@ function InvoiceDialog({
     const hasLodging = rows.some(
       (row) => row.tableAmountCents !== undefined,
     );
-    const longStayDiscountCents = rows.reduce(
-      (total, row) => total + Math.max(0, row.longStayDiscountCents ?? 0),
-      0,
-    );
-    const canRemoveLongStayDiscount = longStayDiscountCents > 0;
     const isPaid = state.invoice?.status === "paid";
     return (
       <Dialog
@@ -9650,23 +9705,6 @@ function InvoiceDialog({
               <span>
                 Use esta ação somente depois de confirmar o recebimento do valor.
               </span>
-              {canRemoveLongStayDiscount && (
-                <label className="invoice-without-discount">
-                  <input
-                    type="checkbox"
-                    checked={registerWithoutLongStayDiscount}
-                    onChange={(event) =>
-                      setRegisterWithoutLongStayDiscount(event.target.checked)
-                    }
-                  />
-                  <span>
-                    Não aplicar desconto por longa estadia
-                    <small>
-                      Receber {formatCurrency(state.amountCents + longStayDiscountCents)} sem esse desconto
-                    </small>
-                  </span>
-                </label>
-              )}
             </div>
           )}
 
@@ -9684,9 +9722,7 @@ function InvoiceDialog({
                 className="primary-button"
                 type="button"
                 disabled={busy || !paidAt}
-                onClick={() =>
-                  onRegisterPayment(paidAt, registerWithoutLongStayDiscount)
-                }
+                onClick={() => onRegisterPayment(paidAt)}
               >
                 {busy
                   ? "Registrando…"

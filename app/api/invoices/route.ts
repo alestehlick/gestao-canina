@@ -91,6 +91,17 @@ export async function POST(request: Request) {
         "A data de vencimento é inválida.",
       );
     }
+    if (
+      body.applyLongStayDiscount !== undefined &&
+      typeof body.applyLongStayDiscount !== "boolean"
+    ) {
+      throw new HttpError(
+        400,
+        "invalid_long_stay_discount_choice",
+        "Revise a opção de desconto por longa estadia.",
+      );
+    }
+    const applyLongStayDiscount = body.applyLongStayDiscount !== false;
 
     const establishmentId = identity.establishmentId!;
     const db = getDb();
@@ -325,6 +336,7 @@ export async function POST(request: Request) {
         row.serviceCode !== "hotel" ||
         row.lodgingNights === null ||
         row.lodgingNights < 10 ||
+        !applyLongStayDiscount ||
         establishment.hotelLongStayDiscountPercent < 1
       ) {
         return { percent: null, cents: 0 };
@@ -579,6 +591,7 @@ export async function POST(request: Request) {
             accountId,
             appointmentItemIds,
             totalCents,
+            applyLongStayDiscount,
           }),
           invoiceId,
           establishmentId,

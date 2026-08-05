@@ -2,7 +2,6 @@ import { and, eq } from "drizzle-orm";
 import { getD1Database, getDb } from "@/db";
 import {
   creditPurchases,
-  invoiceItems,
   invoices,
 } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
@@ -39,7 +38,6 @@ export async function POST(
     const body = await readJsonObject(request);
     const paidAt = paidAtTimestamp(optionalString(body, "paidAt", 10));
     const note = optionalString(body, "note", 500);
-    const withoutLongStayDiscount = body.withoutLongStayDiscount === true;
     const establishmentId = identity.establishmentId!;
     const db = getDb();
 
@@ -78,26 +76,7 @@ export async function POST(
       );
     }
 
-    const discountRows = withoutLongStayDiscount
-      ? await db
-          .select({
-            discountCents: invoiceItems.lodgingLongStayDiscountCents,
-          })
-          .from(invoiceItems)
-          .where(eq(invoiceItems.invoiceId, invoiceId))
-      : [];
-    const longStayDiscountCents = discountRows.reduce(
-      (total, row) => total + Math.max(0, row.discountCents),
-      0,
-    );
-    if (withoutLongStayDiscount && longStayDiscountCents < 1) {
-      throw new HttpError(
-        400,
-        "long_stay_discount_not_available",
-        "Esta fatura não possui desconto de longa estadia para retirar.",
-      );
-    }
-    const paymentAmountCents = invoice.totalCents + longStayDiscountCents;
+    const paymentAmountCents = invoice.totalCents;
 
     const [purchase] =
       invoice.sourceType === "credit_package"
@@ -125,36 +104,6 @@ export async function POST(
     const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
     const d1 = getD1Database();
     const statements = [] as ReturnType<typeof d1.prepare>[];
-    if (withoutLongStayDiscount) {
-      statements.push(
-        d1
-          .prepare(
-            `UPDATE invoice_items
-            SET amount_cents = amount_cents + lodging_long_stay_discount_cents,
-              lodging_long_stay_discount_percent = NULL,
-              lodging_long_stay_discount_cents = 0
-            WHERE invoice_id = ? AND lodging_long_stay_discount_cents > 0
-              AND EXISTS (
-                SELECT 1 FROM invoices
-                WHERE id = ? AND establishment_id = ? AND status = 'issued'
-                  AND NOT EXISTS (
-                    SELECT 1 FROM invoice_payments WHERE invoice_id = ?
-                  )
-              )`,
-          )
-          .bind(invoiceId, invoiceId, establishmentId, invoiceId),
-        d1
-          .prepare(
-            `UPDATE invoices
-            SET total_cents = ?, updated_at = ${nowExpression}
-            WHERE id = ? AND establishment_id = ? AND status = 'issued'
-              AND NOT EXISTS (
-                SELECT 1 FROM invoice_payments WHERE invoice_id = ?
-              )`,
-          )
-          .bind(paymentAmountCents, invoiceId, establishmentId, invoiceId),
-      );
-    }
     const paymentStatementIndex = statements.length;
     statements.push(
       d1
@@ -216,8 +165,7 @@ export async function POST(
               WHEN 'lodging_balance' THEN 'Hospedagem'
               ELSE 'Serviços'
             END,
-            'Recebimento da fatura ' || i.invoice_number ||
-              CASE WHEN ? THEN ' · desconto de longa estadia não aplicado' ELSE '' END,
+            'Recebimento da fatura ' || i.invoice_number,
             ip.note, 'included', NULL, ?, ?, NULL, NULL,
             ${nowExpression}, ${nowExpression}
           FROM invoice_payments ip
@@ -229,7 +177,6 @@ export async function POST(
         )
         .bind(
           cashEntryId,
-          withoutLongStayDiscount ? 1 : 0,
           identity.userId,
           identity.userId,
           paymentId,
@@ -332,8 +279,6 @@ export async function POST(
             amountCents: paymentAmountCents,
             paidAt,
             note,
-            withoutLongStayDiscount,
-            longStayDiscountCents,
           }),
           paymentId,
         ),

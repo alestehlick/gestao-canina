@@ -357,9 +357,8 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
   assert.match(invoices, /FAT-/);
   assert.doesNotMatch(invoices, /pix/i);
   assert.match(payments, /invoice\.payment_recorded/);
-  assert.match(payments, /withoutLongStayDiscount/);
-  assert.match(payments, /long_stay_discount_not_available/);
-  assert.match(payments, /desconto de longa estadia não aplicado/);
+  assert.match(invoices, /applyLongStayDiscount/);
+  assert.doesNotMatch(payments, /withoutLongStayDiscount/);
   assert.match(payments, /Créditos liberados após pagamento da fatura/);
   assert.match(payments, /settlement_method = 'invoice'/);
   assert.match(payments, /service_name_snapshot <> 'Sinal da hospedagem'/);
@@ -503,7 +502,10 @@ test("mantém a política de hospedagem clara e auditável", async () => {
   assert.match(editAppointment, /lodgingRateProfile/);
   assert.match(invoices, /hotelLongStayDiscountPercent/);
   assert.match(invoices, /lodging_long_stay_discount_cents/);
-  assert.match(payments, /withoutLongStayDiscount/);
+  assert.match(invoices, /applyLongStayDiscount !== false/);
+  assert.doesNotMatch(payments, /withoutLongStayDiscount/);
+  assert.match(app, /Desconto de longa estadia de \$\{longStayDiscountPercent\}% aplicado/);
+  assert.match(app, /Desconto por longa estadia/);
   assert.match(settings, /hotelDaycareAdditionalDogDailyRateCents/);
   assert.match(schema, /hotel_long_stay_discount_percent/);
   assert.match(migration, /lodging_long_stay_discount_cents/);

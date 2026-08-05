@@ -1390,34 +1390,6 @@ h3 {
   color: var(--muted);
 }
 
-.invoice-payment-register .invoice-without-discount {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-  color: var(--ink);
-  font-weight: 650;
-}
-
-.invoice-payment-register .invoice-without-discount input {
-  width: 16px;
-  min-height: 16px;
-  margin: 0;
-  padding: 0;
-  accent-color: var(--forest);
-}
-
-.invoice-payment-register .invoice-without-discount span {
-  display: grid;
-  gap: 2px;
-}
-
-.invoice-payment-register .invoice-without-discount small {
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 500;
-}
-
 .daycare-hours-settings {
   align-items: center;
 }
@@ -3983,6 +3955,32 @@ h3 {
 .review-total strong {
   font-family: var(--font-serif);
   font-size: 1.8rem;
+}
+
+.long-stay-choice {
+  display: grid;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--hotel) 30%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--hotel-soft) 42%, var(--surface));
+  padding: 12px;
+}
+
+.long-stay-choice .check-field {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.long-stay-choice p {
+  margin: 0 0 0 27px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.long-stay-choice p.applied {
+  color: var(--forest);
 }
 
 .invoice-notice {

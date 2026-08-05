@@ -210,6 +210,7 @@ export type WorkspaceInvoice = {
   createdByUserId: string | null;
   createdAt: string;
   updatedAt: string;
+  paidAt?: string | null;
   cashEntryId?: string | null;
   cashIncluded?: boolean;
   /**
@@ -1111,7 +1112,9 @@ function invoiceDueLabel(
 ) {
   if (invoice.status === "draft") return "Em preparação";
   if (invoice.status === "paid") {
-    return `Pago em ${formatBrazilianDate(invoice.updatedAt)}`;
+    return invoice.paidAt
+      ? `Pago em ${formatBrazilianDate(invoice.paidAt)}`
+      : "Pago";
   }
   if (invoice.dueDate === referenceDate) return "Vence hoje";
   const date = formatBrazilianDate(invoice.dueDate);

@@ -298,6 +298,7 @@ export async function GET(request: Request) {
       db
         .select({
           invoiceId: invoicePayments.invoiceId,
+          paidAt: invoicePayments.paidAt,
           cashEntryId: cashEntries.id,
           cashStatus: cashEntries.status,
         })
@@ -517,6 +518,8 @@ export async function GET(request: Request) {
             ? []
             : invoiceRows.map((invoice) => ({
                 ...invoice,
+                paidAt:
+                  paymentByInvoice.get(invoice.id)?.paidAt ?? null,
                 cashEntryId:
                   paymentByInvoice.get(invoice.id)?.cashEntryId ?? null,
                 cashIncluded:

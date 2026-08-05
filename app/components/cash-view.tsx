@@ -42,7 +42,39 @@ type CashPayload = {
     inflowCents: number;
     outflowCents: number;
     balanceCents: number;
+    receivableCents: number;
+    receivableCount: number;
     excludedCount: number;
+  };
+  analytics: {
+    serviceStats: Array<{
+      code: string;
+      label: string;
+      count: number;
+      unit: string;
+      billedCents: number;
+      receivedCents: number;
+    }>;
+    previousTotals: { inflowCents: number; outflowCents: number };
+    activity: {
+      invoiceCount: number;
+      customerCount: number;
+      dogCount: number;
+      averageTicketCents: number;
+    };
+    credits: {
+      soldUnits: number;
+      soldCents: number;
+      usedUnits: number;
+      availableUnits: number;
+    };
+    dailyCash: Array<{
+      date: string;
+      inflowCents: number;
+      outflowCents: number;
+      cumulativeCents: number;
+    }>;
+    expenseCategories: Array<{ category: string; amountCents: number }>;
   };
   entries: CashEntry[];
 };
@@ -95,6 +127,15 @@ function shiftMonth(value: string, delta: number) {
   const [year, month] = value.split("-").map(Number);
   const shifted = new Date(Date.UTC(year, month - 1 + delta, 1));
   return shifted.toISOString().slice(0, 7);
+}
+
+function compactDate(value: string) {
+  return value.slice(8, 10);
+}
+
+function barSize(value: number, maximum: number) {
+  if (value <= 0 || maximum <= 0) return 0;
+  return Math.max(5, Math.round((value / maximum) * 100));
 }
 
 async function cashRequest<T>(url: string, init?: RequestInit): Promise<T> {
@@ -387,11 +428,209 @@ export function CashView({
           </strong>
         </div>
         <div>
-          <span>Desconsiderados</span>
-          <strong>{payload?.totals.excludedCount ?? 0}</strong>
-          <small>Ficam preservados no histórico</small>
+          <span>A receber</span>
+          <strong>{formatCurrency(payload?.totals.receivableCents ?? 0)}</strong>
+          <small>
+            {payload?.totals.receivableCount ?? 0} faturas em aberto
+          </small>
         </div>
       </section>
+
+      <section className="panel cash-service-overview">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Atividade do período</p>
+            <h2>Serviços</h2>
+          </div>
+          <small>Valores faturados · recebimentos identificados à parte</small>
+        </div>
+        <div className="cash-service-grid">
+          {(payload?.analytics.serviceStats ?? []).map((service) => (
+            <article key={service.code}>
+              <span>{service.label}</span>
+              <strong>{formatCurrency(service.billedCents)}</strong>
+              <small>
+                {new Intl.NumberFormat("pt-BR", {
+                  maximumFractionDigits: 1,
+                }).format(service.count)}{" "}
+                {service.unit}
+              </small>
+              <small>Recebido: {formatCurrency(service.receivedCents)}</small>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <details className="panel cash-analytics">
+        <summary>
+          <span>
+            <span className="section-kicker">Planejamento</span>
+            <strong>Ver análises</strong>
+          </span>
+          <span className="cash-analysis-toggle" aria-hidden="true">+</span>
+        </summary>
+        {payload && (
+          <div className="cash-analytics-body">
+            <div className="cash-analysis-metrics">
+              <article>
+                <span>Ticket médio</span>
+                <strong>{formatCurrency(payload.analytics.activity.averageTicketCents)}</strong>
+              </article>
+              <article>
+                <span>Faturas emitidas</span>
+                <strong>{payload.analytics.activity.invoiceCount}</strong>
+              </article>
+              <article>
+                <span>Clientes faturados</span>
+                <strong>{payload.analytics.activity.customerCount}</strong>
+              </article>
+              <article>
+                <span>Cães atendidos</span>
+                <strong>{payload.analytics.activity.dogCount}</strong>
+              </article>
+            </div>
+
+            <div className="cash-chart-grid">
+              <article className="cash-chart-card">
+                <div>
+                  <p className="section-kicker">Comparativo</p>
+                  <h3>Entradas e saídas</h3>
+                </div>
+                {(() => {
+                  const values = [
+                    payload.totals.inflowCents,
+                    payload.totals.outflowCents,
+                    payload.analytics.previousTotals.inflowCents,
+                    payload.analytics.previousTotals.outflowCents,
+                  ];
+                  const maximum = Math.max(...values, 1);
+                  return (
+                    <div className="cash-comparison-chart">
+                      {[
+                        [
+                          "Período atual",
+                          payload.totals.inflowCents,
+                          payload.totals.outflowCents,
+                        ],
+                        [
+                          "Período anterior",
+                          payload.analytics.previousTotals.inflowCents,
+                          payload.analytics.previousTotals.outflowCents,
+                        ],
+                      ].map(([label, inflow, outflow]) => (
+                        <div className="cash-comparison-row" key={String(label)}>
+                          <span>{label}</span>
+                          <div className="cash-comparison-bars">
+                            <i
+                              className="inflow-bar"
+                              style={{ width: `${barSize(Number(inflow), maximum)}%` }}
+                              title={`Entradas: ${formatCurrency(Number(inflow))}`}
+                            />
+                            <i
+                              className="outflow-bar"
+                              style={{ width: `${barSize(Number(outflow), maximum)}%` }}
+                              title={`Saídas: ${formatCurrency(Number(outflow))}`}
+                            />
+                          </div>
+                          <small>
+                            +{formatCurrency(Number(inflow))} · −{formatCurrency(Number(outflow))}
+                          </small>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+                <div className="cash-chart-legend">
+                  <span><i className="inflow-bar" /> Entradas</span>
+                  <span><i className="outflow-bar" /> Saídas</span>
+                </div>
+              </article>
+
+              <article className="cash-chart-card">
+                <div>
+                  <p className="section-kicker">Composição</p>
+                  <h3>Faturamento por serviço</h3>
+                </div>
+                <div className="cash-service-chart">
+                  {payload.analytics.serviceStats.map((service) => {
+                    const maximum = Math.max(
+                      ...payload.analytics.serviceStats.map((item) => item.billedCents),
+                      1,
+                    );
+                    return (
+                      <div key={`chart-${service.code}`}>
+                        <span>{service.label}</span>
+                        <i>
+                          <b style={{ width: `${barSize(service.billedCents, maximum)}%` }} />
+                        </i>
+                        <small>{formatCurrency(service.billedCents)}</small>
+                      </div>
+                    );
+                  })}
+                </div>
+              </article>
+
+              <article className="cash-chart-card cash-daily-card">
+                <div>
+                  <p className="section-kicker">Evolução</p>
+                  <h3>Saldo acumulado</h3>
+                </div>
+                {payload.analytics.dailyCash.length ? (
+                  <div className="cash-daily-chart" aria-label="Saldo acumulado por dia">
+                    {(() => {
+                      const maximum = Math.max(
+                        ...payload.analytics.dailyCash.map((day) => Math.abs(day.cumulativeCents)),
+                        1,
+                      );
+                      return payload.analytics.dailyCash.map((day) => (
+                        <span key={day.date}>
+                          <i
+                            className={day.cumulativeCents < 0 ? "negative" : "positive"}
+                            style={{ height: `${barSize(Math.abs(day.cumulativeCents), maximum)}%` }}
+                            title={`${formatBrazilianDate(day.date)}: ${formatCurrency(day.cumulativeCents)}`}
+                          />
+                          <small>{compactDate(day.date)}</small>
+                        </span>
+                      ));
+                    })()}
+                  </div>
+                ) : (
+                  <p className="cash-chart-empty">Sem movimentações consideradas neste período.</p>
+                )}
+              </article>
+            </div>
+
+            <div className="cash-detail-grid">
+              <article>
+                <p className="section-kicker">Créditos</p>
+                <h3>Pacotes pré-pagos</h3>
+                <dl>
+                  <div><dt>Vendidos no período</dt><dd>{payload.analytics.credits.soldUnits}</dd></div>
+                  <div><dt>Valor vendido</dt><dd>{formatCurrency(payload.analytics.credits.soldCents)}</dd></div>
+                  <div><dt>Utilizados</dt><dd>{payload.analytics.credits.usedUnits}</dd></div>
+                  <div><dt>Disponíveis</dt><dd>{payload.analytics.credits.availableUnits}</dd></div>
+                </dl>
+              </article>
+              <article>
+                <p className="section-kicker">Despesas</p>
+                <h3>Por categoria</h3>
+                {payload.analytics.expenseCategories.length ? (
+                  <dl>
+                    {payload.analytics.expenseCategories.map((item) => (
+                      <div key={item.category}>
+                        <dt>{item.category}</dt>
+                        <dd>{formatCurrency(item.amountCents)}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : (
+                  <p className="cash-chart-empty">Nenhuma saída considerada.</p>
+                )}
+              </article>
+            </div>
+          </div>
+        )}
+      </details>
 
       <section className="panel full-panel">
         <div className="panel-heading cash-heading">
@@ -563,6 +802,11 @@ export function CashView({
             </button>
           ))}
         </div>
+        {!!payload?.totals.excludedCount && (
+          <p className="cash-excluded-note">
+            {payload.totals.excludedCount} lançamento(s) desconsiderado(s), preservado(s) no histórico.
+          </p>
+        )}
 
         {entries.length ? (
           <>

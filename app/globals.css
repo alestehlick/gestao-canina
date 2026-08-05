@@ -2340,6 +2340,318 @@ h3 {
   font-size: 1.25rem;
 }
 
+.cash-service-overview {
+  padding: 21px;
+}
+
+.cash-service-overview .panel-heading {
+  align-items: end;
+}
+
+.cash-service-overview .panel-heading > small {
+  max-width: 320px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-align: right;
+}
+
+.cash-service-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 17px;
+}
+
+.cash-service-grid article,
+.cash-analysis-metrics article {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-small);
+  background: var(--surface-muted);
+  padding: 14px;
+}
+
+.cash-service-grid span,
+.cash-analysis-metrics span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 720;
+}
+
+.cash-service-grid strong {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 1.05rem;
+}
+
+.cash-service-grid small {
+  color: var(--muted);
+  font-size: 0.66rem;
+}
+
+.cash-analytics {
+  padding: 0;
+  overflow: hidden;
+}
+
+.cash-analytics > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 68px;
+  padding: 17px 21px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.cash-analytics > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cash-analytics > summary > span:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.cash-analysis-toggle {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--forest);
+  font-size: 1.1rem;
+  transition: transform 160ms ease;
+}
+
+.cash-analytics[open] .cash-analysis-toggle {
+  transform: rotate(45deg);
+}
+
+.cash-analytics-body {
+  display: grid;
+  gap: 16px;
+  border-top: 1px solid var(--line-soft);
+  padding: 20px;
+}
+
+.cash-analysis-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.cash-analysis-metrics strong {
+  font-size: 1.05rem;
+}
+
+.cash-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.cash-chart-card,
+.cash-detail-grid > article {
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-small);
+  padding: 17px;
+}
+
+.cash-chart-card h3,
+.cash-detail-grid h3 {
+  margin-top: 2px;
+  font-size: 1rem;
+}
+
+.cash-daily-card {
+  grid-column: 1 / -1;
+}
+
+.cash-comparison-chart,
+.cash-service-chart {
+  display: grid;
+  gap: 13px;
+  margin-top: 18px;
+}
+
+.cash-comparison-row {
+  display: grid;
+  grid-template-columns: 105px 1fr;
+  align-items: center;
+  gap: 7px 12px;
+}
+
+.cash-comparison-row > span,
+.cash-service-chart span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.cash-comparison-row > small {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 0.62rem;
+}
+
+.cash-comparison-bars {
+  display: grid;
+  gap: 4px;
+}
+
+.cash-comparison-bars i,
+.cash-chart-legend i {
+  display: block;
+  height: 7px;
+  border-radius: 999px;
+}
+
+.inflow-bar {
+  background: #3f7863;
+}
+
+.outflow-bar {
+  background: #c47a69;
+}
+
+.cash-chart-legend {
+  display: flex;
+  gap: 14px;
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 0.64rem;
+}
+
+.cash-chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cash-chart-legend i {
+  width: 16px;
+  height: 5px;
+}
+
+.cash-service-chart > div {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.cash-service-chart > div > i {
+  display: block;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+
+.cash-service-chart b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--forest-soft);
+}
+
+.cash-service-chart small {
+  min-width: 72px;
+  color: var(--ink);
+  font-size: 0.65rem;
+  text-align: right;
+}
+
+.cash-daily-chart {
+  display: flex;
+  align-items: end;
+  gap: 5px;
+  height: 150px;
+  margin-top: 18px;
+  border-bottom: 1px solid var(--line);
+  padding: 0 3px;
+  overflow-x: auto;
+}
+
+.cash-daily-chart > span {
+  display: grid;
+  grid-template-rows: 1fr 18px;
+  align-items: end;
+  min-width: 18px;
+  height: 100%;
+}
+
+.cash-daily-chart i {
+  display: block;
+  width: 12px;
+  min-height: 3px;
+  justify-self: center;
+  border-radius: 3px 3px 0 0;
+}
+
+.cash-daily-chart i.positive {
+  background: #3f7863;
+}
+
+.cash-daily-chart i.negative {
+  background: #c47a69;
+}
+
+.cash-daily-chart small {
+  color: var(--muted);
+  font-size: 0.56rem;
+  text-align: center;
+}
+
+.cash-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.cash-detail-grid dl {
+  display: grid;
+  gap: 0;
+  margin: 13px 0 0;
+}
+
+.cash-detail-grid dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid var(--line-soft);
+  padding: 9px 0;
+  font-size: 0.7rem;
+}
+
+.cash-detail-grid dt {
+  color: var(--muted);
+}
+
+.cash-detail-grid dd {
+  margin: 0;
+  font-weight: 740;
+}
+
+.cash-chart-empty,
+.cash-excluded-note {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.cash-chart-empty {
+  margin-top: 18px;
+}
+
+.cash-excluded-note {
+  margin: 8px 0 0;
+}
+
 .inline-error {
   display: flex;
   align-items: center;
@@ -4610,6 +4922,48 @@ h3 {
   .cash-entry-form {
     grid-template-columns: 1fr;
     padding: 15px;
+  }
+
+  .cash-service-overview .panel-heading {
+    align-items: start;
+  }
+
+  .cash-service-overview .panel-heading > small {
+    text-align: left;
+  }
+
+  .cash-service-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cash-service-grid article:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .cash-analysis-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cash-chart-grid,
+  .cash-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cash-daily-card {
+    grid-column: auto;
+  }
+
+  .cash-comparison-row {
+    grid-template-columns: 88px 1fr;
+  }
+
+  .cash-service-chart > div {
+    grid-template-columns: 78px 1fr;
+  }
+
+  .cash-service-chart small {
+    grid-column: 2;
+    text-align: left;
   }
 
   .cash-description-field,

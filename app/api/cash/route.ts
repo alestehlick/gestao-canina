@@ -1,5 +1,5 @@
 import { and, between, desc, eq } from "drizzle-orm";
-import { getDb } from "@/db";
+import { getD1Database, getDb } from "@/db";
 import {
   auditEvents,
   cashEntries,
@@ -45,6 +45,11 @@ function periodFor(anchorMonth: string, startDay: number) {
   const end = new Date(nextStart);
   end.setUTCDate(end.getUTCDate() - 1);
   return { start: isoDate(start), end: isoDate(end) };
+}
+
+function shiftAnchorMonth(anchorMonth: string, delta: number) {
+  const [year, month] = anchorMonth.split("-").map(Number);
+  return isoDate(new Date(Date.UTC(year, month - 1 + delta, 1))).slice(0, 7);
 }
 
 export async function GET(request: Request) {
@@ -125,6 +130,191 @@ export async function GET(request: Request) {
       .filter((entry) => entry.direction === "outflow")
       .reduce((total, entry) => total + entry.amountCents, 0);
 
+    const previousPeriod = periodFor(
+      shiftAnchorMonth(anchorMonth, -1),
+      monthStartDay,
+    );
+    const d1 = getD1Database();
+    const [serviceResult, previousResult, receivableResult, activityResult, creditResult] =
+      await d1.batch([
+        d1
+          .prepare(
+            `SELECT sc.code AS service_code,
+              ii.appointment_item_id AS item_id,
+              ai.appointment_id AS appointment_id,
+              a.account_id AS account_id,
+              a.dog_id AS dog_id,
+              a.lodging_nights AS lodging_nights,
+              ii.amount_cents AS amount_cents,
+              ip.id AS payment_id,
+              ce.status AS cash_status
+            FROM invoice_items ii
+            INNER JOIN invoices i ON i.id = ii.invoice_id
+            INNER JOIN appointment_items ai ON ai.id = ii.appointment_item_id
+            INNER JOIN appointments a ON a.id = ai.appointment_id
+            INNER JOIN service_catalog sc ON sc.id = ai.service_catalog_id
+            LEFT JOIN invoice_payments ip ON ip.invoice_id = i.id
+            LEFT JOIN cash_entries ce ON ce.source_payment_id = ip.id
+            WHERE i.establishment_id = ?
+              AND i.status IN ('issued', 'paid')
+              AND ii.service_date_snapshot BETWEEN ? AND ?`,
+          )
+          .bind(establishmentId, period.start, period.end),
+        d1
+          .prepare(
+            `SELECT
+              COALESCE(SUM(CASE WHEN direction = 'inflow' AND status = 'included' THEN amount_cents ELSE 0 END), 0) AS inflow_cents,
+              COALESCE(SUM(CASE WHEN direction = 'outflow' AND status = 'included' THEN amount_cents ELSE 0 END), 0) AS outflow_cents
+            FROM cash_entries
+            WHERE establishment_id = ? AND occurred_on BETWEEN ? AND ?`,
+          )
+          .bind(establishmentId, previousPeriod.start, previousPeriod.end),
+        d1
+          .prepare(
+            `SELECT COUNT(*) AS invoice_count,
+              COALESCE(SUM(total_cents), 0) AS total_cents
+            FROM invoices
+            WHERE establishment_id = ? AND status = 'issued'`,
+          )
+          .bind(establishmentId),
+        d1
+          .prepare(
+            `SELECT
+              COUNT(DISTINCT i.id) AS invoice_count,
+              COUNT(DISTINCT i.account_id) AS customer_count,
+              COALESCE(SUM(i.total_cents), 0) AS invoiced_cents
+            FROM invoices i
+            WHERE i.establishment_id = ? AND i.status <> 'void'
+              AND date(i.issued_at, '-3 hours') BETWEEN ? AND ?`,
+          )
+          .bind(establishmentId, period.start, period.end),
+        d1
+          .prepare(
+            `SELECT
+              COALESCE(SUM(CASE WHEN cp.status = 'paid' AND substr(cp.paid_at, 1, 10) BETWEEN ? AND ? THEN cp.credit_units ELSE 0 END), 0) AS sold_units,
+              COALESCE(SUM(CASE WHEN cp.status = 'paid' AND substr(cp.paid_at, 1, 10) BETWEEN ? AND ? THEN cp.amount_cents ELSE 0 END), 0) AS sold_cents,
+              (SELECT COALESCE(-SUM(delta_units), 0) FROM credit_movements
+                WHERE establishment_id = ? AND movement_type = 'consume'
+                  AND date(occurred_at, '-3 hours') BETWEEN ? AND ?) AS used_units,
+              (SELECT COALESCE(SUM(delta_units), 0) FROM credit_movements
+                WHERE establishment_id = ?) AS available_units
+            FROM credit_purchases cp
+            WHERE cp.establishment_id = ?`,
+          )
+          .bind(
+            period.start,
+            period.end,
+            period.start,
+            period.end,
+            establishmentId,
+            period.start,
+            period.end,
+            establishmentId,
+            establishmentId,
+          ),
+      ]);
+
+    type ServiceRow = {
+      service_code: string;
+      item_id: string;
+      appointment_id: string;
+      account_id: string;
+      dog_id: string;
+      lodging_nights: number | null;
+      amount_cents: number;
+      payment_id: string | null;
+      cash_status: "included" | "excluded" | null;
+    };
+    const serviceRows = serviceResult.results as ServiceRow[];
+    const serviceCodes = [
+      ["bath", "Banho"],
+      ["bath_grooming", "Banho e tosa"],
+      ["daycare", "Creche"],
+      ["lodging", "Hospedagem"],
+      ["taxi_dog", "Taxi-dog"],
+    ] as const;
+    const serviceStats = serviceCodes.map(([code, label]) => {
+      const rows = serviceRows.filter((row) => row.service_code === code);
+      const uniqueItems = new Set(rows.map((row) => row.item_id));
+      const lodgingByAppointment = new Map<string, number>();
+      if (code === "lodging") {
+        for (const row of rows) {
+          lodgingByAppointment.set(
+            row.appointment_id,
+            Number(row.lodging_nights ?? 0),
+          );
+        }
+      }
+      return {
+        code,
+        label,
+        count:
+          code === "lodging"
+            ? [...lodgingByAppointment.values()].reduce(
+                (total, nights) => total + nights,
+                0,
+              )
+            : uniqueItems.size,
+        unit: code === "lodging" ? "diárias" : "atendimentos",
+        billedCents: rows.reduce((total, row) => total + row.amount_cents, 0),
+        receivedCents: rows
+          .filter(
+            (row) => row.payment_id && row.cash_status === "included",
+          )
+          .reduce((total, row) => total + row.amount_cents, 0),
+      };
+    });
+    const previous = previousResult.results[0] as
+      | { inflow_cents?: number; outflow_cents?: number }
+      | undefined;
+    const receivable = receivableResult.results[0] as
+      | { invoice_count?: number; total_cents?: number }
+      | undefined;
+    const activity = activityResult.results[0] as
+      | {
+          invoice_count?: number;
+          customer_count?: number;
+          invoiced_cents?: number;
+        }
+      | undefined;
+    const credits = creditResult.results[0] as
+      | {
+          sold_units?: number;
+          sold_cents?: number;
+          used_units?: number;
+          available_units?: number;
+        }
+      | undefined;
+    const dailyMap = new Map<
+      string,
+      { date: string; inflowCents: number; outflowCents: number }
+    >();
+    const expenseMap = new Map<string, number>();
+    for (const entry of included) {
+      const day = dailyMap.get(entry.occurredOn) ?? {
+        date: entry.occurredOn,
+        inflowCents: 0,
+        outflowCents: 0,
+      };
+      if (entry.direction === "inflow") day.inflowCents += entry.amountCents;
+      else {
+        day.outflowCents += entry.amountCents;
+        expenseMap.set(
+          entry.category,
+          (expenseMap.get(entry.category) ?? 0) + entry.amountCents,
+        );
+      }
+      dailyMap.set(entry.occurredOn, day);
+    }
+    let cumulativeCents = 0;
+    const dailyCash = [...dailyMap.values()]
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map((day) => {
+        cumulativeCents += day.inflowCents - day.outflowCents;
+        return { ...day, cumulativeCents };
+      });
+    const invoiceCount = Number(activity?.invoice_count ?? 0);
+
     return json({
       anchorMonth,
       monthStartDay,
@@ -133,7 +323,34 @@ export async function GET(request: Request) {
         inflowCents,
         outflowCents,
         balanceCents: inflowCents - outflowCents,
+        receivableCents: Number(receivable?.total_cents ?? 0),
+        receivableCount: Number(receivable?.invoice_count ?? 0),
         excludedCount: entries.length - included.length,
+      },
+      analytics: {
+        serviceStats,
+        previousTotals: {
+          inflowCents: Number(previous?.inflow_cents ?? 0),
+          outflowCents: Number(previous?.outflow_cents ?? 0),
+        },
+        activity: {
+          invoiceCount,
+          customerCount: new Set(serviceRows.map((row) => row.account_id)).size,
+          dogCount: new Set(serviceRows.map((row) => row.dog_id)).size,
+          averageTicketCents: invoiceCount
+            ? Math.round(Number(activity?.invoiced_cents ?? 0) / invoiceCount)
+            : 0,
+        },
+        credits: {
+          soldUnits: Number(credits?.sold_units ?? 0),
+          soldCents: Number(credits?.sold_cents ?? 0),
+          usedUnits: Number(credits?.used_units ?? 0),
+          availableUnits: Number(credits?.available_units ?? 0),
+        },
+        dailyCash,
+        expenseCategories: [...expenseMap.entries()]
+          .map(([category, amountCents]) => ({ category, amountCents }))
+          .sort((a, b) => b.amountCents - a.amountCents),
       },
       entries,
     });

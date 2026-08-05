@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { getD1Database, getDb } from "@/db";
 import {
   dogs,
+  establishments,
   serviceCatalog,
 } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
@@ -18,6 +19,33 @@ import {
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
 const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
 const operationalTimePattern = /^(?:\d{2}:\d{2}|manha|tarde|noite)$/;
+const lodgingRateProfiles = [
+  "standard",
+  "daycare",
+  "additional_dog",
+  "daycare_additional_dog",
+] as const;
+type LodgingRateProfile = (typeof lodgingRateProfiles)[number];
+
+function isLodgingRateProfile(value: unknown): value is LodgingRateProfile {
+  return typeof value === "string" && lodgingRateProfiles.includes(value as LodgingRateProfile);
+}
+
+function lodgingDailyRateCents(
+  establishment: typeof establishments.$inferSelect,
+  profile: LodgingRateProfile,
+) {
+  switch (profile) {
+    case "daycare":
+      return establishment.hotelDaycareDailyRateCents;
+    case "additional_dog":
+      return establishment.hotelAdditionalDogDailyRateCents;
+    case "daycare_additional_dog":
+      return establishment.hotelDaycareAdditionalDogDailyRateCents;
+    default:
+      return establishment.hotelStandardDailyRateCents;
+  }
+}
 
 function operationalTimeOrder(value: string) {
   if (value === "manha") return 8 * 60;
@@ -158,7 +186,7 @@ export async function POST(request: Request) {
 
     const establishmentId = identity.establishmentId!;
     const db = getDb();
-    const [[dog], [service]] = await Promise.all([
+    const [[dog], [service], [establishment]] = await Promise.all([
       db
         .select()
         .from(dogs)
@@ -181,8 +209,13 @@ export async function POST(request: Request) {
           ),
         )
         .limit(1),
+      db
+        .select()
+        .from(establishments)
+        .where(eq(establishments.id, establishmentId))
+        .limit(1),
     ]);
-    if (!dog || !service) {
+    if (!dog || !service || !establishment) {
       throw new HttpError(
         404,
         "record_not_found",
@@ -202,6 +235,14 @@ export async function POST(request: Request) {
 
     const lodgingNights = typeof body.lodgingNights === "number" ? body.lodgingNights : null;
     const depositPercent = typeof body.depositPercent === "number" ? body.depositPercent : null;
+    const lodgingRateProfile: LodgingRateProfile | null =
+      service.code === "hotel"
+        ? body.lodgingRateProfile === undefined
+          ? "standard"
+          : isLodgingRateProfile(body.lodgingRateProfile)
+            ? body.lodgingRateProfile
+            : null
+        : null;
     if (service.code === "hotel") {
       if (
         lodgingNights === null ||
@@ -221,6 +262,13 @@ export async function POST(request: Request) {
       if (depositPercent !== null && (!Number.isInteger(depositPercent) || depositPercent < 1 || depositPercent > 99)) {
         throw new HttpError(400, "invalid_deposit_percent", "Informe um sinal entre 1% e 99%.");
       }
+      if (!lodgingRateProfile) {
+        throw new HttpError(
+          400,
+          "invalid_lodging_rate_profile",
+          "Escolha uma condição de diária válida para a hospedagem.",
+        );
+      }
     }
     const direction = body.transportDirection === "round_trip" ? "round_trip" : "one_way";
     const catalogPriceCents =
@@ -229,7 +277,10 @@ export async function POST(request: Request) {
           ? 1_000
           : 500
         : service.code === "hotel"
-          ? Math.round(service.basePriceCents * (lodgingNights ?? 1))
+          ? Math.round(
+              lodgingDailyRateCents(establishment, lodgingRateProfile!) *
+                (lodgingNights ?? 1),
+            )
           : service.basePriceCents;
     // Somente administradores podem conceder valores especiais.
     const priceCents =
@@ -290,7 +341,7 @@ export async function POST(request: Request) {
       const placeholders = appointmentChunk
         .map(
           () =>
-            `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?,
+            `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?,
               ${nowExpression}, ${nowExpression})`,
         )
         .join(", ");
@@ -299,7 +350,8 @@ export async function POST(request: Request) {
           .prepare(
             `INSERT INTO appointments (
               id, establishment_id, account_id, dog_id, start_date, end_date,
-              start_time, end_time, lodging_nights, deposit_percent, status,
+              start_time, end_time, lodging_nights, deposit_percent,
+              lodging_rate_profile, lodging_table_daily_rate_cents, status,
               source, recurring_schedule_id, occurrence_date, internal_notes,
               created_by_user_id, created_at, updated_at
             ) VALUES ${placeholders}`,
@@ -316,6 +368,10 @@ export async function POST(request: Request) {
               endTime,
               service.code === "hotel" ? lodgingNights : null,
               service.code === "hotel" ? depositPercent : null,
+              service.code === "hotel" ? lodgingRateProfile : null,
+              service.code === "hotel"
+                ? establishment.hotelStandardDailyRateCents
+                : null,
               recurringScheduleId ? "recurring" : "manual",
               recurringScheduleId,
               recurringScheduleId ? created.startDate : null,
@@ -392,6 +448,8 @@ export async function POST(request: Request) {
               service.code === "hotel" ? lodgingNights : null,
             depositPercent:
               service.code === "hotel" ? depositPercent : null,
+            lodgingRateProfile:
+              service.code === "hotel" ? lodgingRateProfile : null,
           }),
         ),
     );

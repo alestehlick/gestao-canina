@@ -148,6 +148,13 @@ export type WorkspaceAppointment = {
   endTime: string | null;
   lodgingNights: number | null;
   depositPercent: number | null;
+  lodgingRateProfile:
+    | "standard"
+    | "daycare"
+    | "additional_dog"
+    | "daycare_additional_dog"
+    | null;
+  lodgingTableDailyRateCents: number | null;
   status: BookingStatus;
   source: "manual" | "recurring";
   recurringScheduleId: string | null;
@@ -192,6 +199,15 @@ export type WorkspaceInvoiceItem = {
   lodgingEndDate: string | null;
   lodgingNights: number | null;
   lodgingDailyRateCents: number | null;
+  lodgingTableDailyRateCents: number | null;
+  lodgingRateProfile:
+    | "standard"
+    | "daycare"
+    | "additional_dog"
+    | "daycare_additional_dog"
+    | null;
+  lodgingLongStayDiscountPercent: number | null;
+  lodgingLongStayDiscountCents: number;
   depositPercent: number | null;
 };
 
@@ -319,6 +335,11 @@ export type WorkspaceReadyPayload = {
     timezone: string;
     daycareStartTime: string;
     daycareEndTime: string;
+    hotelStandardDailyRateCents: number;
+    hotelDaycareDailyRateCents: number;
+    hotelAdditionalDogDailyRateCents: number;
+    hotelDaycareAdditionalDogDailyRateCents: number;
+    hotelLongStayDiscountPercent: number;
     cashMonthStartDay: number;
     createdAt: string;
     updatedAt: string;
@@ -619,6 +640,9 @@ export function mapWorkspaceBookings(
       endTime: appointment.endTime ?? undefined,
       lodgingNights: appointment.lodgingNights ?? undefined,
       depositPercent: appointment.depositPercent ?? undefined,
+      lodgingRateProfile: appointment.lodgingRateProfile ?? undefined,
+      lodgingTableDailyRateCents:
+        appointment.lodgingTableDailyRateCents ?? undefined,
       dogId: appointment.dogId,
       dogName: appointment.dogName,
       customerId: appointment.accountId,
@@ -707,7 +731,12 @@ export function mapWorkspaceBillableServices(
               checkInDate: appointment.startDate,
               checkOutDate: appointment.endDate,
               nights: appointment.lodgingNights,
-              dailyRateCents: servicesById.get(item.serviceCatalogId)?.basePriceCents,
+              dailyRateCents: appointment.lodgingNights
+                ? Math.round(item.totalCents / appointment.lodgingNights)
+                : undefined,
+              tableDailyRateCents:
+                appointment.lodgingTableDailyRateCents ?? undefined,
+              rateProfile: appointment.lodgingRateProfile ?? undefined,
               depositPercent: appointment.depositPercent ?? undefined,
             }
           : undefined;
@@ -901,6 +930,13 @@ export function mapWorkspaceInvoices(
                     checkOutDate: item.lodgingEndDate,
                     nights: item.lodgingNights,
                     dailyRateCents: item.lodgingDailyRateCents ?? undefined,
+                    tableDailyRateCents:
+                      item.lodgingTableDailyRateCents ?? undefined,
+                    rateProfile: item.lodgingRateProfile ?? undefined,
+                    longStayDiscountPercent:
+                      item.lodgingLongStayDiscountPercent ?? undefined,
+                    longStayDiscountCents:
+                      item.lodgingLongStayDiscountCents ?? undefined,
                     depositPercent: item.depositPercent ?? undefined,
                   }
                 : undefined,

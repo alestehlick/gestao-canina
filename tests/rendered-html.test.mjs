@@ -30,8 +30,8 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.match(app, /Registrar pagamento/);
   assert.match(app, /Gerar fatura do sinal/);
   assert.match(app, /Gerar fatura do saldo/);
-  assert.match(app, /Registrar pagamento sem desconto/);
-  assert.match(app, /Total sem desconto/);
+  assert.match(app, /Não aplicar desconto por longa estadia/);
+  assert.match(app, /Total pela diária padrão/);
   assert.match(app, /Valor tabelado:/);
   assert.match(app, /lodgingTableAmountCents/);
   assert.doesNotMatch(app, /pix/i);
@@ -357,9 +357,9 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
   assert.match(invoices, /FAT-/);
   assert.doesNotMatch(invoices, /pix/i);
   assert.match(payments, /invoice\.payment_recorded/);
-  assert.match(payments, /withoutDiscount/);
-  assert.match(payments, /lodging_table_value_unavailable/);
-  assert.match(payments, /sem desconto/);
+  assert.match(payments, /withoutLongStayDiscount/);
+  assert.match(payments, /long_stay_discount_not_available/);
+  assert.match(payments, /desconto de longa estadia não aplicado/);
   assert.match(payments, /Créditos liberados após pagamento da fatura/);
   assert.match(payments, /settlement_method = 'invoice'/);
   assert.match(payments, /service_name_snapshot <> 'Sinal da hospedagem'/);
@@ -477,4 +477,30 @@ test("mantém histórico descritivo, indicadores recentes e horários flexíveis
   assert.match(auditLog, /recipient_name_snapshot/);
   assert.match(appointments, /manha\|tarde\|noite/);
   assert.match(appointmentEdit, /manha\|tarde\|noite/);
+});
+
+test("mantém a política de hospedagem clara e auditável", async () => {
+  const [app, createAppointment, editAppointment, invoices, payments, settings, schema, migration] =
+    await Promise.all([
+      readFile(new URL("../app/components/management-app.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/appointments/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/appointments/[id]/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/invoices/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/invoices/[id]/payments/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/settings/prices/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+      readFile(new URL("../drizzle/0010_lodging_pricing.sql", import.meta.url), "utf8"),
+    ]);
+
+  assert.match(app, /cliente de creche regular/);
+  assert.match(app, /segundo cão ou mais/);
+  assert.match(app, /Não aplicar desconto por longa estadia/);
+  assert.match(createAppointment, /lodging_rate_profile/);
+  assert.match(editAppointment, /lodgingRateProfile/);
+  assert.match(invoices, /hotelLongStayDiscountPercent/);
+  assert.match(invoices, /lodging_long_stay_discount_cents/);
+  assert.match(payments, /withoutLongStayDiscount/);
+  assert.match(settings, /hotelDaycareAdditionalDogDailyRateCents/);
+  assert.match(schema, /hotel_long_stay_discount_percent/);
+  assert.match(migration, /lodging_long_stay_discount_cents/);
 });

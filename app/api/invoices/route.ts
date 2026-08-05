@@ -5,6 +5,7 @@ import {
   appointments,
   customerAccounts,
   dogs,
+  establishments,
   invoiceItems,
   invoices,
   serviceCatalog,
@@ -93,6 +94,17 @@ export async function POST(request: Request) {
 
     const establishmentId = identity.establishmentId!;
     const db = getDb();
+    const [establishment] = await db
+      .select({
+        hotelLongStayDiscountPercent:
+          establishments.hotelLongStayDiscountPercent,
+      })
+      .from(establishments)
+      .where(eq(establishments.id, establishmentId))
+      .limit(1);
+    if (!establishment) {
+      throw new HttpError(404, "establishment_not_found", "A unidade não foi encontrada.");
+    }
     const rows = await db
       .select({
         itemId: appointmentItems.id,
@@ -112,7 +124,8 @@ export async function POST(request: Request) {
         endDate: appointments.endDate,
         lodgingNights: appointments.lodgingNights,
         depositPercent: appointments.depositPercent,
-        lodgingDailyRateCents: serviceCatalog.basePriceCents,
+        lodgingTableDailyRateCents: appointments.lodgingTableDailyRateCents,
+        lodgingRateProfile: appointments.lodgingRateProfile,
         dogName: dogs.name,
         customerName: customerAccounts.displayName,
       })
@@ -307,39 +320,83 @@ export async function POST(request: Request) {
       );
     }
 
+    const lodgingLongStayDiscount = (row: (typeof selectedRows)[number]) => {
+      if (
+        row.serviceCode !== "hotel" ||
+        row.lodgingNights === null ||
+        row.lodgingNights < 10 ||
+        establishment.hotelLongStayDiscountPercent < 1
+      ) {
+        return { percent: null, cents: 0 };
+      }
+      return {
+        percent: establishment.hotelLongStayDiscountPercent,
+        cents: Math.round(
+          (row.amountCents * establishment.hotelLongStayDiscountPercent) / 100,
+        ),
+      };
+    };
     const effectiveRows = selectedRows.map((row) => {
+      const longStayDiscount = lodgingLongStayDiscount(row);
+      const discountedLodgingCents = Math.max(
+        0,
+        row.amountCents - longStayDiscount.cents,
+      );
+      const longStayNote = longStayDiscount.percent
+        ? ` Desconto de longa estadia de ${longStayDiscount.percent}% aplicado.`
+        : "";
       if (row.billingKind === "service") {
         return {
           ...row,
-          invoiceAmountCents: row.amountCents,
+          invoiceAmountCents:
+            row.serviceCode === "hotel"
+              ? discountedLodgingCents
+              : row.amountCents,
+          lodgingLongStayDiscountPercent: longStayDiscount.percent,
+          lodgingLongStayDiscountCents: longStayDiscount.cents,
           invoiceServiceName: row.serviceName,
           invoiceDescription:
-            row.description || `${row.serviceName} de ${row.dogName}`,
+            (row.description || `${row.serviceName} de ${row.dogName}`) +
+            longStayNote,
         };
       }
       if (row.billingKind === "lodging_deposit") {
         const percent = row.depositPercent!;
         return {
           ...row,
-          invoiceAmountCents: Math.round((row.amountCents * percent) / 100),
+          invoiceAmountCents: Math.round(
+            (discountedLodgingCents * percent) / 100,
+          ),
+          lodgingLongStayDiscountPercent: longStayDiscount.percent,
+          lodgingLongStayDiscountCents: Math.round(
+            (longStayDiscount.cents * percent) / 100,
+          ),
           invoiceServiceName: "Sinal da hospedagem",
-          invoiceDescription: `Sinal de ${percent}% da hospedagem de ${row.dogName}, ${row.startDate} a ${row.endDate}`,
+          invoiceDescription: `Sinal de ${percent}% da hospedagem de ${row.dogName}, ${row.startDate} a ${row.endDate}.${longStayNote}`,
         };
       }
       const depositInvoice = depositByAppointment.get(row.appointmentId);
       const paidDepositCents =
         depositInvoice?.status === "paid" ? depositInvoice.totalCents : 0;
-      const invoiceAmountCents = Math.max(0, row.amountCents - paidDepositCents);
+      const invoiceAmountCents = Math.max(
+        0,
+        discountedLodgingCents - paidDepositCents,
+      );
       const period = `${row.startDate} a ${row.endDate}`;
       return {
         ...row,
         invoiceAmountCents,
+        lodgingLongStayDiscountPercent: longStayDiscount.percent,
+        lodgingLongStayDiscountCents: Math.max(
+          0,
+          row.amountCents - paidDepositCents - invoiceAmountCents,
+        ),
         invoiceServiceName:
           paidDepositCents > 0 ? "Saldo da hospedagem" : row.serviceName,
         invoiceDescription:
           paidDepositCents > 0
             ? `Saldo da hospedagem de ${row.dogName}, ${period}, com sinal já abatido`
-            : `Hospedagem de ${row.dogName}, ${period}, ${row.lodgingNights ?? 0} diárias`,
+            : `Hospedagem de ${row.dogName}, ${period}, ${row.lodgingNights ?? 0} diárias.${longStayNote}`,
       };
     });
 
@@ -470,9 +527,11 @@ export async function POST(request: Request) {
             `INSERT INTO invoice_items (
               id, invoice_id, appointment_item_id, dog_name_snapshot,
               service_name_snapshot, service_date_snapshot,
-              description_snapshot, amount_cents
+              description_snapshot, amount_cents,
+              lodging_long_stay_discount_percent,
+              lodging_long_stay_discount_cents
             )
-            SELECT ?, ?, ?, ?, ?, ?, ?, ?
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             WHERE EXISTS (
               SELECT 1
               FROM invoices
@@ -488,6 +547,8 @@ export async function POST(request: Request) {
             row.serviceDate,
             row.invoiceDescription,
             row.invoiceAmountCents,
+            row.lodgingLongStayDiscountPercent ?? null,
+            row.lodgingLongStayDiscountCents ?? 0,
             invoiceId,
             establishmentId,
           ),
@@ -571,7 +632,17 @@ export async function POST(request: Request) {
                     checkInDate: row.startDate,
                     checkOutDate: row.endDate,
                     nights: row.lodgingNights,
-                    dailyRateCents: row.lodgingDailyRateCents,
+                    dailyRateCents:
+                      row.lodgingNights
+                        ? Math.round(row.amountCents / row.lodgingNights)
+                        : undefined,
+                    tableDailyRateCents:
+                      row.lodgingTableDailyRateCents ?? undefined,
+                    rateProfile: row.lodgingRateProfile ?? undefined,
+                    longStayDiscountPercent:
+                      row.lodgingLongStayDiscountPercent ?? undefined,
+                    longStayDiscountCents:
+                      row.lodgingLongStayDiscountCents ?? undefined,
                     depositPercent: row.depositPercent,
                   }
                 : null,

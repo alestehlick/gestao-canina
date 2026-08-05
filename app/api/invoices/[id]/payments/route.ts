@@ -1,12 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import { getD1Database, getDb } from "@/db";
 import {
-  appointmentItems,
-  appointments,
   creditPurchases,
   invoiceItems,
   invoices,
-  serviceCatalog,
 } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
 import {
@@ -42,7 +39,7 @@ export async function POST(
     const body = await readJsonObject(request);
     const paidAt = paidAtTimestamp(optionalString(body, "paidAt", 10));
     const note = optionalString(body, "note", 500);
-    const withoutDiscount = body.withoutDiscount === true;
+    const withoutLongStayDiscount = body.withoutLongStayDiscount === true;
     const establishmentId = identity.establishmentId!;
     const db = getDb();
 
@@ -81,80 +78,26 @@ export async function POST(
       );
     }
 
-    let paymentAmountCents = invoice.totalCents;
-    if (withoutDiscount) {
-      const lodgingLines = await db
-        .select({
-          serviceName: invoiceItems.serviceNameSnapshot,
-          invoiceAmountCents: invoiceItems.amountCents,
-          nights: appointments.lodgingNights,
-          depositPercent: appointments.depositPercent,
-          dailyRateCents: serviceCatalog.basePriceCents,
-        })
-        .from(invoiceItems)
-        .innerJoin(
-          appointmentItems,
-          eq(appointmentItems.id, invoiceItems.appointmentItemId),
-        )
-        .innerJoin(
-          appointments,
-          eq(appointments.id, appointmentItems.appointmentId),
-        )
-        .innerJoin(
-          serviceCatalog,
-          eq(serviceCatalog.id, appointmentItems.serviceCatalogId),
-        )
-        .where(
-          and(
-            eq(invoiceItems.invoiceId, invoiceId),
-            eq(serviceCatalog.code, "hotel"),
-          ),
-        );
-      if (!lodgingLines.length) {
-        throw new HttpError(
-          400,
-          "without_discount_not_available",
-          "Esta opção está disponível somente para faturas com hospedagem.",
-        );
-      }
-      const tableAmountForLine = (line: (typeof lodgingLines)[number]) => {
-        if (line.nights === null || line.dailyRateCents < 1) {
-          throw new HttpError(
-            409,
-            "lodging_table_value_unavailable",
-            "Não foi possível calcular o valor tabelado desta hospedagem.",
-          );
-        }
-        const fullStayCents = Math.round(line.nights * line.dailyRateCents);
-        if (
-          line.serviceName === "Sinal da hospedagem" &&
-          line.depositPercent
-        ) {
-          return Math.round((fullStayCents * line.depositPercent) / 100);
-        }
-        if (
-          line.serviceName === "Saldo da hospedagem" &&
-          line.depositPercent
-        ) {
-          return Math.round(
-            (fullStayCents * (100 - line.depositPercent)) / 100,
-          );
-        }
-        return fullStayCents;
-      };
-      const lodgingInvoiceCents = lodgingLines.reduce(
-        (total, line) => total + line.invoiceAmountCents,
-        0,
-      );
-      const lodgingTableCents = lodgingLines.reduce(
-        (total, line) => total + tableAmountForLine(line),
-        0,
-      );
-      paymentAmountCents = Math.max(
-        1,
-        invoice.totalCents - lodgingInvoiceCents + lodgingTableCents,
+    const discountRows = withoutLongStayDiscount
+      ? await db
+          .select({
+            discountCents: invoiceItems.lodgingLongStayDiscountCents,
+          })
+          .from(invoiceItems)
+          .where(eq(invoiceItems.invoiceId, invoiceId))
+      : [];
+    const longStayDiscountCents = discountRows.reduce(
+      (total, row) => total + Math.max(0, row.discountCents),
+      0,
+    );
+    if (withoutLongStayDiscount && longStayDiscountCents < 1) {
+      throw new HttpError(
+        400,
+        "long_stay_discount_not_available",
+        "Esta fatura não possui desconto de longa estadia para retirar.",
       );
     }
+    const paymentAmountCents = invoice.totalCents + longStayDiscountCents;
 
     const [purchase] =
       invoice.sourceType === "credit_package"
@@ -181,7 +124,39 @@ export async function POST(
     const movementId = purchase ? crypto.randomUUID() : null;
     const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
     const d1 = getD1Database();
-    const statements = [
+    const statements = [] as ReturnType<typeof d1.prepare>[];
+    if (withoutLongStayDiscount) {
+      statements.push(
+        d1
+          .prepare(
+            `UPDATE invoice_items
+            SET amount_cents = amount_cents + lodging_long_stay_discount_cents,
+              lodging_long_stay_discount_percent = NULL,
+              lodging_long_stay_discount_cents = 0
+            WHERE invoice_id = ? AND lodging_long_stay_discount_cents > 0
+              AND EXISTS (
+                SELECT 1 FROM invoices
+                WHERE id = ? AND establishment_id = ? AND status = 'issued'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM invoice_payments WHERE invoice_id = ?
+                  )
+              )`,
+          )
+          .bind(invoiceId, invoiceId, establishmentId, invoiceId),
+        d1
+          .prepare(
+            `UPDATE invoices
+            SET total_cents = ?, updated_at = ${nowExpression}
+            WHERE id = ? AND establishment_id = ? AND status = 'issued'
+              AND NOT EXISTS (
+                SELECT 1 FROM invoice_payments WHERE invoice_id = ?
+              )`,
+          )
+          .bind(paymentAmountCents, invoiceId, establishmentId, invoiceId),
+      );
+    }
+    const paymentStatementIndex = statements.length;
+    statements.push(
       d1
         .prepare(
           `INSERT INTO invoice_payments (
@@ -206,6 +181,9 @@ export async function POST(
           establishmentId,
           invoiceId,
         ),
+    );
+    const paidStatementIndex = statements.length;
+    statements.push(
       d1
         .prepare(
           `UPDATE invoices
@@ -217,9 +195,10 @@ export async function POST(
             )`,
         )
         .bind(invoiceId, establishmentId, paymentId),
-    ];
+    );
 
     const cashEntryId = crypto.randomUUID();
+    const cashEntryStatementIndex = statements.length;
     statements.push(
       d1
         .prepare(
@@ -238,7 +217,7 @@ export async function POST(
               ELSE 'Serviços'
             END,
             'Recebimento da fatura ' || i.invoice_number ||
-              CASE WHEN ? THEN ' · sem desconto' ELSE '' END,
+              CASE WHEN ? THEN ' · desconto de longa estadia não aplicado' ELSE '' END,
             ip.note, 'included', NULL, ?, ?, NULL, NULL,
             ${nowExpression}, ${nowExpression}
           FROM invoice_payments ip
@@ -250,7 +229,7 @@ export async function POST(
         )
         .bind(
           cashEntryId,
-          withoutDiscount ? 1 : 0,
+          withoutLongStayDiscount ? 1 : 0,
           identity.userId,
           identity.userId,
           paymentId,
@@ -353,7 +332,8 @@ export async function POST(
             amountCents: paymentAmountCents,
             paidAt,
             note,
-            withoutDiscount,
+            withoutLongStayDiscount,
+            longStayDiscountCents,
           }),
           paymentId,
         ),
@@ -361,9 +341,9 @@ export async function POST(
 
     const results = await d1.batch(statements);
     if (
-      (results[0].meta.changes ?? 0) !== 1 ||
-      (results[1].meta.changes ?? 0) !== 1 ||
-      (results[2].meta.changes ?? 0) !== 1
+      (results[paymentStatementIndex].meta.changes ?? 0) !== 1 ||
+      (results[paidStatementIndex].meta.changes ?? 0) !== 1 ||
+      (results[cashEntryStatementIndex].meta.changes ?? 0) !== 1
     ) {
       throw new HttpError(
         409,
@@ -377,7 +357,7 @@ export async function POST(
         id: invoiceId,
         invoiceNumber: invoice.invoiceNumber,
         status: "paid",
-        totalCents: invoice.totalCents,
+        totalCents: paymentAmountCents,
         paidAt,
       },
       payment: { id: paymentId, amountCents: paymentAmountCents, paidAt, note },

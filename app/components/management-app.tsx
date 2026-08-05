@@ -106,6 +106,59 @@ type RuntimeMode =
   | "demo"
   | "error";
 
+type LodgingRateProfile =
+  | "standard"
+  | "daycare"
+  | "additional_dog"
+  | "daycare_additional_dog";
+
+type LodgingPricing = {
+  standardDailyRateCents: number;
+  daycareDailyRateCents: number;
+  additionalDogDailyRateCents: number;
+  daycareAdditionalDogDailyRateCents: number;
+  longStayDiscountPercent: number;
+};
+
+const defaultLodgingPricing: LodgingPricing = {
+  standardDailyRateCents: 11_000,
+  daycareDailyRateCents: 10_000,
+  additionalDogDailyRateCents: 9_900,
+  daycareAdditionalDogDailyRateCents: 9_000,
+  longStayDiscountPercent: 5,
+};
+
+function lodgingRateProfile(
+  daycareCustomer: boolean,
+  additionalDog: boolean,
+): LodgingRateProfile {
+  if (daycareCustomer && additionalDog) return "daycare_additional_dog";
+  if (daycareCustomer) return "daycare";
+  if (additionalDog) return "additional_dog";
+  return "standard";
+}
+
+function lodgingDailyRate(
+  pricing: LodgingPricing,
+  profile: LodgingRateProfile,
+) {
+  if (profile === "daycare") return pricing.daycareDailyRateCents;
+  if (profile === "additional_dog") return pricing.additionalDogDailyRateCents;
+  if (profile === "daycare_additional_dog") {
+    return pricing.daycareAdditionalDogDailyRateCents;
+  }
+  return pricing.standardDailyRateCents;
+}
+
+function lodgingRateLabel(profile: LodgingRateProfile) {
+  if (profile === "daycare") return "Cliente de creche";
+  if (profile === "additional_dog") return "Segundo cão ou mais";
+  if (profile === "daycare_additional_dog") {
+    return "Cliente de creche · segundo cão ou mais";
+  }
+  return "Diária padrão";
+}
+
 type AuthStatusPayload = {
   setupRequired: boolean;
   authenticated: boolean;
@@ -412,12 +465,18 @@ function lodgingTableAmountCents(
   lodging: {
     nights: number;
     dailyRateCents?: number;
+    tableDailyRateCents?: number;
+    rateProfile?: string;
+    longStayDiscountPercent?: number;
+    longStayDiscountCents?: number;
     depositPercent?: number;
   },
   service: string,
 ) {
-  if (!lodging.dailyRateCents || lodging.dailyRateCents < 1) return undefined;
-  const fullStayCents = Math.round(lodging.dailyRateCents * lodging.nights);
+  const tableDailyRateCents =
+    lodging.tableDailyRateCents ?? lodging.dailyRateCents;
+  if (!tableDailyRateCents || tableDailyRateCents < 1) return undefined;
+  const fullStayCents = Math.round(tableDailyRateCents * lodging.nights);
   if (service === "Sinal da hospedagem" && lodging.depositPercent) {
     return Math.round((fullStayCents * lodging.depositPercent) / 100);
   }
@@ -434,6 +493,8 @@ type InvoiceDescriptionLine = {
   detail: string;
   amountCents: number;
   tableAmountCents?: number;
+  longStayDiscountPercent?: number;
+  longStayDiscountCents?: number;
 };
 
 function invoiceDescriptionLines(state: InvoiceState): InvoiceDescriptionLine[] {
@@ -458,6 +519,8 @@ function invoiceDescriptionLines(state: InvoiceState): InvoiceDescriptionLine[] 
       tableAmountCents: service.lodging
         ? lodgingTableAmountCents(service.lodging, service.service)
         : undefined,
+      longStayDiscountPercent: service.lodging?.longStayDiscountPercent,
+      longStayDiscountCents: service.lodging?.longStayDiscountCents,
     }));
   }
   if (state.invoice?.lines.length) {
@@ -470,6 +533,8 @@ function invoiceDescriptionLines(state: InvoiceState): InvoiceDescriptionLine[] 
       tableAmountCents: line.lodging
         ? lodgingTableAmountCents(line.lodging, line.service)
         : undefined,
+      longStayDiscountPercent: line.lodging?.longStayDiscountPercent,
+      longStayDiscountCents: line.lodging?.longStayDiscountCents,
     }));
   }
   return [
@@ -570,6 +635,16 @@ async function createInvoicePdf(state: InvoiceState) {
         { align: "right" },
       );
     }
+    if ((row.longStayDiscountCents ?? 0) > 0) {
+      document.setTextColor(128, 134, 131);
+      document.setFontSize(7);
+      document.text(
+        `Longa estadia (${row.longStayDiscountPercent}%): −${formatCurrency(row.longStayDiscountCents!)}`,
+        192,
+        y + (row.tableAmountCents !== undefined ? 8 : 4),
+        { align: "right" },
+      );
+    }
     const detailY = y + titleLines.length * 5;
     document.setTextColor(102, 108, 104);
     document.setFontSize(8.5);
@@ -578,7 +653,9 @@ async function createInvoicePdf(state: InvoiceState) {
     document.setDrawColor(232, 234, 232);
     const rowEnd = Math.max(
       detailY + detailLines.length * 4 + 3,
-      row.tableAmountCents !== undefined ? y + 8 : 0,
+      row.tableAmountCents !== undefined || (row.longStayDiscountCents ?? 0) > 0
+        ? y + 12
+        : 0,
     );
     document.line(18, rowEnd, 192, rowEnd);
     y = rowEnd + 8;
@@ -599,7 +676,7 @@ async function createInvoicePdf(state: InvoiceState) {
     document.setTextColor(112, 118, 115);
     document.setFont("helvetica", "normal");
     document.setFontSize(7.5);
-    document.text("Total sem desconto", 145, y + 13);
+    document.text("Total pela diária padrão", 145, y + 13);
     document.text(formatCurrency(tableTotalCents), 192, y + 13, {
       align: "right",
     });
@@ -778,6 +855,8 @@ export function ManagementApp() {
   const [activities, setActivities] = useState<AuditActivity[]>([]);
   const [servicePrices, setServicePrices] =
     useState<Record<ServiceType, number>>(defaultServicePrices);
+  const [lodgingPricing, setLodgingPricing] =
+    useState<LodgingPricing>(defaultLodgingPricing);
   const [selectedDate, setSelectedDate] = useState(operationalToday);
   const [selectedBillables, setSelectedBillables] = useState<string[]>([]);
   const [selectedDogId, setSelectedDogId] = useState<string | null>(null);
@@ -801,6 +880,9 @@ export function ManagementApp() {
   const [editDraftTransportDirection, setEditDraftTransportDirection] =
     useState<"one_way" | "round_trip">("one_way");
   const [editDraftHasDeposit, setEditDraftHasDeposit] = useState(false);
+  const [editDraftDaycareCustomer, setEditDraftDaycareCustomer] =
+    useState(false);
+  const [editDraftAdditionalDog, setEditDraftAdditionalDog] = useState(false);
   const [editDraftDate, setEditDraftDate] = useState(operationalToday);
   const [editDraftEndDate, setEditDraftEndDate] = useState(
     shiftDate(operationalToday, 1),
@@ -822,6 +904,10 @@ export function ManagementApp() {
   const [serviceDraftTransportDirection, setServiceDraftTransportDirection] =
     useState<"one_way" | "round_trip">("one_way");
   const [serviceDraftHasDeposit, setServiceDraftHasDeposit] = useState(false);
+  const [serviceDraftDaycareCustomer, setServiceDraftDaycareCustomer] =
+    useState(false);
+  const [serviceDraftAdditionalDog, setServiceDraftAdditionalDog] =
+    useState(false);
   const [serviceDraftDate, setServiceDraftDate] = useState(operationalToday);
   const [serviceDraftEndDate, setServiceDraftEndDate] = useState(
     shiftDate(operationalToday, 1),
@@ -856,6 +942,7 @@ export function ManagementApp() {
     setReceipts([]);
     setActivities([]);
     setServicePrices(defaultServicePrices);
+    setLodgingPricing(defaultLodgingPricing);
     setDaycareStartTime("07:30");
     setDaycareEndTime("19:30");
     setSelectedDogId(null);
@@ -899,6 +986,7 @@ export function ManagementApp() {
     setReceipts(demoReceipts);
     setActivities(auditFixtures);
     setServicePrices(defaultServicePrices);
+    setLodgingPricing(defaultLodgingPricing);
     setSessionExpiresAt(null);
     setCreditCustomerId((current) => current || demoCustomers[0]?.id || "");
     setRuntimeMode("demo");
@@ -922,6 +1010,17 @@ export function ManagementApp() {
     setReceipts(data.receipts);
     setActivities(data.activities);
     setServicePrices(data.servicePrices);
+    setLodgingPricing({
+      standardDailyRateCents:
+        payload.establishment.hotelStandardDailyRateCents,
+      daycareDailyRateCents: payload.establishment.hotelDaycareDailyRateCents,
+      additionalDogDailyRateCents:
+        payload.establishment.hotelAdditionalDogDailyRateCents,
+      daycareAdditionalDogDailyRateCents:
+        payload.establishment.hotelDaycareAdditionalDogDailyRateCents,
+      longStayDiscountPercent:
+        payload.establishment.hotelLongStayDiscountPercent,
+    });
     setDaycareStartTime(payload.establishment.daycareStartTime || "07:30");
     setDaycareEndTime(payload.establishment.daycareEndTime || "19:30");
     setCreditCustomerId((current) =>
@@ -1282,6 +1381,8 @@ export function ManagementApp() {
     setServiceDraftType("daycare");
     setServiceDraftPayment("invoice");
     setServiceDraftHasDeposit(false);
+    setServiceDraftDaycareCustomer(false);
+    setServiceDraftAdditionalDog(false);
     setServiceDraftRecurrence("none");
     setServiceDraftDate(selectedDateRef.current);
     setServiceDraftEndDate(shiftDate(selectedDateRef.current, 1));
@@ -1622,6 +1723,14 @@ export function ManagementApp() {
       booking.transportDirection ?? "one_way",
     );
     setEditDraftHasDeposit(Boolean(booking.depositPercent));
+    setEditDraftDaycareCustomer(
+      booking.lodgingRateProfile === "daycare" ||
+        booking.lodgingRateProfile === "daycare_additional_dog",
+    );
+    setEditDraftAdditionalDog(
+      booking.lodgingRateProfile === "additional_dog" ||
+        booking.lodgingRateProfile === "daycare_additional_dog",
+    );
     setEditDraftDate(booking.date);
     setEditDraftEndDate(
       booking.endDate ?? shiftDate(booking.date, 1),
@@ -1665,6 +1774,10 @@ export function ManagementApp() {
           ? 1_000
           : 500
         : Math.round(Number(form.get("price") ?? 0) * 100);
+    const nextLodgingRateProfile = lodgingRateProfile(
+      editDraftDaycareCustomer,
+      editDraftAdditionalDog,
+    );
     if (
       !date ||
       !serviceType ||
@@ -1739,6 +1852,8 @@ export function ManagementApp() {
                   serviceType === "hotel" ? lodgingNights : null,
                 depositPercent:
                   serviceType === "hotel" ? depositPercent : null,
+                lodgingRateProfile:
+                  serviceType === "hotel" ? nextLodgingRateProfile : null,
               }),
             },
           ),
@@ -1774,6 +1889,14 @@ export function ManagementApp() {
                 depositPercent:
                   serviceType === "hotel"
                     ? depositPercent ?? undefined
+                    : undefined,
+                lodgingRateProfile:
+                  serviceType === "hotel"
+                    ? nextLodgingRateProfile
+                    : undefined,
+                lodgingTableDailyRateCents:
+                  serviceType === "hotel"
+                    ? lodgingPricing.standardDailyRateCents
                     : undefined,
                 serviceType,
                 service: serviceLabels[serviceType],
@@ -2269,6 +2392,10 @@ export function ManagementApp() {
       recurrenceCount,
     );
     const priceCents = serviceType === "transport" ? (transportDirection === "round_trip" ? 1_000 : 500) : Math.max(0, Math.round(price * 100));
+    const nextLodgingRateProfile = lodgingRateProfile(
+      serviceDraftDaycareCustomer,
+      serviceDraftAdditionalDog,
+    );
     const paymentPreference: Booking["paymentPreference"] =
       creditServiceTypes.includes(serviceType as CreditServiceType) &&
       String(form.get("paymentPreference") ?? "invoice") === "credit"
@@ -2311,6 +2438,8 @@ export function ManagementApp() {
                 serviceType === "hotel" ? lodgingNights : undefined,
               depositPercent:
                 serviceType === "hotel" ? depositPercent : undefined,
+              lodgingRateProfile:
+                serviceType === "hotel" ? nextLodgingRateProfile : undefined,
               recurrence,
               recurrenceCount,
             }),
@@ -2353,6 +2482,12 @@ export function ManagementApp() {
             : undefined,
         lodgingNights: serviceType === "hotel" ? lodgingNights : undefined,
         depositPercent: serviceType === "hotel" ? depositPercent ?? undefined : undefined,
+        lodgingRateProfile:
+          serviceType === "hotel" ? nextLodgingRateProfile : undefined,
+        lodgingTableDailyRateCents:
+          serviceType === "hotel"
+            ? lodgingPricing.standardDailyRateCents
+            : undefined,
         dogId: dog.id,
         dogName: dog.name,
         customerId: dog.customerId,
@@ -2719,13 +2854,42 @@ export function ManagementApp() {
       form.get("daycareStartTime") ?? "",
     );
     const nextDaycareEndTime = String(form.get("daycareEndTime") ?? "");
-    for (const serviceType of ["hotel", ...creditServiceTypes] as const) {
+    const nextLodgingPricing: LodgingPricing = {
+      standardDailyRateCents: Math.round(
+        Number(form.get("hotelStandardDailyRate") ?? 0) * 100,
+      ),
+      daycareDailyRateCents: Math.round(
+        Number(form.get("hotelDaycareDailyRate") ?? 0) * 100,
+      ),
+      additionalDogDailyRateCents: Math.round(
+        Number(form.get("hotelAdditionalDogDailyRate") ?? 0) * 100,
+      ),
+      daycareAdditionalDogDailyRateCents: Math.round(
+        Number(form.get("hotelDaycareAdditionalDogDailyRate") ?? 0) * 100,
+      ),
+      longStayDiscountPercent: Number(
+        form.get("hotelLongStayDiscountPercent") ?? 0,
+      ),
+    };
+    next.hotel = nextLodgingPricing.standardDailyRateCents;
+    for (const serviceType of creditServiceTypes) {
       const cents = Math.round(Number(form.get(serviceType) ?? 0) * 100);
       if (!Number.isFinite(cents) || cents < 1) {
         setToast({ message: "Revise todos os valores antes de salvar." });
         return;
       }
       next[serviceType] = cents;
+    }
+    if (
+      Object.values(nextLodgingPricing)
+        .slice(0, 4)
+        .some((value) => !Number.isSafeInteger(value) || value < 1) ||
+      !Number.isInteger(nextLodgingPricing.longStayDiscountPercent) ||
+      nextLodgingPricing.longStayDiscountPercent < 0 ||
+      nextLodgingPricing.longStayDiscountPercent > 99
+    ) {
+      setToast({ message: "Revise os valores e o desconto da hospedagem." });
+      return;
     }
     if (
       !nextDaycareStartTime ||
@@ -2755,6 +2919,7 @@ export function ManagementApp() {
               },
               daycareStartTime: nextDaycareStartTime,
               daycareEndTime: nextDaycareEndTime,
+              lodgingPricing: nextLodgingPricing,
             }),
           }),
         {
@@ -2767,6 +2932,7 @@ export function ManagementApp() {
         setServicePrices(next);
         setDaycareStartTime(nextDaycareStartTime);
         setDaycareEndTime(nextDaycareEndTime);
+        setLodgingPricing(nextLodgingPricing);
       }
       return;
     }
@@ -2774,6 +2940,7 @@ export function ManagementApp() {
     setServicePrices(next);
     setDaycareStartTime(nextDaycareStartTime);
     setDaycareEndTime(nextDaycareEndTime);
+    setLodgingPricing(nextLodgingPricing);
     setToast({
       message:
         "Preços padrão salvos. Novos serviços já usarão os valores atualizados.",
@@ -3407,7 +3574,7 @@ export function ManagementApp() {
 
   async function registerInvoicePayment(
     paidAt = operationalToday,
-    withoutDiscount = false,
+    withoutLongStayDiscount = false,
   ) {
     if (!invoiceState?.invoice) return;
     const invoiceId = invoiceState.invoice.id;
@@ -3421,15 +3588,15 @@ export function ManagementApp() {
             creditsGranted: number;
           }>(`/api/invoices/${invoiceId}/payments`, {
             method: "POST",
-            body: JSON.stringify({ paidAt, withoutDiscount }),
+            body: JSON.stringify({ paidAt, withoutLongStayDiscount }),
           }),
         {
           refresh: true,
           successMessage:
             invoiceState.kind === "credit_package"
               ? "Pagamento registrado. Os créditos já estão disponíveis."
-              : withoutDiscount
-                ? "Pagamento sem desconto registrado e fatura concluída."
+              : withoutLongStayDiscount
+                ? "Pagamento registrado sem o desconto de longa estadia."
                 : "Pagamento registrado e fatura concluída.",
         },
       );
@@ -4164,6 +4331,7 @@ export function ManagementApp() {
           {view === "settings" && (
             <SettingsView
               prices={servicePrices}
+              lodgingPricing={lodgingPricing}
               daycareStartTime={daycareStartTime}
               daycareEndTime={daycareEndTime}
               onSave={saveDefaultPrices}
@@ -4429,6 +4597,42 @@ export function ManagementApp() {
                 </label>
                 <label className="check-field">
                   <input
+                    type="checkbox"
+                    checked={serviceDraftDaycareCustomer}
+                    onChange={(event) =>
+                      setServiceDraftDaycareCustomer(event.target.checked)
+                    }
+                  />
+                  <span>Aplicar diária para cliente de creche regular</span>
+                </label>
+                <label className="check-field">
+                  <input
+                    type="checkbox"
+                    checked={serviceDraftAdditionalDog}
+                    onChange={(event) =>
+                      setServiceDraftAdditionalDog(event.target.checked)
+                    }
+                  />
+                  <span>Aplicar diária para segundo cão ou mais nesta reserva</span>
+                </label>
+                <small className="field-help">
+                  {lodgingRateLabel(
+                    lodgingRateProfile(
+                      serviceDraftDaycareCustomer,
+                      serviceDraftAdditionalDog,
+                    ),
+                  )}: {formatCurrency(
+                    lodgingDailyRate(
+                      lodgingPricing,
+                      lodgingRateProfile(
+                        serviceDraftDaycareCustomer,
+                        serviceDraftAdditionalDog,
+                      ),
+                    ),
+                  )} por diária.
+                </small>
+                <label className="check-field">
+                  <input
                     name="hasDeposit"
                     type="checkbox"
                     checked={serviceDraftHasDeposit}
@@ -4456,7 +4660,7 @@ export function ManagementApp() {
             <label className="field">
               <span>Valor aplicado (R$) *</span>
               <input
-                key={`${serviceDraftType}-${serviceDraftTransportDirection}-${serviceDraftLodgingNights}`}
+                key={`${serviceDraftType}-${serviceDraftTransportDirection}-${serviceDraftLodgingNights}-${serviceDraftDaycareCustomer}-${serviceDraftAdditionalDog}`}
                 name="price"
                 type="number"
                 min="0"
@@ -4467,7 +4671,13 @@ export function ManagementApp() {
                       ? 10
                       : 5
                     : serviceDraftType === "hotel"
-                      ? (servicePrices.hotel *
+                      ? (lodgingDailyRate(
+                          lodgingPricing,
+                          lodgingRateProfile(
+                            serviceDraftDaycareCustomer,
+                            serviceDraftAdditionalDog,
+                          ),
+                        ) *
                           serviceDraftLodgingNights) /
                         100
                       : servicePrices[serviceDraftType] / 100
@@ -4760,6 +4970,42 @@ export function ManagementApp() {
                 </label>
                 <label className="check-field">
                   <input
+                    type="checkbox"
+                    checked={editDraftDaycareCustomer}
+                    onChange={(event) =>
+                      setEditDraftDaycareCustomer(event.target.checked)
+                    }
+                  />
+                  <span>Aplicar diária para cliente de creche regular</span>
+                </label>
+                <label className="check-field">
+                  <input
+                    type="checkbox"
+                    checked={editDraftAdditionalDog}
+                    onChange={(event) =>
+                      setEditDraftAdditionalDog(event.target.checked)
+                    }
+                  />
+                  <span>Aplicar diária para segundo cão ou mais nesta reserva</span>
+                </label>
+                <small className="field-help">
+                  {lodgingRateLabel(
+                    lodgingRateProfile(
+                      editDraftDaycareCustomer,
+                      editDraftAdditionalDog,
+                    ),
+                  )}: {formatCurrency(
+                    lodgingDailyRate(
+                      lodgingPricing,
+                      lodgingRateProfile(
+                        editDraftDaycareCustomer,
+                        editDraftAdditionalDog,
+                      ),
+                    ),
+                  )} por diária.
+                </small>
+                <label className="check-field">
+                  <input
                     name="hasDeposit"
                     type="checkbox"
                     checked={editDraftHasDeposit}
@@ -4787,7 +5033,7 @@ export function ManagementApp() {
             <label className="field">
               <span>Valor aplicado (R$) *</span>
               <input
-                key={`${editDraftType}-${editDraftTransportDirection}-${editDraftLodgingNights}`}
+                key={`${editDraftType}-${editDraftTransportDirection}-${editDraftLodgingNights}-${editDraftDaycareCustomer}-${editDraftAdditionalDog}`}
                 name="price"
                 type="number"
                 min="0"
@@ -4801,7 +5047,13 @@ export function ManagementApp() {
                         editDraftLodgingNights !==
                           bookingToEdit.lodgingNights
                       ? (
-                          (servicePrices.hotel *
+                          (lodgingDailyRate(
+                            lodgingPricing,
+                            lodgingRateProfile(
+                              editDraftDaycareCustomer,
+                              editDraftAdditionalDog,
+                            ),
+                          ) *
                             editDraftLodgingNights) /
                           100
                         ).toFixed(2)
@@ -7836,27 +8088,23 @@ function BillingView({
 
 function SettingsView({
   prices,
+  lodgingPricing,
   daycareStartTime,
   daycareEndTime,
   onSave,
 }: {
   prices: Record<ServiceType, number>;
+  lodgingPricing: LodgingPricing;
   daycareStartTime: string;
   daycareEndTime: string;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const settings: {
-    serviceType: "hotel" | CreditServiceType;
+    serviceType: CreditServiceType;
     title: string;
     description: string;
     unit: string;
   }[] = [
-    {
-      serviceType: "hotel",
-      title: "Diária do hotel",
-      description: "Valor sugerido para cada diária de hospedagem.",
-      unit: "por diária",
-    },
     {
       serviceType: "daycare",
       title: "Creche",
@@ -7934,6 +8182,32 @@ function SettingsView({
             </label>
           ))}
         </div>
+        <section className="lodging-pricing-settings">
+          <div>
+            <p className="section-kicker">Hospedagem</p>
+            <h3>Diárias por condição</h3>
+            <span>
+              A condição é escolhida em cada reserva; os valores abaixo são o padrão.
+            </span>
+          </div>
+          <div className="price-settings-grid">
+            {[
+              ["hotelStandardDailyRate", "Diária padrão", lodgingPricing.standardDailyRateCents],
+              ["hotelDaycareDailyRate", "Cliente de creche", lodgingPricing.daycareDailyRateCents],
+              ["hotelAdditionalDogDailyRate", "Segundo cão ou mais", lodgingPricing.additionalDogDailyRateCents],
+              ["hotelDaycareAdditionalDogDailyRate", "Creche · segundo cão ou mais", lodgingPricing.daycareAdditionalDogDailyRateCents],
+            ].map(([name, title, cents]) => (
+              <label className="price-setting-card" key={String(name)}>
+                <span><strong>{title}</strong><small>por diária</small></span>
+                <span className="currency-input"><span>R$</span><input name={String(name)} type="number" min="0.01" step="0.01" defaultValue={(Number(cents) / 100).toFixed(2)} required /></span>
+              </label>
+            ))}
+            <label className="price-setting-card">
+              <span><strong>Longa estadia</strong><small>Aplicado a partir de 10 diárias.</small></span>
+              <span className="currency-input"><input name="hotelLongStayDiscountPercent" type="number" min="0" max="99" step="1" defaultValue={lodgingPricing.longStayDiscountPercent} required /><span>%</span></span>
+            </label>
+          </div>
+        </section>
         <div className="daycare-hours-settings">
           <div>
             <p className="section-kicker">Horário padrão da creche</p>
@@ -8935,7 +9209,7 @@ function InvoiceDialog({
   onIssue: () => void;
   onRegisterPayment: (
     paidAt: string,
-    withoutDiscount?: boolean,
+    withoutLongStayDiscount?: boolean,
   ) => void | Promise<void>;
   onVoid: () => void | Promise<void>;
   onDeliveryConfirmed: (
@@ -8949,7 +9223,7 @@ function InvoiceDialog({
   const [deliveryBusy, setDeliveryBusy] =
     useState<InvoiceDeliveryChannel | null>(null);
   const [paidAt, setPaidAt] = useState(operationalToday);
-  const [registerWithoutDiscount, setRegisterWithoutDiscount] =
+  const [registerWithoutLongStayDiscount, setRegisterWithoutLongStayDiscount] =
     useState(false);
 
   async function handleDelivery(channel: InvoiceDeliveryChannel) {
@@ -9102,8 +9376,11 @@ function InvoiceDialog({
     const hasLodging = rows.some(
       (row) => row.tableAmountCents !== undefined,
     );
-    const canRegisterWithoutDiscount =
-      hasLodging && tableTotalCents > state.amountCents;
+    const longStayDiscountCents = rows.reduce(
+      (total, row) => total + Math.max(0, row.longStayDiscountCents ?? 0),
+      0,
+    );
+    const canRemoveLongStayDiscount = longStayDiscountCents > 0;
     const isPaid = state.invoice?.status === "paid";
     return (
       <Dialog
@@ -9136,6 +9413,11 @@ function InvoiceDialog({
                       Valor tabelado: {formatCurrency(row.tableAmountCents)}
                     </small>
                   )}
+                  {(row.longStayDiscountCents ?? 0) > 0 && (
+                    <small className="invoice-table-value">
+                      Desconto de longa estadia ({row.longStayDiscountPercent}%): −{formatCurrency(row.longStayDiscountCents!)}
+                    </small>
+                  )}
                 </span>
                 <strong>{formatCurrency(row.amountCents)}</strong>
               </div>
@@ -9147,7 +9429,7 @@ function InvoiceDialog({
               Total da fatura
               {hasLodging && (
                 <small>
-                  Total sem desconto: {formatCurrency(tableTotalCents)}
+                  Total pela diária padrão: {formatCurrency(tableTotalCents)}
                 </small>
               )}
             </span>
@@ -9223,19 +9505,19 @@ function InvoiceDialog({
               <span>
                 Use esta ação somente depois de confirmar o recebimento do valor.
               </span>
-              {canRegisterWithoutDiscount && (
+              {canRemoveLongStayDiscount && (
                 <label className="invoice-without-discount">
                   <input
                     type="checkbox"
-                    checked={registerWithoutDiscount}
+                    checked={registerWithoutLongStayDiscount}
                     onChange={(event) =>
-                      setRegisterWithoutDiscount(event.target.checked)
+                      setRegisterWithoutLongStayDiscount(event.target.checked)
                     }
                   />
                   <span>
-                    Registrar pagamento sem desconto
+                    Não aplicar desconto por longa estadia
                     <small>
-                      Receber {formatCurrency(tableTotalCents)} conforme tabela
+                      Receber {formatCurrency(state.amountCents + longStayDiscountCents)} sem esse desconto
                     </small>
                   </span>
                 </label>
@@ -9258,14 +9540,12 @@ function InvoiceDialog({
                 type="button"
                 disabled={busy || !paidAt}
                 onClick={() =>
-                  onRegisterPayment(paidAt, registerWithoutDiscount)
+                  onRegisterPayment(paidAt, registerWithoutLongStayDiscount)
                 }
               >
                 {busy
                   ? "Registrando…"
-                  : registerWithoutDiscount
-                    ? "Registrar sem desconto"
-                    : "Registrar pagamento"}
+                  : "Registrar pagamento"}
               </button>
             )}
           </div>

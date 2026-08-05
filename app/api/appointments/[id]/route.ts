@@ -4,6 +4,7 @@ import {
   appointmentItems,
   appointments,
   auditEvents,
+  establishments,
   serviceCatalog,
 } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
@@ -35,6 +36,33 @@ function isAppointmentStatus(value: string): value is AppointmentStatus {
 
 const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
 const operationalTimePattern = /^(?:\d{2}:\d{2}|manha|tarde|noite)$/;
+const lodgingRateProfiles = [
+  "standard",
+  "daycare",
+  "additional_dog",
+  "daycare_additional_dog",
+] as const;
+type LodgingRateProfile = (typeof lodgingRateProfiles)[number];
+
+function isLodgingRateProfile(value: unknown): value is LodgingRateProfile {
+  return typeof value === "string" && lodgingRateProfiles.includes(value as LodgingRateProfile);
+}
+
+function lodgingDailyRateCents(
+  establishment: typeof establishments.$inferSelect,
+  profile: LodgingRateProfile,
+) {
+  switch (profile) {
+    case "daycare":
+      return establishment.hotelDaycareDailyRateCents;
+    case "additional_dog":
+      return establishment.hotelAdditionalDogDailyRateCents;
+    case "daycare_additional_dog":
+      return establishment.hotelDaycareAdditionalDogDailyRateCents;
+    default:
+      return establishment.hotelStandardDailyRateCents;
+  }
+}
 
 function operationalTimeOrder(value: string) {
   if (value === "manha") return 8 * 60;
@@ -854,6 +882,14 @@ export async function PATCH(
                 ? body.depositPercent
                 : Number.NaN
           : null;
+      const lodgingRateProfile: LodgingRateProfile | null =
+        service.code === "hotel"
+          ? body.lodgingRateProfile === undefined
+            ? (appointment.lodgingRateProfile ?? "standard") as LodgingRateProfile
+            : isLodgingRateProfile(body.lodgingRateProfile)
+              ? body.lodgingRateProfile
+              : null
+          : null;
       if (service.code === "hotel") {
         const calendarDays = Math.round(
           (Date.parse(`${endDate}T00:00:00.000Z`) -
@@ -889,11 +925,27 @@ export async function PATCH(
             "Informe um sinal entre 1% e 99%.",
           );
         }
+        if (!lodgingRateProfile) {
+          throw new HttpError(
+            400,
+            "invalid_lodging_rate_profile",
+            "Escolha uma condição de diária válida para a hospedagem.",
+          );
+        }
+      }
+      const [establishment] = await db
+        .select()
+        .from(establishments)
+        .where(eq(establishments.id, establishmentId))
+        .limit(1);
+      if (!establishment) {
+        throw new HttpError(404, "establishment_not_found", "A unidade não foi encontrada.");
       }
       const catalogPriceCents =
         service.code === "hotel"
           ? Math.round(
-              service.basePriceCents * (lodgingNights ?? 1),
+              lodgingDailyRateCents(establishment, lodgingRateProfile!) *
+                (lodgingNights ?? 1),
             )
           : service.code === "taxi_dog"
             ? direction === "round_trip"
@@ -924,6 +976,11 @@ export async function PATCH(
             endTime,
             lodgingNights,
             depositPercent,
+            lodgingRateProfile,
+            lodgingTableDailyRateCents:
+              service.code === "hotel"
+                ? establishment.hotelStandardDailyRateCents
+                : null,
             internalNotes,
             updatedAt: now,
           })
@@ -969,6 +1026,7 @@ export async function PATCH(
           internalNotes,
           lodgingNights,
           depositPercent,
+          lodgingRateProfile,
           serviceCatalogId: service.id,
           serviceName: service.name,
           priceCents,

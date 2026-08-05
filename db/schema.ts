@@ -17,6 +17,25 @@ export const establishments = sqliteTable("establishments", {
   timezone: text("timezone").notNull().default("America/Sao_Paulo"),
   daycareStartTime: text("daycare_start_time").notNull().default("07:30"),
   daycareEndTime: text("daycare_end_time").notNull().default("19:30"),
+  hotelStandardDailyRateCents: integer("hotel_standard_daily_rate_cents")
+    .notNull()
+    .default(11_000),
+  hotelDaycareDailyRateCents: integer("hotel_daycare_daily_rate_cents")
+    .notNull()
+    .default(10_000),
+  hotelAdditionalDogDailyRateCents: integer(
+    "hotel_additional_dog_daily_rate_cents",
+  )
+    .notNull()
+    .default(9_900),
+  hotelDaycareAdditionalDogDailyRateCents: integer(
+    "hotel_daycare_additional_dog_daily_rate_cents",
+  )
+    .notNull()
+    .default(9_000),
+  hotelLongStayDiscountPercent: integer("hotel_long_stay_discount_percent")
+    .notNull()
+    .default(5),
   cashMonthStartDay: integer("cash_month_start_day").notNull().default(1),
   createdAt: text("created_at").notNull().default(now),
   updatedAt: text("updated_at").notNull().default(now),
@@ -466,6 +485,10 @@ export const appointments = sqliteTable(
     endTime: text("end_time"),
     lodgingNights: integer("lodging_nights"),
     depositPercent: integer("deposit_percent"),
+    lodgingRateProfile: text("lodging_rate_profile", {
+      enum: ["standard", "daycare", "additional_dog", "daycare_additional_dog"],
+    }),
+    lodgingTableDailyRateCents: integer("lodging_table_daily_rate_cents"),
     status: text("status", {
       enum: [
         "scheduled",
@@ -942,6 +965,12 @@ export const invoiceItems = sqliteTable(
     serviceDateSnapshot: text("service_date_snapshot").notNull(),
     descriptionSnapshot: text("description_snapshot").notNull(),
     amountCents: integer("amount_cents").notNull(),
+    lodgingLongStayDiscountPercent: integer(
+      "lodging_long_stay_discount_percent",
+    ),
+    lodgingLongStayDiscountCents: integer("lodging_long_stay_discount_cents")
+      .notNull()
+      .default(0),
     createdAt: text("created_at").notNull().default(now),
   },
   (table) => [

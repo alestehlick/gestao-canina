@@ -71,6 +71,13 @@
       "when": 1785920400000,
       "tag": "0009_audit_period_index",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1786010400000,
+      "tag": "0010_lodging_pricing",
+      "breakpoints": true
     }
   ]
 }

@@ -68,6 +68,12 @@ export type Booking = {
   endDate?: string;
   lodgingNights?: number;
   depositPercent?: number;
+  lodgingRateProfile?:
+    | "standard"
+    | "daycare"
+    | "additional_dog"
+    | "daycare_additional_dog";
+  lodgingTableDailyRateCents?: number;
   dogId: string;
   dogName: string;
   customerId: string;
@@ -130,6 +136,10 @@ export type Invoice = {
       checkOutDate: string;
       nights: number;
       dailyRateCents?: number;
+      tableDailyRateCents?: number;
+      rateProfile?: string;
+      longStayDiscountPercent?: number;
+      longStayDiscountCents?: number;
       depositPercent?: number;
     };
   }[];
@@ -153,6 +163,10 @@ export type BillableService = {
     checkOutDate: string;
     nights: number;
     dailyRateCents?: number;
+    tableDailyRateCents?: number;
+    rateProfile?: string;
+    longStayDiscountPercent?: number;
+    longStayDiscountCents?: number;
     depositPercent?: number;
   };
 };

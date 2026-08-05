@@ -83,6 +83,10 @@ type PortalData = {
       lodgingEndDate: string | null;
       lodgingNights: number | null;
       lodgingDailyRateCents: number | null;
+      lodgingTableDailyRateCents: number | null;
+      lodgingRateProfile: string | null;
+      lodgingLongStayDiscountPercent: number | null;
+      lodgingLongStayDiscountCents: number;
       depositPercent: number | null;
     }>;
   }>;
@@ -164,12 +168,13 @@ function invoiceItemTableAmount(
   if (
     item.serviceCode !== "hotel" ||
     item.lodgingNights === null ||
-    !item.lodgingDailyRateCents
+    !(item.lodgingTableDailyRateCents ?? item.lodgingDailyRateCents)
   ) {
     return undefined;
   }
   const fullStayCents = Math.round(
-    item.lodgingNights * item.lodgingDailyRateCents,
+    item.lodgingNights *
+      (item.lodgingTableDailyRateCents ?? item.lodgingDailyRateCents!),
   );
   if (item.serviceName === "Sinal da hospedagem" && item.depositPercent) {
     return Math.round((fullStayCents * item.depositPercent) / 100);
@@ -433,6 +438,16 @@ export default function CustomerPortal() {
             align: "right",
           });
         }
+        if (item.lodgingLongStayDiscountCents > 0) {
+          pdf.setTextColor(128, 134, 131);
+          pdf.setFontSize(7);
+          pdf.text(
+            `Longa estadia (${item.lodgingLongStayDiscountPercent}%): −${money(item.lodgingLongStayDiscountCents)}`,
+            192,
+            y + (tableAmountCents !== undefined ? 8 : 4),
+            { align: "right" },
+          );
+        }
         pdf.setTextColor(102, 108, 104);
         pdf.setFontSize(8.5);
         const detailLines = pdf.splitTextToSize(invoiceItemDetail(item), 150) as string[];
@@ -440,7 +455,9 @@ export default function CustomerPortal() {
         pdf.setDrawColor(232, 234, 232);
         const rowHeight = Math.max(
           11 + detailLines.length * 4,
-          tableAmountCents !== undefined ? 12 : 0,
+          tableAmountCents !== undefined || item.lodgingLongStayDiscountCents > 0
+            ? 16
+            : 0,
         );
         pdf.line(18, y + rowHeight, 192, y + rowHeight);
         y += rowHeight + 8;
@@ -460,7 +477,7 @@ export default function CustomerPortal() {
         pdf.setTextColor(112, 118, 115);
         pdf.setFont("helvetica", "normal");
         pdf.setFontSize(7.5);
-        pdf.text("Total sem desconto", 145, y + 14);
+        pdf.text("Total pela diária padrão", 145, y + 14);
         pdf.text(money(tableTotalCents), 192, y + 14, { align: "right" });
       }
       const safeName = (data?.account.displayName ?? "cliente")

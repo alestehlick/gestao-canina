@@ -52,6 +52,14 @@ export async function GET(request: Request) {
       .select({
         daycareStartTime: establishments.daycareStartTime,
         daycareEndTime: establishments.daycareEndTime,
+        hotelStandardDailyRateCents: establishments.hotelStandardDailyRateCents,
+        hotelDaycareDailyRateCents: establishments.hotelDaycareDailyRateCents,
+        hotelAdditionalDogDailyRateCents:
+          establishments.hotelAdditionalDogDailyRateCents,
+        hotelDaycareAdditionalDogDailyRateCents:
+          establishments.hotelDaycareAdditionalDogDailyRateCents,
+        hotelLongStayDiscountPercent:
+          establishments.hotelLongStayDiscountPercent,
       })
       .from(establishments)
       .where(eq(establishments.id, identity.establishmentId!))
@@ -63,6 +71,24 @@ export async function GET(request: Request) {
         daycareStartTime: "07:30",
         daycareEndTime: "19:30",
       },
+      lodgingPricing: establishment
+        ? {
+            standardDailyRateCents: establishment.hotelStandardDailyRateCents,
+            daycareDailyRateCents: establishment.hotelDaycareDailyRateCents,
+            additionalDogDailyRateCents:
+              establishment.hotelAdditionalDogDailyRateCents,
+            daycareAdditionalDogDailyRateCents:
+              establishment.hotelDaycareAdditionalDogDailyRateCents,
+            longStayDiscountPercent:
+              establishment.hotelLongStayDiscountPercent,
+          }
+        : {
+            standardDailyRateCents: 11_000,
+            daycareDailyRateCents: 10_000,
+            additionalDogDailyRateCents: 9_900,
+            daycareAdditionalDogDailyRateCents: 9_000,
+            longStayDiscountPercent: 5,
+          },
     });
   } catch (error) {
     return errorResponse(error, requestId);
@@ -105,6 +131,53 @@ export async function PATCH(request: Request) {
         400,
         "empty_update",
         "Informe ao menos um preço para atualizar.",
+      );
+    }
+    const rawLodgingPricing = body.lodgingPricing;
+    if (
+      !rawLodgingPricing ||
+      typeof rawLodgingPricing !== "object" ||
+      Array.isArray(rawLodgingPricing)
+    ) {
+      throw new HttpError(
+        400,
+        "invalid_lodging_pricing",
+        "Informe todos os valores da hospedagem.",
+      );
+    }
+    const lodgingPricing = rawLodgingPricing as Record<string, unknown>;
+    const lodgingRateFields = [
+      "standardDailyRateCents",
+      "daycareDailyRateCents",
+      "additionalDogDailyRateCents",
+      "daycareAdditionalDogDailyRateCents",
+    ] as const;
+    for (const field of lodgingRateFields) {
+      const value = lodgingPricing[field];
+      if (
+        typeof value !== "number" ||
+        !Number.isSafeInteger(value) ||
+        value < 1 ||
+        value > 100_000_000
+      ) {
+        throw new HttpError(
+          400,
+          "invalid_lodging_rate",
+          "Um dos valores de diária da hospedagem é inválido.",
+        );
+      }
+    }
+    const longStayDiscountPercent = lodgingPricing.longStayDiscountPercent;
+    if (
+      typeof longStayDiscountPercent !== "number" ||
+      !Number.isInteger(longStayDiscountPercent) ||
+      longStayDiscountPercent < 0 ||
+      longStayDiscountPercent > 99
+    ) {
+      throw new HttpError(
+        400,
+        "invalid_lodging_discount",
+        "Informe um desconto de longa estadia entre 0% e 99%.",
       );
     }
     const daycareStartTime =
@@ -171,6 +244,13 @@ export async function PATCH(request: Request) {
         .set({
           daycareStartTime,
           daycareEndTime,
+          hotelStandardDailyRateCents: lodgingPricing.standardDailyRateCents as number,
+          hotelDaycareDailyRateCents: lodgingPricing.daycareDailyRateCents as number,
+          hotelAdditionalDogDailyRateCents:
+            lodgingPricing.additionalDogDailyRateCents as number,
+          hotelDaycareAdditionalDogDailyRateCents:
+            lodgingPricing.daycareAdditionalDogDailyRateCents as number,
+          hotelLongStayDiscountPercent: longStayDiscountPercent,
           updatedAt: sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
         })
         .where(eq(establishments.id, establishmentId)),
@@ -187,6 +267,7 @@ export async function PATCH(request: Request) {
           updates,
           daycareStartTime,
           daycareEndTime,
+          lodgingPricing,
         }),
       }),
     ]);
@@ -196,6 +277,7 @@ export async function PATCH(request: Request) {
         updates.map(({ code, priceCents }) => [code, priceCents]),
       ),
       daycareHours: { daycareStartTime, daycareEndTime },
+      lodgingPricing,
     });
   } catch (error) {
     return errorResponse(error, requestId);

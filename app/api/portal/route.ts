@@ -211,7 +211,16 @@ export async function GET(request: Request) {
           lodgingStartDate: appointments.startDate,
           lodgingEndDate: appointments.endDate,
           lodgingNights: appointments.lodgingNights,
-          lodgingDailyRateCents: serviceCatalog.basePriceCents,
+          lodgingDailyRateCents: sql<number | null>`case
+            when ${appointments.lodgingNights} is null or ${appointments.lodgingNights} = 0 then null
+            else round(${appointmentItems.totalCents} * 1.0 / ${appointments.lodgingNights})
+          end`,
+          lodgingTableDailyRateCents: appointments.lodgingTableDailyRateCents,
+          lodgingRateProfile: appointments.lodgingRateProfile,
+          lodgingLongStayDiscountPercent:
+            invoiceItems.lodgingLongStayDiscountPercent,
+          lodgingLongStayDiscountCents:
+            invoiceItems.lodgingLongStayDiscountCents,
           depositPercent: appointments.depositPercent,
         })
         .from(invoiceItems)

@@ -120,6 +120,7 @@ export type Invoice = {
   paidAt?: string;
   sentBy?: ("whatsapp" | "email")[];
   lastSentAt?: string;
+  internalNote?: string;
   items: string;
   sourceType?: "services" | "credit_package" | "lodging_deposit" | "lodging_balance";
   cashEntryId?: string;

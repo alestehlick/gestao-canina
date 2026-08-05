@@ -2390,6 +2390,15 @@ h3 {
   font-size: 0.76rem;
 }
 
+.invoice-entry-note {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-style: italic;
+  line-height: 1.35;
+}
+
 .data-table tbody tr:last-child td {
   border-bottom: 0;
 }
@@ -4388,6 +4397,41 @@ h3 {
 .invoice-share-note p {
   color: var(--muted);
   font-size: 0.72rem;
+}
+
+.invoice-internal-note {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 14px;
+}
+
+.invoice-internal-note > div:first-child,
+.invoice-note-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.invoice-internal-note > div:first-child > span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 720;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.invoice-internal-note textarea {
+  min-height: 66px;
+  resize: vertical;
+}
+
+.invoice-internal-note p {
+  color: var(--ink);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 .simulation-strip {

@@ -85,6 +85,13 @@
       "when": 1786020000000,
       "tag": "0011_invoice_compensation",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1786023600000,
+      "tag": "0012_invoice_internal_notes",
+      "breakpoints": true
     }
   ]
 }

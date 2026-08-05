@@ -706,6 +706,7 @@ export const invoices = sqliteTable(
     issuedAt: text("issued_at"),
     deliveryChannelsJson: text("delivery_channels_json").notNull().default("[]"),
     lastSentAt: text("last_sent_at"),
+    internalNote: text("internal_note"),
     dueDate: text("due_date").notNull(),
     totalCents: integer("total_cents").notNull(),
     sourceType: text("source_type", {

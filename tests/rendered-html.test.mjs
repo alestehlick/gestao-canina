@@ -333,7 +333,7 @@ test("mantém o primeiro acesso e o login protegidos sem bloqueio global da cont
 });
 
 test("preserva as regras de faturas, sinais e créditos", async () => {
-  const [invoices, payments, deposit, balance, lodgingHelper, consume, purchases, prices, workspaceData, managementApp] = await Promise.all([
+  const [invoices, payments, deposit, balance, lodgingHelper, consume, purchases, prices, workspaceData, managementApp, invoiceNotes, invoiceNotesMigration] = await Promise.all([
     readFile(new URL("../app/api/invoices/route.ts", import.meta.url), "utf8"),
     readFile(
       new URL("../app/api/invoices/[id]/payments/route.ts", import.meta.url),
@@ -363,6 +363,14 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
     readFile(new URL("../lib/workspace-data.ts", import.meta.url), "utf8"),
     readFile(
       new URL("../app/components/management-app.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/api/invoices/[id]/note/route.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../drizzle/0012_invoice_internal_notes.sql", import.meta.url),
       "utf8",
     ),
   ]);
@@ -400,6 +408,11 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
   assert.match(managementApp, /booking\.serviceType !== "transport"/);
   assert.match(managementApp, /agenda-card[\s\S]*without-time/);
   assert.doesNotMatch(managementApp, /Usará 1 crédito ao concluir/);
+  assert.match(managementApp, /Observação interna/);
+  assert.match(workspaceData, /internalNote: invoice\.internalNote/);
+  assert.match(invoiceNotes, /requireIdentity\(request, \["owner", "finance"\]\)/);
+  assert.match(invoiceNotes, /invoice\.note_updated/);
+  assert.match(invoiceNotesMigration, /ADD COLUMN internal_note text/);
 });
 
 test("mantém o manual e os detalhes das faturas disponíveis", async () => {

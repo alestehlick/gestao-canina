@@ -222,6 +222,7 @@ export type WorkspaceInvoice = {
   issuedAt: string | null;
   deliveryChannelsJson: string;
   lastSentAt: string | null;
+  internalNote: string | null;
   dueDate: string;
   totalCents: number;
   sourceType:
@@ -898,6 +899,7 @@ export function mapWorkspaceInvoices(
             channel === "whatsapp" || channel === "email",
         ),
         lastSentAt: invoice.lastSentAt ?? undefined,
+        internalNote: invoice.internalNote ?? undefined,
         items: invoiceItemsLabel(invoice, purchase, service),
         sourceType: invoice.sourceType,
         cashEntryId: invoice.cashEntryId ?? undefined,
@@ -1303,6 +1305,7 @@ function activityActionLabel(action: string) {
     "invoice.created": "Cobrança preparada",
     "invoice.payment_recorded": "Pagamento registrado",
     "invoice.sent": "Fatura enviada",
+    "invoice.note_updated": "Observação da fatura atualizada",
     "invoice.voided": "Fatura cancelada",
     "cash.entry_created": "Lançamento incluído no Caixa",
     "cash.entry_updated": "Lançamento do Caixa atualizado",
@@ -1442,15 +1445,20 @@ function invoiceItemsLabel(
   service: WorkspaceService | undefined,
 ) {
   if (invoice.items?.length) {
-    const labels = invoice.items.map(
-      (item) =>
-        item.descriptionSnapshot ||
-        `${item.serviceNameSnapshot} de ${item.dogNameSnapshot}`,
-    );
-    if (labels.length === 1) return labels[0];
-    const others = labels.length - 1;
-    return `${labels[0]} e ${others} ${
-      others === 1 ? "outro serviço" : "outros serviços"
+    const dogNames = [...new Set(invoice.items.map((item) => item.dogNameSnapshot))]
+      .filter(Boolean);
+    const firstItem = invoice.items[0];
+    if (invoice.items.length === 1) {
+      return `${firstItem.dogNameSnapshot} · ${firstItem.serviceNameSnapshot}`;
+    }
+    const dogsLabel =
+      dogNames.length === 1
+        ? dogNames[0]
+        : `${dogNames.slice(0, 2).join(" · ")}${
+            dogNames.length > 2 ? ` + ${dogNames.length - 2} cães` : ""
+          }`;
+    return `${dogsLabel} · ${invoice.items.length} ${
+      invoice.items.length === 1 ? "serviço" : "serviços"
     }`;
   }
 

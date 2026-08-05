@@ -455,6 +455,26 @@ function operationalTimeOrder(value: string) {
   return hours * 60 + minutes;
 }
 
+function agendaServiceOrder(serviceType: ServiceType) {
+  if (serviceType === "transport") return 0;
+  if (serviceType === "bath" || serviceType === "grooming") return 1;
+  if (serviceType === "daycare") return 2;
+  if (serviceType === "hotel") return 3;
+  return 4;
+}
+
+function agendaBookingOrder(left: Booking, right: Booking) {
+  const serviceDifference =
+    agendaServiceOrder(left.serviceType) - agendaServiceOrder(right.serviceType);
+  if (serviceDifference !== 0) return serviceDifference;
+
+  const leftTime = operationalTimeOrder(left.time) ?? Number.MAX_SAFE_INTEGER;
+  const rightTime = operationalTimeOrder(right.time) ?? Number.MAX_SAFE_INTEGER;
+  if (leftTime !== rightTime) return leftTime - rightTime;
+
+  return left.dogName.localeCompare(right.dogName, "pt-BR");
+}
+
 function invalidTimeOrder(start: string, end: string) {
   const startOrder = operationalTimeOrder(start);
   const endOrder = operationalTimeOrder(end);
@@ -6276,7 +6296,7 @@ function TodayView({
   );
   const filteredBookings = filterBookings(dayBookings, agendaFilter).filter(
     (booking) => booking.status !== "cancelled",
-  );
+  ).sort(agendaBookingOrder);
   const isToday = selectedDate === operationalToday;
   const alertsForDay = new Set(
     visibleBookings

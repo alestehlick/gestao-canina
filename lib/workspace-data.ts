@@ -1467,9 +1467,17 @@ function invoiceItemsLabel(
     const serviceName = type ? serviceLabels[type] : service?.name;
     const unitLabel =
       purchase.creditUnits === 1 ? "1 crédito" : `${purchase.creditUnits} créditos`;
-    return `${purchase.packageNameSnapshot} · ${unitLabel}${
-      serviceName ? ` de ${serviceName}` : ""
-    }`;
+    const creditDetail = `${unitLabel}${serviceName ? ` de ${serviceName}` : ""}`;
+    const compact = (value: string) =>
+      value
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim();
+    return compact(purchase.packageNameSnapshot).includes(compact(creditDetail))
+      ? purchase.packageNameSnapshot
+      : `${purchase.packageNameSnapshot} · ${creditDetail}`;
   }
 
   return invoice.sourceType === "credit_package"

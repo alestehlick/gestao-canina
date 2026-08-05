@@ -411,6 +411,7 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
   assert.match(managementApp, /Adicionar nota/);
   assert.match(managementApp, /invoice-entry-note-editor/);
   assert.match(workspaceData, /internalNote: invoice\.internalNote/);
+  assert.match(workspaceData, /packageNameSnapshot\)\.includes\(compact\(creditDetail\)\)/);
   assert.match(invoiceNotes, /requireIdentity\(request, \["owner", "finance"\]\)/);
   assert.match(invoiceNotes, /invoice\.note_updated/);
   assert.match(invoiceNotesMigration, /ADD COLUMN internal_note text/);

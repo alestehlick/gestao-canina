@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useEffectEvent,
@@ -4454,6 +4455,7 @@ export function ManagementApp() {
               onAddCredits={() => openCreditPackage()}
               onOpenReceipt={openReceipt}
               onToggleCash={toggleInvoiceCash}
+              onSaveNote={saveInvoiceNote}
               receivedLast30DaysCents={
                 workspacePayload?.billing.receivedLast30DaysCents
               }
@@ -5952,7 +5954,6 @@ export function ManagementApp() {
           onRegisterPayment={registerInvoicePayment}
           onVoid={voidInvoice}
           onDeliveryConfirmed={markInvoiceDelivered}
-          onSaveNote={saveInvoiceNote}
           onFeedback={(message) => setToast({ message })}
           longStayDiscountPercent={lodgingPricing.longStayDiscountPercent}
           liveMode={runtimeMode === "ready"}
@@ -7935,6 +7936,7 @@ function BillingView({
   onAddCredits,
   onOpenReceipt,
   onToggleCash,
+  onSaveNote,
   receivedLast30DaysCents,
   receivedLast30DaysCount,
 }: {
@@ -7953,9 +7955,13 @@ function BillingView({
   onAddCredits: () => void;
   onOpenReceipt: (receipt: ServiceReceipt) => void;
   onToggleCash: (invoice: Invoice) => void;
+  onSaveNote: (invoiceId: string, note: string) => Promise<boolean>;
   receivedLast30DaysCents?: number;
   receivedLast30DaysCount?: number;
 }) {
+  const [noteEditorInvoiceId, setNoteEditorInvoiceId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [noteSaving, setNoteSaving] = useState(false);
   const selectedTotal = billableServices
     .filter((item) => selectedBillables.includes(item.id))
     .reduce((total, item) => total + item.amountCents, 0);
@@ -7996,6 +8002,19 @@ function BillingView({
   const awaitingPackages = creditPurchases.filter(
     (purchase) => purchase.status === "awaiting_payment",
   ).length;
+
+  function openInvoiceNote(invoice: Invoice) {
+    setNoteEditorInvoiceId(invoice.id);
+    setNoteDraft(invoice.internalNote ?? "");
+  }
+
+  async function saveInvoiceNote(invoiceId: string) {
+    if (noteSaving) return;
+    setNoteSaving(true);
+    const saved = await onSaveNote(invoiceId, noteDraft);
+    setNoteSaving(false);
+    if (saved) setNoteEditorInvoiceId(null);
+  }
 
   return (
     <div className="billing-page">
@@ -8145,18 +8164,14 @@ function BillingView({
                 </thead>
                 <tbody>
                   {invoices.map((invoice) => (
-                    <tr key={invoice.id}>
+                    <Fragment key={invoice.id}>
+                    <tr>
                       <td>#{invoice.number}</td>
                       <td>
                         <strong>{invoice.customerName}</strong>
                       </td>
                       <td>
                         <span>{invoice.items}</span>
-                        {invoice.internalNote && (
-                          <small className="invoice-entry-note">
-                            {invoice.internalNote}
-                          </small>
-                        )}
                       </td>
                       <td>{invoice.due}</td>
                       <td>
@@ -8188,14 +8203,56 @@ function BillingView({
                         )}
                       </td>
                       <td>
-                        <button
-                          className="row-link"
-                          onClick={() => onOpenInvoice(invoice)}
-                        >
-                          {invoice.status === "pending" ? "Ver fatura" : "Detalhes"}
-                        </button>
+                        <div className="invoice-row-actions">
+                          <button
+                            className="row-link"
+                            onClick={() => onOpenInvoice(invoice)}
+                          >
+                            {invoice.status === "pending" ? "Ver fatura" : "Detalhes"}
+                          </button>
+                          <button
+                            className={`row-link subtle invoice-note-link${
+                              invoice.internalNote ? " has-note" : ""
+                            }`}
+                            onClick={() => openInvoiceNote(invoice)}
+                            title={invoice.internalNote ?? undefined}
+                          >
+                            {invoice.internalNote ?? "Adicionar nota"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
+                    {noteEditorInvoiceId === invoice.id && (
+                      <tr className="invoice-note-editor-row">
+                        <td colSpan={9}>
+                          <form
+                            className="invoice-entry-note-editor"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              void saveInvoiceNote(invoice.id);
+                            }}
+                          >
+                            <label>
+                              <span>Observação</span>
+                              <input
+                                autoFocus
+                                value={noteDraft}
+                                onChange={(event) => setNoteDraft(event.target.value)}
+                                maxLength={1000}
+                                placeholder="Ex.: pediu para pagar em 12/08"
+                              />
+                            </label>
+                            <button className="text-button" type="button" onClick={() => setNoteEditorInvoiceId(null)} disabled={noteSaving}>
+                              Cancelar
+                            </button>
+                            <button className="text-button" type="submit" disabled={noteSaving}>
+                              {noteSaving ? "Salvando…" : "Salvar"}
+                            </button>
+                          </form>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
@@ -8217,11 +8274,6 @@ function BillingView({
                     <InvoiceStatus invoice={invoice} />
                     <span className="invoice-mobile-items">
                       {invoice.items}
-                      {invoice.internalNote && (
-                        <small className="invoice-entry-note">
-                          {invoice.internalNote}
-                        </small>
-                      )}
                     </span>
                     <InvoiceDeliveryStatus invoice={invoice} compact />
                     <span className="invoice-mobile-footer">
@@ -8239,6 +8291,42 @@ function BillingView({
                       />
                       Considerar no Caixa
                     </label>
+                  )}
+                  <button
+                    className={`row-link subtle invoice-note-trigger invoice-note-link${
+                      invoice.internalNote ? " has-note" : ""
+                    }`}
+                    type="button"
+                    onClick={() => openInvoiceNote(invoice)}
+                    title={invoice.internalNote ?? undefined}
+                  >
+                    {invoice.internalNote ?? "Adicionar nota"}
+                  </button>
+                  {noteEditorInvoiceId === invoice.id && (
+                    <form
+                      className="invoice-entry-note-editor"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void saveInvoiceNote(invoice.id);
+                      }}
+                    >
+                      <label>
+                        <span>Observação</span>
+                        <input
+                          autoFocus
+                          value={noteDraft}
+                          onChange={(event) => setNoteDraft(event.target.value)}
+                          maxLength={1000}
+                          placeholder="Ex.: pediu para pagar em 12/08"
+                        />
+                      </label>
+                      <button className="text-button" type="button" onClick={() => setNoteEditorInvoiceId(null)} disabled={noteSaving}>
+                        Cancelar
+                      </button>
+                      <button className="text-button" type="submit" disabled={noteSaving}>
+                        {noteSaving ? "Salvando…" : "Salvar"}
+                      </button>
+                    </form>
                   )}
                 </article>
               ))}
@@ -9545,7 +9633,6 @@ function InvoiceDialog({
   onRegisterPayment,
   onVoid,
   onDeliveryConfirmed,
-  onSaveNote,
   onFeedback,
   longStayDiscountPercent,
   liveMode,
@@ -9564,7 +9651,6 @@ function InvoiceDialog({
     invoiceId: string,
     channel: "whatsapp" | "email",
   ) => Promise<boolean>;
-  onSaveNote: (invoiceId: string, note: string) => Promise<boolean>;
   onFeedback: (message: string) => void;
   longStayDiscountPercent: number;
   liveMode: boolean;
@@ -9578,20 +9664,6 @@ function InvoiceDialog({
   );
   const [availableOn, setAvailableOn] = useState(shiftDate(operationalToday, 1));
   const [skipLongStayDiscount, setSkipLongStayDiscount] = useState(false);
-  const [noteEditing, setNoteEditing] = useState(false);
-  const [noteDraft, setNoteDraft] = useState(state.invoice?.internalNote ?? "");
-  const [noteSaving, setNoteSaving] = useState(false);
-
-  async function saveInternalNote() {
-    if (!state.invoice || noteSaving) return;
-    setNoteSaving(true);
-    const saved = await onSaveNote(state.invoice.id, noteDraft);
-    setNoteSaving(false);
-    if (saved) {
-      setNoteEditing(false);
-      onFeedback(noteDraft.trim() ? "Observação salva." : "Observação removida.");
-    }
-  }
 
   async function handleDelivery(channel: InvoiceDeliveryChannel) {
     if (deliveryBusy) return;
@@ -9885,57 +9957,6 @@ function InvoiceDialog({
 
           {state.invoice && (state.invoice.sentBy?.length ?? 0) > 0 && (
             <InvoiceDeliveryStatus invoice={state.invoice} compact />
-          )}
-
-          {state.invoice && (
-            <section className="invoice-internal-note" aria-label="Observação interna">
-              <div>
-                <span>Observação interna</span>
-                {!noteEditing && (
-                  <button
-                    className="text-button"
-                    type="button"
-                    onClick={() => setNoteEditing(true)}
-                  >
-                    {state.invoice.internalNote ? "Editar" : "Adicionar"}
-                  </button>
-                )}
-              </div>
-              {noteEditing ? (
-                <>
-                  <textarea
-                    value={noteDraft}
-                    onChange={(event) => setNoteDraft(event.target.value)}
-                    maxLength={1000}
-                    rows={2}
-                    placeholder="Ex.: pediu para pagar em 12/08"
-                  />
-                  <div className="invoice-note-actions">
-                    <button
-                      className="text-button"
-                      type="button"
-                      onClick={() => {
-                        setNoteDraft(state.invoice?.internalNote ?? "");
-                        setNoteEditing(false);
-                      }}
-                      disabled={noteSaving}
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      className="text-button"
-                      type="button"
-                      onClick={() => void saveInternalNote()}
-                      disabled={noteSaving}
-                    >
-                      {noteSaving ? "Salvando…" : "Salvar"}
-                    </button>
-                  </div>
-                </>
-              ) : state.invoice.internalNote ? (
-                <p>{state.invoice.internalNote}</p>
-              ) : null}
-            </section>
           )}
 
           <div className="invoice-share-note">

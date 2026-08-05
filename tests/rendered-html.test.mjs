@@ -408,7 +408,8 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
   assert.match(managementApp, /booking\.serviceType !== "transport"/);
   assert.match(managementApp, /agenda-card[\s\S]*without-time/);
   assert.doesNotMatch(managementApp, /Usará 1 crédito ao concluir/);
-  assert.match(managementApp, /Observação interna/);
+  assert.match(managementApp, /Adicionar nota/);
+  assert.match(managementApp, /invoice-entry-note-editor/);
   assert.match(workspaceData, /internalNote: invoice\.internalNote/);
   assert.match(invoiceNotes, /requireIdentity\(request, \["owner", "finance"\]\)/);
   assert.match(invoiceNotes, /invoice\.note_updated/);

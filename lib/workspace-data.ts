@@ -561,8 +561,23 @@ export function mapWorkspaceBookings(
       (invoice) =>
         invoice.sourceId === appointment.id && invoice.status !== "void",
     );
-    const depositInvoice = appointmentInvoices.find(
-      (invoice) => invoice.sourceType === "lodging_deposit",
+    const depositInvoice =
+      appointmentInvoices.find(
+        (invoice) => invoice.sourceType === "lodging_deposit",
+      ) ??
+      payload.billing.invoices.find(
+        (invoice) =>
+          invoice.status !== "void" &&
+          invoice.items?.some(
+            (invoiceItem) =>
+              invoiceItem.appointmentItemId === firstItem?.id &&
+              invoiceItem.serviceNameSnapshot === "Sinal da hospedagem",
+          ),
+      );
+    const depositInvoiceLine = depositInvoice?.items?.find(
+      (invoiceItem) =>
+        invoiceItem.appointmentItemId === firstItem?.id &&
+        invoiceItem.serviceNameSnapshot === "Sinal da hospedagem",
     );
     const balanceInvoice = appointmentInvoices.find(
       (invoice) => invoice.sourceType === "lodging_balance",
@@ -624,7 +639,8 @@ export function mapWorkspaceBookings(
         ? {
             id: depositInvoice.id,
             number: depositInvoice.invoiceNumber,
-            amountCents: depositInvoice.totalCents,
+            amountCents:
+              depositInvoiceLine?.amountCents ?? depositInvoice.totalCents,
             status: invoiceStatus(depositInvoice, payload.range.from),
           }
         : undefined,
@@ -654,57 +670,130 @@ export function mapWorkspaceBillableServices(
   const servicesById = new Map(
     payload.serviceCatalog.map((service) => [service.id, service]),
   );
+  const activeInvoices = payload.billing.invoices.filter(
+    (invoice) => invoice.status !== "void",
+  );
+
   return payload.agenda.flatMap((appointment) =>
-    appointment.items
-      .filter(
-        (item) =>
-          appointment.status === "completed" &&
-          item.status === "completed" &&
-          item.paymentPreference === "invoice" &&
-          item.settlementMethod === "unsettled" &&
-          !item.activeInvoiceId,
-      )
-      .map((item) => {
-        const isLodging = servicesById.get(item.serviceCatalogId)?.code === "hotel";
-        const depositInvoice = isLodging
-          ? payload.billing.invoices.find(
-              (invoice) =>
-                invoice.sourceType === "lodging_deposit" &&
-                invoice.sourceId === appointment.id &&
-                invoice.status !== "void",
-            )
+    appointment.items.flatMap((item): BillableService[] => {
+      if (
+        item.paymentPreference !== "invoice" ||
+        item.settlementMethod !== "unsettled"
+      ) {
+        return [];
+      }
+
+      const isLodging =
+        servicesById.get(item.serviceCatalogId)?.code === "hotel";
+      const lodging =
+        isLodging && appointment.lodgingNights !== null
+          ? {
+              checkInDate: appointment.startDate,
+              checkOutDate: appointment.endDate,
+              nights: appointment.lodgingNights,
+            }
           : undefined;
+      const base = {
+        appointmentItemId: item.id,
+        customerId: appointment.accountId,
+        customerName: appointment.customerName,
+        dogName: appointment.dogName,
+        date: formatBrazilianDate(appointment.startDate),
+        lodging,
+      };
+
+      if (!isLodging) {
+        return appointment.status === "completed" &&
+          item.status === "completed" &&
+          !item.activeInvoiceId
+          ? [
+              {
+                ...base,
+                id: item.id,
+                billingKind: "service",
+                service: item.serviceName,
+                amountCents: item.totalCents,
+              },
+            ]
+          : [];
+      }
+
+      const depositInvoice = activeInvoices.find(
+        (invoice) =>
+          (invoice.sourceType === "lodging_deposit" &&
+            invoice.sourceId === appointment.id) ||
+          invoice.items?.some(
+            (invoiceItem) =>
+              invoiceItem.appointmentItemId === item.id &&
+              invoiceItem.serviceNameSnapshot === "Sinal da hospedagem",
+          ),
+      );
+      const depositInvoiceLine = depositInvoice?.items?.find(
+        (invoiceItem) =>
+          invoiceItem.appointmentItemId === item.id &&
+          invoiceItem.serviceNameSnapshot === "Sinal da hospedagem",
+      );
+      const depositConfigured =
+        Boolean(appointment.depositPercent) &&
+        appointment.depositPercent! > 0 &&
+        appointment.depositPercent! < 100;
+      const canOfferDeposit = [
+        "confirmed",
+        "present",
+        "in_service",
+        "completed",
+      ].includes(appointment.status);
+      const entries: BillableService[] = [];
+
+      if (depositConfigured && canOfferDeposit && !depositInvoice) {
+        const depositAmount = Math.round(
+          (item.totalCents * appointment.depositPercent!) / 100,
+        );
+        entries.push({
+          ...base,
+          id: `deposit:${item.id}`,
+          billingKind: "lodging_deposit",
+          service: "Sinal da hospedagem",
+          amountCents: depositAmount,
+          selectable: depositAmount > 0,
+          billingNote: `${appointment.depositPercent}% do valor da hospedagem`,
+        });
+      }
+
+      if (
+        appointment.status === "completed" &&
+        item.status === "completed" &&
+        !item.activeInvoiceId
+      ) {
         const paidDepositCents =
-          depositInvoice?.status === "paid" ? depositInvoice.totalCents : 0;
-        const depositPending = depositInvoice?.status === "issued";
+          depositInvoice?.status === "paid"
+            ? (depositInvoiceLine?.amountCents ?? depositInvoice.totalCents)
+            : 0;
+        const waitingForDeposit =
+          depositConfigured && depositInvoice?.status !== "paid";
         const amountCents = Math.max(0, item.totalCents - paidDepositCents);
-        return {
-          id: item.id,
-          customerId: appointment.accountId,
-          customerName: appointment.customerName,
-          dogName: appointment.dogName,
-          date: formatBrazilianDate(appointment.startDate),
+        entries.push({
+          ...base,
+          id: `balance:${item.id}`,
+          billingKind: "lodging_balance",
           service:
-            isLodging && paidDepositCents > 0
+            depositConfigured || paidDepositCents > 0
               ? "Saldo da hospedagem"
-              : item.serviceName,
+              : "Hospedagem",
           amountCents,
-          selectable: !depositPending && amountCents > 0,
-          billingNote: depositPending
-            ? "Aguardando pagamento ou cancelamento da fatura do sinal"
+          selectable: !waitingForDeposit && amountCents > 0,
+          billingNote: waitingForDeposit
+            ? depositInvoice?.status === "issued"
+              ? "Aguardando pagamento ou cancelamento da fatura do sinal"
+              : "Fature e registre o sinal antes de cobrar o saldo"
             : paidDepositCents > 0
               ? `Sinal de ${formatMoney(paidDepositCents)} já abatido`
               : undefined,
-          lodging:
-            isLodging && appointment.lodgingNights !== null
-              ? {
-                  checkInDate: appointment.startDate,
-                  checkOutDate: appointment.endDate,
-                  nights: appointment.lodgingNights,
-                }
-              : undefined,
-        };
-      }),
+        });
+      }
+
+      return entries;
+    }),
   );
 }
 

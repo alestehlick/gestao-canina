@@ -5,6 +5,7 @@ import {
   appointments,
   customerAccounts,
   dogs,
+  invoiceItems,
   invoices,
   serviceCatalog,
   tutors,
@@ -42,14 +43,21 @@ export async function POST(request: Request) {
     assertSameOrigin(request);
     const identity = await requireIdentity(request, ["owner", "finance"]);
     const body = await readJsonObject(request);
-    const rawIds = body.appointmentItemIds;
+    const rawEntries = body.billingEntries;
     if (
-      !Array.isArray(rawIds) ||
-      rawIds.length < 1 ||
-      rawIds.length > 75 ||
-      rawIds.some(
+      !Array.isArray(rawEntries) ||
+      rawEntries.length < 1 ||
+      rawEntries.length > 75 ||
+      rawEntries.some(
         (value) =>
-          typeof value !== "string" || !value.trim() || value.length > 80,
+          !value ||
+          typeof value !== "object" ||
+          typeof value.appointmentItemId !== "string" ||
+          !value.appointmentItemId.trim() ||
+          value.appointmentItemId.length > 80 ||
+          !["service", "lodging_deposit", "lodging_balance"].includes(
+            value.kind,
+          ),
       )
     ) {
       throw new HttpError(
@@ -58,8 +66,14 @@ export async function POST(request: Request) {
         "Selecione entre 1 e 75 serviços concluídos.",
       );
     }
-    const appointmentItemIds = [...new Set(rawIds as string[])];
-    if (appointmentItemIds.length !== rawIds.length) {
+    const billingEntries = rawEntries as Array<{
+      appointmentItemId: string;
+      kind: "service" | "lodging_deposit" | "lodging_balance";
+    }>;
+    const appointmentItemIds = [
+      ...new Set(billingEntries.map((entry) => entry.appointmentItemId)),
+    ];
+    if (appointmentItemIds.length !== billingEntries.length) {
       throw new HttpError(
         400,
         "duplicate_appointment_item",
@@ -97,6 +111,7 @@ export async function POST(request: Request) {
         startDate: appointments.startDate,
         endDate: appointments.endDate,
         lodgingNights: appointments.lodgingNights,
+        depositPercent: appointments.depositPercent,
         dogName: dogs.name,
         customerName: customerAccounts.displayName,
       })
@@ -128,6 +143,13 @@ export async function POST(request: Request) {
         "Um dos serviços selecionados não foi encontrado.",
       );
     }
+    const entryByItemId = new Map(
+      billingEntries.map((entry) => [entry.appointmentItemId, entry.kind]),
+    );
+    const selectedRows = rows.map((row) => ({
+      ...row,
+      billingKind: entryByItemId.get(row.itemId)!,
+    }));
     const accountId = rows[0].accountId;
     if (rows.some((row) => row.accountId !== accountId)) {
       throw new HttpError(
@@ -137,10 +159,18 @@ export async function POST(request: Request) {
       );
     }
     if (
-      rows.some(
+      selectedRows.some(
         (row) =>
-          row.appointmentStatus !== "completed" ||
-          row.itemStatus !== "completed",
+          row.billingKind === "lodging_deposit"
+            ? row.serviceCode !== "hotel" ||
+              !["confirmed", "present", "in_service", "completed"].includes(
+                row.appointmentStatus,
+              ) ||
+              !row.depositPercent ||
+              row.depositPercent <= 0 ||
+              row.depositPercent >= 100
+            : row.appointmentStatus !== "completed" ||
+              row.itemStatus !== "completed",
       )
     ) {
       throw new HttpError(
@@ -162,7 +192,12 @@ export async function POST(request: Request) {
         "Um dos serviços já foi pago ou está configurado para usar crédito.",
       );
     }
-    if (rows.some((row) => row.activeInvoiceId)) {
+    if (
+      selectedRows.some(
+        (row) =>
+          row.billingKind !== "lodging_deposit" && row.activeInvoiceId,
+      )
+    ) {
       throw new HttpError(
         409,
         "service_already_invoiced",
@@ -170,7 +205,21 @@ export async function POST(request: Request) {
       );
     }
 
-    const lodgingAppointmentIds = rows
+    if (
+      selectedRows.some(
+        (row) =>
+          row.billingKind.startsWith("lodging_") &&
+          row.serviceCode !== "hotel",
+      )
+    ) {
+      throw new HttpError(
+        400,
+        "invalid_lodging_entry",
+        "Uma das etapas de hospedagem selecionadas é inválida.",
+      );
+    }
+
+    const lodgingAppointmentIds = selectedRows
       .filter((row) => row.serviceCode === "hotel")
       .map((row) => row.appointmentId);
     const depositInvoices = lodgingAppointmentIds.length
@@ -185,14 +234,55 @@ export async function POST(request: Request) {
             ),
           )
       : [];
-    const depositByAppointment = new Map(
+    const depositByAppointment = new Map<
+      string,
+      { status: "draft" | "issued" | "paid" | "void"; totalCents: number }
+    >(
       depositInvoices
         .filter((invoice) => invoice.sourceId && invoice.status !== "void")
         .map((invoice) => [invoice.sourceId!, invoice]),
     );
-    const pendingDeposit = rows.find(
+    const combinedDepositRows = await db
+      .select({
+        appointmentItemId: invoiceItems.appointmentItemId,
+        status: invoices.status,
+        totalCents: invoiceItems.amountCents,
+      })
+      .from(invoiceItems)
+      .innerJoin(invoices, eq(invoices.id, invoiceItems.invoiceId))
+      .where(
+        and(
+          eq(invoices.establishmentId, establishmentId),
+          inArray(invoiceItems.appointmentItemId, appointmentItemIds),
+          eq(invoiceItems.serviceNameSnapshot, "Sinal da hospedagem"),
+        ),
+      );
+    const appointmentByItemId = new Map(
+      selectedRows.map((row) => [row.itemId, row.appointmentId]),
+    );
+    for (const deposit of combinedDepositRows) {
+      const appointmentId = appointmentByItemId.get(deposit.appointmentItemId);
+      if (appointmentId && deposit.status !== "void") {
+        depositByAppointment.set(appointmentId, deposit);
+      }
+    }
+
+    const duplicateDeposit = selectedRows.find(
       (row) =>
-        row.serviceCode === "hotel" &&
+        row.billingKind === "lodging_deposit" &&
+        depositByAppointment.has(row.appointmentId),
+    );
+    if (duplicateDeposit) {
+      throw new HttpError(
+        409,
+        "lodging_deposit_already_invoiced",
+        `O sinal da hospedagem de ${duplicateDeposit.dogName} já pertence a uma fatura.`,
+      );
+    }
+
+    const pendingDeposit = selectedRows.find(
+      (row) =>
+        row.billingKind === "lodging_balance" &&
         depositByAppointment.get(row.appointmentId)?.status === "issued",
     );
     if (pendingDeposit) {
@@ -202,14 +292,37 @@ export async function POST(request: Request) {
         `Registre o pagamento ou cancele a fatura do sinal da hospedagem de ${pendingDeposit.dogName} antes de incluí-la em outra fatura.`,
       );
     }
-    const effectiveRows = rows.map((row) => {
-      if (row.serviceCode !== "hotel") {
+    const missingRequiredDeposit = selectedRows.find(
+      (row) =>
+        row.billingKind === "lodging_balance" &&
+        Boolean(row.depositPercent) &&
+        !depositByAppointment.has(row.appointmentId),
+    );
+    if (missingRequiredDeposit) {
+      throw new HttpError(
+        409,
+        "lodging_deposit_required",
+        `Fature e registre o sinal da hospedagem de ${missingRequiredDeposit.dogName} antes de cobrar o saldo.`,
+      );
+    }
+
+    const effectiveRows = selectedRows.map((row) => {
+      if (row.billingKind === "service") {
         return {
           ...row,
           invoiceAmountCents: row.amountCents,
           invoiceServiceName: row.serviceName,
           invoiceDescription:
             row.description || `${row.serviceName} de ${row.dogName}`,
+        };
+      }
+      if (row.billingKind === "lodging_deposit") {
+        const percent = row.depositPercent!;
+        return {
+          ...row,
+          invoiceAmountCents: Math.round((row.amountCents * percent) / 100),
+          invoiceServiceName: "Sinal da hospedagem",
+          invoiceDescription: `Sinal de ${percent}% da hospedagem de ${row.dogName}, ${row.startDate} a ${row.endDate}`,
         };
       }
       const depositInvoice = depositByAppointment.get(row.appointmentId);
@@ -256,15 +369,27 @@ export async function POST(request: Request) {
     const invoiceId = crypto.randomUUID();
     const number = invoiceNumber();
     const now = new Date().toISOString();
-    const placeholders = appointmentItemIds.map(() => "?").join(", ");
     const d1 = getD1Database();
     const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
-    const results = await d1.batch([
-      d1
+    const lockedItemIds = selectedRows
+      .filter((row) => row.billingKind !== "lodging_deposit")
+      .map((row) => row.itemId);
+    const depositItemIds = selectedRows
+      .filter((row) => row.billingKind === "lodging_deposit")
+      .map((row) => row.itemId);
+    const lockedPlaceholders = lockedItemIds.map(() => "?").join(", ");
+    const depositPlaceholders = depositItemIds.map(() => "?").join(", ");
+    const statements: ReturnType<typeof d1.prepare>[] = [];
+    let lockResultIndex: number | null = null;
+
+    if (lockedItemIds.length) {
+      lockResultIndex = statements.length;
+      statements.push(
+        d1
         .prepare(
           `UPDATE appointment_items
           SET active_invoice_id = ?, updated_at = ${nowExpression}
-          WHERE id IN (${placeholders})
+          WHERE id IN (${lockedPlaceholders})
             AND status = 'completed'
             AND payment_preference = 'invoice'
             AND settlement_method = 'unsettled'
@@ -277,7 +402,32 @@ export async function POST(request: Request) {
                 AND a.status = 'completed'
             )`,
         )
-        .bind(invoiceId, ...appointmentItemIds, establishmentId),
+        .bind(invoiceId, ...lockedItemIds, establishmentId),
+      );
+    }
+
+    const lockCondition = lockedItemIds.length
+      ? `(SELECT COUNT(*)
+          FROM appointment_items ai
+          INNER JOIN appointments a ON a.id = ai.appointment_id
+          WHERE ai.id IN (${lockedPlaceholders})
+            AND ai.active_invoice_id = ?
+            AND a.establishment_id = ?
+            AND a.account_id = ?) = ?`
+      : "1 = 1";
+    const depositCondition = depositItemIds.length
+      ? `AND NOT EXISTS (
+          SELECT 1
+          FROM invoice_items existing_item
+          INNER JOIN invoices existing_invoice
+            ON existing_invoice.id = existing_item.invoice_id
+          WHERE existing_item.appointment_item_id IN (${depositPlaceholders})
+            AND existing_item.service_name_snapshot = 'Sinal da hospedagem'
+            AND existing_invoice.status <> 'void'
+        )`
+      : "";
+    const invoiceResultIndex = statements.length;
+    statements.push(
       d1
         .prepare(
           `INSERT INTO invoices (
@@ -287,15 +437,8 @@ export async function POST(request: Request) {
             created_by_user_id
           )
           SELECT ?, ?, ?, ?, ?, ?, 'issued', ?, ?, ?, 'services', ?, ?
-          WHERE (
-            SELECT COUNT(*)
-            FROM appointment_items ai
-            INNER JOIN appointments a ON a.id = ai.appointment_id
-            WHERE ai.id IN (${placeholders})
-              AND ai.active_invoice_id = ?
-              AND a.establishment_id = ?
-              AND a.account_id = ?
-          ) = ?`,
+          WHERE ${lockCondition}
+          ${depositCondition}`,
         )
         .bind(
           invoiceId,
@@ -309,11 +452,16 @@ export async function POST(request: Request) {
           totalCents,
           invoiceId,
           identity.userId,
-          ...appointmentItemIds,
-          invoiceId,
-          establishmentId,
-          accountId,
-          appointmentItemIds.length,
+          ...(lockedItemIds.length
+            ? [
+                ...lockedItemIds,
+                invoiceId,
+                establishmentId,
+                accountId,
+                lockedItemIds.length,
+              ]
+            : []),
+          ...depositItemIds,
         ),
       ...effectiveRows.map((row) =>
         d1
@@ -383,11 +531,14 @@ export async function POST(request: Request) {
             )`,
         )
         .bind(invoiceId, invoiceId),
-    ]);
+    );
+    const results = await d1.batch(statements);
 
     if (
-      (results[0].meta.changes ?? 0) !== appointmentItemIds.length ||
-      (results[1].meta.changes ?? 0) !== 1
+      (lockResultIndex !== null &&
+        (results[lockResultIndex].meta.changes ?? 0) !==
+          lockedItemIds.length) ||
+      (results[invoiceResultIndex].meta.changes ?? 0) !== 1
     ) {
       throw new HttpError(
         409,

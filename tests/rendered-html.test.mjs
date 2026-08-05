@@ -308,7 +308,7 @@ test("mantém o primeiro acesso e o login protegidos sem bloqueio global da cont
 });
 
 test("preserva as regras de faturas, sinais e créditos", async () => {
-  const [invoices, payments, deposit, balance, lodgingHelper, consume, purchases, prices] = await Promise.all([
+  const [invoices, payments, deposit, balance, lodgingHelper, consume, purchases, prices, workspaceData] = await Promise.all([
     readFile(new URL("../app/api/invoices/route.ts", import.meta.url), "utf8"),
     readFile(
       new URL("../app/api/invoices/[id]/payments/route.ts", import.meta.url),
@@ -335,15 +335,19 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
       new URL("../app/api/settings/prices/route.ts", import.meta.url),
       "utf8",
     ),
+    readFile(new URL("../lib/workspace-data.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(invoices, /active_invoice_id = \?/);
-  assert.match(invoices, /results\[0\]\.meta\.changes/);
+  assert.match(invoices, /lockResultIndex/);
+  assert.match(invoices, /lodging_deposit_already_invoiced/);
+  assert.match(invoices, /invoiceServiceName: "Sinal da hospedagem"/);
   assert.match(invoices, /FAT-/);
   assert.doesNotMatch(invoices, /pix/i);
   assert.match(payments, /invoice\.payment_recorded/);
   assert.match(payments, /Créditos liberados após pagamento da fatura/);
   assert.match(payments, /settlement_method = 'invoice'/);
+  assert.match(payments, /service_name_snapshot <> 'Sinal da hospedagem'/);
   assert.match(deposit, /kind: "deposit"/);
   assert.match(balance, /kind: "balance"/);
   assert.match(lodgingHelper, /deposit_payment_pending/);
@@ -354,6 +358,9 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
   assert.match(purchases, /default_price_required/);
   assert.match(prices, /value < 1/);
   assert.match(prices, /daycareStartTime/);
+  assert.match(workspaceData, /id: `deposit:\$\{item\.id\}`/);
+  assert.match(workspaceData, /id: `balance:\$\{item\.id\}`/);
+  assert.match(workspaceData, /Fature e registre o sinal antes de cobrar o saldo/);
 });
 
 test("mantém o manual e os detalhes das faturas disponíveis", async () => {

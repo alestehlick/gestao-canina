@@ -187,6 +187,7 @@ export async function POST(
               SELECT appointment_item_id
               FROM invoice_items
               WHERE invoice_id = ?
+                AND service_name_snapshot <> 'Sinal da hospedagem'
             )
               AND settlement_method = 'unsettled'
               AND EXISTS (

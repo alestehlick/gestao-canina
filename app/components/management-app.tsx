@@ -2998,9 +2998,12 @@ export function ManagementApp() {
             }>("/api/invoices", {
               method: "POST",
               body: JSON.stringify({
-                appointmentItemIds: invoiceState.selectedServices.map(
-                  (service) => service.id,
-                ),
+                billingEntries: invoiceState.selectedServices.map(
+                  (service) => ({
+                    appointmentItemId:
+                      service.appointmentItemId ?? service.id,
+                    kind: service.billingKind ?? "service",
+                  })),
                 dueDate: operationalToday,
               }),
             });

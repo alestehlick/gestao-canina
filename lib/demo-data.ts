@@ -132,6 +132,8 @@ export type Invoice = {
 
 export type BillableService = {
   id: string;
+  appointmentItemId?: string;
+  billingKind?: "service" | "lodging_deposit" | "lodging_balance";
   customerId: string;
   customerName: string;
   dogName: string;

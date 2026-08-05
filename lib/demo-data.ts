@@ -111,6 +111,8 @@ export type Invoice = {
   amountCents: number;
   due: string;
   status: "pending" | "paid" | "overdue";
+  sentBy?: ("whatsapp" | "email")[];
+  lastSentAt?: string;
   items: string;
   sourceType?: "services" | "credit_package" | "lodging_deposit" | "lodging_balance";
   cashEntryId?: string;
@@ -141,6 +143,7 @@ export type BillableService = {
   dogName: string;
   date: string;
   service: string;
+  serviceType?: ServiceType;
   amountCents: number;
   selectable?: boolean;
   billingNote?: string;
@@ -607,6 +610,8 @@ export const demoInvoices: Invoice[] = [
     amountCents: 18000,
     due: "Pago em 27/07",
     status: "paid",
+    sentBy: ["whatsapp"],
+    lastSentAt: "2026-07-27T15:20:00.000Z",
     cashEntryId: "cash-invoice-183",
     cashIncluded: true,
     items: "Hospedagem da Mel",
@@ -642,6 +647,7 @@ export const demoBillableServices: BillableService[] = [
     dogName: "Bento",
     date: "28/07/2026",
     service: "Banho",
+    serviceType: "bath",
     amountCents: 9000,
   },
   {
@@ -651,6 +657,7 @@ export const demoBillableServices: BillableService[] = [
     dogName: "Lola",
     date: "29/07/2026",
     service: "Creche",
+    serviceType: "daycare",
     amountCents: 7000,
   },
   {
@@ -660,6 +667,7 @@ export const demoBillableServices: BillableService[] = [
     dogName: "Bento",
     date: "29/07/2026",
     service: "Taxi-dog",
+    serviceType: "transport",
     amountCents: 5500,
   },
   {
@@ -669,6 +677,7 @@ export const demoBillableServices: BillableService[] = [
     dogName: "Theo",
     date: "25/07/2026",
     service: "Banho",
+    serviceType: "bath",
     amountCents: 9500,
   },
 ];

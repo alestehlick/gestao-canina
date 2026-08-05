@@ -1871,6 +1871,45 @@ export function ManagementApp() {
     setToast({ message: `Cadastro de ${updated.name} atualizado.` });
   }
 
+  async function saveDogFeeding(dogId: string, feedingNotes: string) {
+    const dog = dogs.find((item) => item.id === dogId);
+    const cleanedNotes = feedingNotes.trim();
+    if (!dog || !cleanedNotes) return false;
+
+    setDogs((current) =>
+      current.map((item) =>
+        item.id === dogId ? { ...item, feedingNotes: cleanedNotes } : item,
+      ),
+    );
+
+    if (runtimeMode === "ready") {
+      const result = await runLiveAction(
+        `feeding-notes:${dogId}`,
+        () =>
+          requestJson<{ dog: { id: string } }>(`/api/dogs/${dogId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ feedingNotes: cleanedNotes }),
+          }),
+        {
+          refresh: false,
+          successMessage: `Alimentação de ${dog.name} salva.`,
+        },
+      );
+      if (!result) {
+        setDogs((current) =>
+          current.map((item) =>
+            item.id === dogId ? { ...item, feedingNotes: dog.feedingNotes } : item,
+          ),
+        );
+        return false;
+      }
+      return true;
+    }
+
+    setToast({ message: `Alimentação de ${dog.name} salva.` });
+    return true;
+  }
+
   async function submitCustomerEdit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!customerToEdit) return;
@@ -2837,6 +2876,74 @@ export function ManagementApp() {
         : undefined,
     });
     setDialog("invoice");
+  }
+
+  async function markInvoiceDelivered(
+    invoiceId: string,
+    channel: "whatsapp" | "email",
+  ) {
+    const currentInvoice = invoices.find((item) => item.id === invoiceId);
+    const currentChannels = currentInvoice?.sentBy ?? [];
+    const sentBy = [...new Set([...currentChannels, channel])];
+    const lastSentAt = new Date().toISOString();
+
+    if (runtimeMode === "ready") {
+      const result = await runLiveAction(
+        `invoice-delivery:${invoiceId}`,
+        () =>
+          requestJson<{
+            invoice: {
+              id: string;
+              sentBy: ("whatsapp" | "email")[];
+              lastSentAt: string;
+            };
+          }>(`/api/invoices/${invoiceId}/delivery`, {
+            method: "POST",
+            body: JSON.stringify({ channel }),
+          }),
+        { refresh: false },
+      );
+      if (!result) return false;
+      setInvoices((items) =>
+        items.map((item) =>
+          item.id === invoiceId
+            ? {
+                ...item,
+                sentBy: result.invoice.sentBy,
+                lastSentAt: result.invoice.lastSentAt,
+              }
+            : item,
+        ),
+      );
+      setInvoiceState((state) =>
+        state?.invoice?.id === invoiceId
+          ? {
+              ...state,
+              invoice: {
+                ...state.invoice,
+                sentBy: result.invoice.sentBy,
+                lastSentAt: result.invoice.lastSentAt,
+              },
+            }
+          : state,
+      );
+      return true;
+    }
+
+    setInvoices((items) =>
+      items.map((item) =>
+        item.id === invoiceId ? { ...item, sentBy, lastSentAt } : item,
+      ),
+    );
+    setInvoiceState((state) =>
+      state?.invoice?.id === invoiceId
+        ? {
+            ...state,
+            invoice: { ...state.invoice, sentBy, lastSentAt },
+          }
+        : state,
+    );
+    return true;
   }
 
   async function issueLodgingInvoice(
@@ -3852,6 +3959,7 @@ export function ManagementApp() {
               onOpenInvoice={openExistingInvoice}
               onLodgingInvoice={issueLodgingInvoice}
               onOpenReceipt={openReceipt}
+              onSaveDogFeeding={saveDogFeeding}
               invoice={invoices.find((item) => item.status !== "paid")}
             />
           )}
@@ -5153,6 +5261,7 @@ export function ManagementApp() {
           onIssue={issueInvoice}
           onRegisterPayment={registerInvoicePayment}
           onVoid={voidInvoice}
+          onDeliveryConfirmed={markInvoiceDelivered}
           onFeedback={(message) => setToast({ message })}
           liveMode={runtimeMode === "ready"}
           busy={
@@ -5494,6 +5603,7 @@ function TodayView({
   onOpenInvoice,
   onLodgingInvoice,
   onOpenReceipt,
+  onSaveDogFeeding,
   invoice,
 }: {
   bookings: Booking[];
@@ -5521,8 +5631,12 @@ function TodayView({
     kind: "deposit" | "balance",
   ) => void;
   onOpenReceipt: (receipt: ServiceReceipt) => void;
+  onSaveDogFeeding: (dogId: string, feedingNotes: string) => Promise<boolean>;
   invoice?: Invoice;
 }) {
+  const [feedingEditorDogId, setFeedingEditorDogId] = useState<string | null>(null);
+  const [feedingDraft, setFeedingDraft] = useState("");
+  const [feedingSaving, setFeedingSaving] = useState(false);
   const dayBookings = bookings.filter((booking) =>
     bookingOccursOn(booking, selectedDate),
   );
@@ -5643,6 +5757,32 @@ function TodayView({
                   )}
                   onOpenReceipt={onOpenReceipt}
                   onLodgingInvoice={onLodgingInvoice}
+                  agendaDate={selectedDate}
+                  feedingEditorOpen={feedingEditorDogId === booking.dogId}
+                  feedingDraft={feedingDraft}
+                  feedingSaving={feedingSaving}
+                  onStartFeedingEdit={() => {
+                    setFeedingEditorDogId(booking.dogId);
+                    setFeedingDraft("");
+                  }}
+                  onFeedingDraftChange={setFeedingDraft}
+                  onCancelFeedingEdit={() => {
+                    setFeedingEditorDogId(null);
+                    setFeedingDraft("");
+                  }}
+                  onSaveFeeding={async () => {
+                    if (!feedingDraft.trim()) return;
+                    setFeedingSaving(true);
+                    const saved = await onSaveDogFeeding(
+                      booking.dogId,
+                      feedingDraft,
+                    );
+                    setFeedingSaving(false);
+                    if (saved) {
+                      setFeedingEditorDogId(null);
+                      setFeedingDraft("");
+                    }
+                  }}
                 />
               ))}
             {!filteredBookings.length && (
@@ -5655,85 +5795,6 @@ function TodayView({
         </section>
 
         <aside className="dashboard-rail">
-          <section className="panel compact-panel">
-            <div className="panel-heading">
-              <div>
-                <p className="section-kicker">
-                  {isToday ? "Presença" : "Planejamento"}
-                </p>
-                <h2>{isToday ? "No local agora" : "Programados neste dia"}</h2>
-              </div>
-              <span className="soft-count">
-                {isToday ? presentDogs.length : visibleBookings.length}
-              </span>
-            </div>
-            <div className="presence-list">
-              {(isToday ? presentDogs : visibleBookings).map((booking) => {
-                const dog = dogs.find((item) => item.id === booking.dogId);
-                return (
-                  <div className="presence-row" key={booking.id}>
-                    <DogAvatar dog={dog} size="small" />
-                    <span>
-                      <strong>{booking.dogName}</strong>
-                      <small>
-                        {booking.time} · {booking.service}
-                      </small>
-                    </span>
-                    <span className="presence-dot">
-                      {isToday ? "Presente" : "Previsto"}
-                    </span>
-                  </div>
-                );
-              })}
-              {(isToday ? presentDogs : visibleBookings).length === 0 && (
-                <EmptyState
-                  title="Nenhum cão nesta lista"
-                  description={
-                    isToday
-                      ? "As chegadas registradas aparecerão aqui."
-                      : "Não há serviços programados para este dia."
-                  }
-                />
-              )}
-            </div>
-          </section>
-
-          {alertsForDay > 0 && (
-            <section className="panel compact-panel attention-panel">
-            <div className="panel-heading">
-              <div>
-                <p className="section-kicker">Cuidados</p>
-                <h2>Requer atenção</h2>
-              </div>
-                <span className="attention-count">{alertsForDay}</span>
-            </div>
-              {visibleBookings
-                .map((booking) => ({
-                  booking,
-                  dog: dogs.find((dog) => dog.id === booking.dogId),
-                }))
-                .filter(({ dog }, index, items) =>
-                  Boolean(
-                    dog?.alert &&
-                      items.findIndex(
-                        (item) => item.booking.dogId === dog.id,
-                      ) === index,
-                  ),
-                )
-                .map(({ dog }) => (
-                  <div className="attention-item" key={dog?.id}>
-                    <span className="attention-mark" aria-hidden="true">
-                      !
-                    </span>
-                    <span>
-                      <strong>{dog?.name} · alerta</strong>
-                      <small>{dog?.alert}</small>
-                    </span>
-                  </div>
-                ))}
-            </section>
-          )}
-
           <section className="panel compact-panel">
             <div className="panel-heading">
               <div>
@@ -5793,6 +5854,40 @@ function TodayView({
                   Abrir financeiro
                 </button>
               </div>
+            </section>
+          )}
+
+          {alertsForDay > 0 && (
+            <section className="panel compact-panel attention-panel">
+              <div className="panel-heading">
+                <div>
+                  <p className="section-kicker">Cuidados</p>
+                  <h2>Requer atenção</h2>
+                </div>
+                <span className="attention-count">{alertsForDay}</span>
+              </div>
+              {visibleBookings
+                .map((booking) => ({
+                  booking,
+                  dog: dogs.find((dog) => dog.id === booking.dogId),
+                }))
+                .filter(({ dog }, index, items) =>
+                  Boolean(
+                    dog?.alert &&
+                      items.findIndex(
+                        (item) => item.booking.dogId === dog.id,
+                      ) === index,
+                  ),
+                )
+                .map(({ dog }) => (
+                  <div className="attention-item" key={dog?.id}>
+                    <span className="attention-mark" aria-hidden="true">!</span>
+                    <span>
+                      <strong>{dog?.name} · alerta</strong>
+                      <small>{dog?.alert}</small>
+                    </span>
+                  </div>
+                ))}
             </section>
           )}
         </aside>
@@ -5925,6 +6020,24 @@ function bookingOccursOn(booking: Booking, date: string) {
   return booking.date === date;
 }
 
+function agendaAlertsForDog(dog: Dog | undefined, date: string) {
+  if (!dog) return [];
+  const alerts: string[] = [];
+  if (dog.alert?.trim()) alerts.push(dog.alert.trim());
+  if (dog.birthDate?.slice(5) === date.slice(5)) {
+    alerts.push(`Aniversário de ${dog.name}`);
+  }
+  for (const vaccine of dog.vaccines ?? []) {
+    if (vaccine.expiresOn > shiftDate(date, 30)) continue;
+    alerts.push(
+      `${vaccine.name} ${
+        vaccine.expiresOn < date ? "vencida" : "vence"
+      } em ${formatShortDate(vaccine.expiresOn)}`,
+    );
+  }
+  return alerts;
+}
+
 function AgendaCard({
   booking,
   dog,
@@ -5937,6 +6050,14 @@ function AgendaCard({
   onOpenReceipt,
   onLodgingInvoice,
   showDate = false,
+  agendaDate,
+  feedingEditorOpen = false,
+  feedingDraft = "",
+  feedingSaving = false,
+  onStartFeedingEdit,
+  onFeedingDraftChange,
+  onCancelFeedingEdit,
+  onSaveFeeding,
 }: {
   booking: Booking;
   dog?: Dog;
@@ -5952,6 +6073,14 @@ function AgendaCard({
     kind: "deposit" | "balance",
   ) => void;
   showDate?: boolean;
+  agendaDate?: string;
+  feedingEditorOpen?: boolean;
+  feedingDraft?: string;
+  feedingSaving?: boolean;
+  onStartFeedingEdit?: () => void;
+  onFeedingDraftChange?: (value: string) => void;
+  onCancelFeedingEdit?: () => void;
+  onSaveFeeding?: () => void;
 }) {
   const action =
     booking.date > operationalToday &&
@@ -5959,6 +6088,7 @@ function AgendaCard({
     booking.status !== "completed"
       ? null
       : primaryAction(booking.status);
+  const dogAlerts = agendaDate ? agendaAlertsForDog(dog, agendaDate) : [];
   return (
     <article
       className={`agenda-card service-${booking.serviceType} status-${booking.status}`}
@@ -6079,6 +6209,63 @@ function AgendaCard({
             </div>
           )}
         {booking.note && <span className="care-note">{booking.note}</span>}
+        {agendaDate && dog && (
+          <div className="agenda-dog-care">
+            {dogAlerts.length > 0 && (
+              <div className="agenda-dog-alert" role="note">
+                <span aria-hidden="true">!</span>
+                <p>
+                  <strong>Atenção</strong>
+                  {dogAlerts.join(" · ")}
+                </p>
+              </div>
+            )}
+            {dog.feedingNotes ? (
+              <div className="agenda-feeding-note">
+                <span>Alimentação</span>
+                <p>{dog.feedingNotes}</p>
+              </div>
+            ) : feedingEditorOpen ? (
+              <div className="agenda-feeding-editor">
+                <label htmlFor={`feeding-${booking.id}`}>Alimentação de {dog.name}</label>
+                <textarea
+                  id={`feeding-${booking.id}`}
+                  rows={3}
+                  value={feedingDraft}
+                  onChange={(event) => onFeedingDraftChange?.(event.target.value)}
+                  placeholder="Ex.: 2 porções por dia, 120 g cada"
+                  autoFocus
+                />
+                <div>
+                  <button
+                    type="button"
+                    className="text-button muted"
+                    onClick={onCancelFeedingEdit}
+                    disabled={feedingSaving}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button compact"
+                    onClick={onSaveFeeding}
+                    disabled={feedingSaving || !feedingDraft.trim()}
+                  >
+                    {feedingSaving ? "Salvando…" : "Salvar"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="add-feeding-button"
+                onClick={onStartFeedingEdit}
+              >
+                + Adicionar dados sobre alimentação
+              </button>
+            )}
+          </div>
+        )}
       </div>
       <div className="agenda-actions">
         {action && (
@@ -6938,6 +7125,17 @@ function CustomerProfile({
   );
 }
 
+function billableVisualType(service: BillableService): ServiceType {
+  if (service.serviceType) return service.serviceType;
+  const label = normalize(service.service);
+  if (label.includes("hospedagem")) return "hotel";
+  if (label.includes("taxi")) return "transport";
+  if (label.includes("banho e tosa")) return "grooming";
+  if (label.includes("banho")) return "bath";
+  if (label.includes("creche")) return "daycare";
+  return "other";
+}
+
 function BillingView({
   invoices,
   billableServices,
@@ -7075,9 +7273,9 @@ function BillingView({
                     (Boolean(first) && first?.customerId !== service.customerId);
                   return (
                     <label
-                      className={
-                        disabled ? "billable-row disabled" : "billable-row"
-                      }
+                      className={`billable-row service-${billableVisualType(service)}${
+                        disabled ? " disabled" : ""
+                      }`}
                       key={service.id}
                     >
                       <input
@@ -7087,19 +7285,21 @@ function BillingView({
                         onChange={() => onToggleBillable(service)}
                       />
                       <span className="billable-date">{service.date}</span>
-                      <span>
+                      <span className="billable-identity">
                         <strong>{service.dogName}</strong>
                         <small>{service.customerName}</small>
                       </span>
-                      <span>
-                        {service.service}
+                      <span className="billable-description">
+                        <strong>{service.service}</strong>
                         {service.billingNote && (
                           <small className="billable-note">
                             {service.billingNote}
                           </small>
                         )}
                       </span>
-                      <strong>{formatCurrency(service.amountCents)}</strong>
+                      <strong className="billable-amount">
+                        {formatCurrency(service.amountCents)}
+                      </strong>
                     </label>
                   );
                 })}
@@ -7129,6 +7329,7 @@ function BillingView({
                     <th>Vencimento</th>
                     <th>Valor</th>
                     <th>Situação</th>
+                    <th>Envio</th>
                     <th>No Caixa</th>
                     <th>
                       <span className="sr-only">Ação</span>
@@ -7149,6 +7350,9 @@ function BillingView({
                       </td>
                       <td>
                         <InvoiceStatus invoice={invoice} />
+                      </td>
+                      <td>
+                        <InvoiceDeliveryStatus invoice={invoice} />
                       </td>
                       <td className="cash-inclusion-cell">
                         {invoice.status === "paid" ? (
@@ -7185,25 +7389,23 @@ function BillingView({
             <div className="mobile-card-list invoice-mobile-list">
               {invoices.map((invoice) => (
                 <article
-                  className="mobile-data-card"
+                  className={`mobile-data-card invoice-${invoice.status}`}
                   key={`mobile-${invoice.id}`}
                 >
                   <button
                     className="mobile-card-main"
                     onClick={() => onOpenInvoice(invoice)}
                   >
-                    <span>
-                      <strong>#{invoice.number} · {invoice.customerName}</strong>
-                      <small>{invoice.items}</small>
+                    <span className="invoice-mobile-heading">
+                      <small>Fatura #{invoice.number}</small>
+                      <strong>{invoice.customerName}</strong>
                     </span>
-                    <strong>{formatCurrency(invoice.amountCents)}</strong>
-                    <span className="mobile-data-detail">
-                      {invoice.due} ·{" "}
-                      {invoice.status === "paid"
-                        ? "Pago"
-                        : invoice.status === "overdue"
-                          ? "Vencido"
-                          : "Pendente"}
+                    <InvoiceStatus invoice={invoice} />
+                    <span className="invoice-mobile-items">{invoice.items}</span>
+                    <InvoiceDeliveryStatus invoice={invoice} compact />
+                    <span className="invoice-mobile-footer">
+                      <small>{invoice.status === "paid" ? "Pagamento" : "Vencimento"}: {invoice.due}</small>
+                      <strong>{formatCurrency(invoice.amountCents)}</strong>
                     </span>
                   </button>
                   {invoice.status === "paid" && (
@@ -7565,6 +7767,32 @@ function InvoiceStatus({ invoice }: { invoice: Invoice }) {
     return <span className="status-pill overdue">Vencido</span>;
   }
   return <span className="status-pill pending">Fatura pendente</span>;
+}
+
+function InvoiceDeliveryStatus({
+  invoice,
+  compact = false,
+}: {
+  invoice: Invoice;
+  compact?: boolean;
+}) {
+  const channels = invoice.sentBy ?? [];
+  if (!channels.length) {
+    return compact ? (
+      <span className="invoice-delivery-state not-sent">Ainda não enviada</span>
+    ) : (
+      <span className="invoice-delivery-empty">—</span>
+    );
+  }
+  return (
+    <span className={`invoice-delivery-state${compact ? " compact" : ""}`}>
+      {channels.map((channel) => (
+        <span className={`delivery-channel ${channel}`} key={channel}>
+          {channel === "whatsapp" ? "Enviada por WhatsApp" : "Enviada por e-mail"}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 function ActivityView({ activities }: { activities: AuditActivity[] }) {
@@ -8389,6 +8617,7 @@ function InvoiceDialog({
   onIssue,
   onRegisterPayment,
   onVoid,
+  onDeliveryConfirmed,
   onFeedback,
   liveMode,
   busy,
@@ -8401,6 +8630,10 @@ function InvoiceDialog({
     withoutDiscount?: boolean,
   ) => void | Promise<void>;
   onVoid: () => void | Promise<void>;
+  onDeliveryConfirmed: (
+    invoiceId: string,
+    channel: "whatsapp" | "email",
+  ) => Promise<boolean>;
   onFeedback: (message: string) => void;
   liveMode: boolean;
   busy: boolean;
@@ -8419,7 +8652,16 @@ function InvoiceDialog({
       if (result === "saved") {
         onFeedback("Fatura salva nos arquivos ou downloads deste aparelho.");
       } else if (result === "shared") {
-        onFeedback("Fatura entregue ao menu de compartilhamento.");
+        if (channel !== "save" && state.invoice?.id) {
+          const recorded = await onDeliveryConfirmed(state.invoice.id, channel);
+          onFeedback(
+            recorded
+              ? `Envio por ${channel === "whatsapp" ? "WhatsApp" : "e-mail"} registrado.`
+              : "O compartilhamento foi concluído, mas não foi possível registrar o canal.",
+          );
+        } else {
+          onFeedback("Fatura entregue ao menu de compartilhamento.");
+        }
       } else {
         onFeedback(
           "PDF salvo. O aplicativo foi aberto para você anexar e confirmar o envio.",
@@ -8644,6 +8886,10 @@ function InvoiceDialog({
               <small>Arquivos ou downloads</small>
             </button>
           </div>
+
+          {state.invoice && (state.invoice.sentBy?.length ?? 0) > 0 && (
+            <InvoiceDeliveryStatus invoice={state.invoice} compact />
+          )}
 
           <div className="invoice-share-note">
             <span className="attention-mark">i</span>

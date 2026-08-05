@@ -204,6 +204,8 @@ export type WorkspaceInvoice = {
   recipientEmailSnapshot: string | null;
   status: "draft" | "issued" | "paid" | "void";
   issuedAt: string | null;
+  deliveryChannelsJson: string;
+  lastSentAt: string | null;
   dueDate: string;
   totalCents: number;
   sourceType:
@@ -687,6 +689,9 @@ export function mapWorkspaceBillableServices(
 
       const isLodging =
         servicesById.get(item.serviceCatalogId)?.code === "hotel";
+      const serviceType = toUiServiceType(
+        servicesById.get(item.serviceCatalogId)?.code,
+      );
       const lodging =
         isLodging && appointment.lodgingNights !== null
           ? {
@@ -703,6 +708,7 @@ export function mapWorkspaceBillableServices(
         customerName: appointment.customerName,
         dogName: appointment.dogName,
         date: formatBrazilianDate(appointment.startDate),
+        serviceType,
         lodging,
       };
 
@@ -847,6 +853,11 @@ export function mapWorkspaceInvoices(
         amountCents: Math.max(0, invoice.totalCents),
         due: invoiceDueLabel(invoice, referenceDate),
         status,
+        sentBy: extractDeliveryChannels(invoice.deliveryChannelsJson).filter(
+          (channel): channel is "whatsapp" | "email" =>
+            channel === "whatsapp" || channel === "email",
+        ),
+        lastSentAt: invoice.lastSentAt ?? undefined,
         items: invoiceItemsLabel(invoice, purchase, service),
         sourceType: invoice.sourceType,
         cashEntryId: invoice.cashEntryId ?? undefined,
@@ -1046,7 +1057,6 @@ export function mapWorkspaceDogs(
           firstNonEmpty(
             dog.emergencyNotes,
             dog.healthNotes,
-            dog.feedingNotes,
           ) ?? undefined,
         credits: creditServiceTypes.flatMap((serviceType) => {
           const value = accountCredits[serviceType] ?? 0;

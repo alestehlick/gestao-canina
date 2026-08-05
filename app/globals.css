@@ -1219,6 +1219,121 @@ h3 {
   --service-soft: var(--other-soft);
 }
 
+.agenda-dog-care {
+  display: grid;
+  gap: 7px;
+  max-width: 720px;
+  margin-top: 10px;
+}
+
+.agenda-dog-alert,
+.agenda-feeding-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.agenda-dog-alert {
+  border: 1px solid color-mix(in srgb, var(--danger) 20%, var(--line-soft));
+  background: color-mix(in srgb, var(--danger) 6%, var(--surface));
+  color: #7a3530;
+}
+
+.agenda-dog-alert > span {
+  display: grid;
+  width: 19px;
+  height: 19px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--danger) 14%, white);
+  font-size: 0.69rem;
+  font-weight: 850;
+}
+
+.agenda-dog-alert p,
+.agenda-feeding-note p {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.agenda-dog-alert strong {
+  display: block;
+  margin-bottom: 1px;
+  font-size: 0.66rem;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.agenda-feeding-note {
+  border: 1px solid color-mix(in srgb, var(--service-color) 18%, var(--line-soft));
+  background: color-mix(in srgb, var(--service-soft) 55%, var(--surface));
+}
+
+.agenda-feeding-note > span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 760;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.add-feeding-button {
+  width: fit-content;
+  min-height: 30px;
+  border: 1px dashed color-mix(in srgb, var(--service-color) 30%, var(--line));
+  border-radius: 8px;
+  background: transparent;
+  color: var(--forest);
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 0.69rem;
+  font-weight: 700;
+  text-align: left;
+}
+
+.agenda-feeding-editor {
+  display: grid;
+  gap: 7px;
+  border: 1px solid color-mix(in srgb, var(--service-color) 25%, var(--line));
+  border-radius: 9px;
+  background: var(--surface-muted);
+  padding: 10px;
+}
+
+.agenda-feeding-editor label {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 730;
+}
+
+.agenda-feeding-editor textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: 9px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.76rem;
+  resize: vertical;
+}
+
+.agenda-feeding-editor > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.secondary-button.compact {
+  min-height: 34px;
+  padding: 6px 11px;
+}
+
 .lodging-billing-status {
   display: flex;
   flex-wrap: wrap;
@@ -3009,6 +3124,8 @@ h3 {
 }
 
 .billable-row {
+  --service-color: var(--other);
+  --service-soft: var(--other-soft);
   display: grid;
   min-height: 58px;
   grid-template-columns: 24px 92px minmax(170px, 1.1fr) 1fr auto;
@@ -3040,6 +3157,53 @@ h3 {
 .billable-date {
   color: var(--muted);
   font-size: 0.7rem;
+}
+
+.billable-description > strong {
+  font-weight: 680;
+}
+
+.billable-amount {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.invoice-delivery-state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.delivery-channel,
+.invoice-delivery-state.not-sent {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  padding: 4px 7px;
+  font-size: 0.64rem;
+  font-weight: 720;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.delivery-channel.whatsapp {
+  border-color: color-mix(in srgb, #1a9b55 24%, var(--line-soft));
+  background: color-mix(in srgb, #1a9b55 8%, var(--surface));
+  color: #167244;
+}
+
+.delivery-channel.email {
+  border-color: color-mix(in srgb, var(--daycare) 24%, var(--line-soft));
+  background: color-mix(in srgb, var(--daycare) 7%, var(--surface));
+  color: #17668a;
+}
+
+.invoice-delivery-empty {
+  color: var(--faint);
 }
 
 .selection-bar {
@@ -4792,12 +4956,7 @@ h3 {
     display: contents;
   }
 
-  .attention-panel {
-    order: 0;
-    width: 100%;
-  }
-
-  .dashboard-rail > .compact-panel:not(.attention-panel) {
+  .dashboard-rail > .compact-panel {
     order: 2;
     width: 100%;
   }
@@ -4845,6 +5004,24 @@ h3 {
 
   .care-note {
     max-width: 100%;
+  }
+
+  .agenda-dog-care {
+    grid-column: 1 / -1;
+    margin-top: 8px;
+  }
+
+  .agenda-feeding-note {
+    display: grid;
+    gap: 3px;
+  }
+
+  .agenda-feeding-editor > div {
+    justify-content: stretch;
+  }
+
+  .agenda-feeding-editor button {
+    flex: 1;
   }
 
   .more-menu {
@@ -4934,6 +5111,119 @@ h3 {
     grid-column: 1 / -1;
     color: var(--muted);
     font-size: 0.72rem;
+  }
+
+  .invoice-mobile-list {
+    gap: 10px;
+  }
+
+  .invoice-mobile-list .mobile-data-card {
+    position: relative;
+    display: block;
+    overflow: hidden;
+    border-color: var(--line);
+    border-radius: 12px;
+    padding: 0;
+    box-shadow: 0 2px 8px rgb(30 45 38 / 4%);
+  }
+
+  .invoice-mobile-list .mobile-data-card::before {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 4px;
+    background: var(--gold);
+    content: "";
+  }
+
+  .invoice-mobile-list .mobile-data-card.invoice-paid::before {
+    background: var(--success);
+  }
+
+  .invoice-mobile-list .mobile-data-card.invoice-overdue::before {
+    background: var(--danger);
+  }
+
+  .invoice-mobile-list .mobile-card-main {
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px 12px;
+    border: 0;
+    background: transparent;
+    padding: 14px 14px 13px 17px;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+  }
+
+  .invoice-mobile-heading,
+  .invoice-mobile-heading strong,
+  .invoice-mobile-heading small {
+    display: block;
+    min-width: 0;
+  }
+
+  .invoice-mobile-heading small {
+    margin-bottom: 3px;
+    color: var(--muted);
+    font-size: 0.66rem;
+    font-weight: 680;
+    letter-spacing: 0.025em;
+  }
+
+  .invoice-mobile-heading strong {
+    overflow: hidden;
+    font-size: 0.88rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .invoice-mobile-items {
+    grid-column: 1 / -1;
+    color: var(--muted);
+    font-size: 0.72rem;
+    line-height: 1.45;
+  }
+
+  .invoice-mobile-list .invoice-delivery-state {
+    grid-column: 1 / -1;
+  }
+
+  .invoice-mobile-list .invoice-delivery-state.not-sent {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    color: var(--faint);
+    font-weight: 650;
+  }
+
+  .invoice-mobile-footer {
+    display: flex;
+    grid-column: 1 / -1;
+    align-items: end;
+    justify-content: space-between;
+    gap: 12px;
+    border-top: 1px solid var(--line-soft);
+    padding-top: 9px;
+  }
+
+  .invoice-mobile-footer small {
+    color: var(--muted);
+    font-size: 0.68rem;
+  }
+
+  .invoice-mobile-footer strong {
+    flex: 0 0 auto;
+    font-size: 0.94rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .invoice-mobile-list .cash-inclusion-mobile {
+    display: flex;
+    min-height: 42px;
+    margin-inline: 17px 14px;
+    padding: 9px 0 10px;
   }
 
   .finance-summary {
@@ -5089,36 +5379,66 @@ h3 {
   }
 
   .billable-row {
-    min-height: 100px;
-    grid-template-columns: 24px 1fr auto;
-    gap: 6px 10px;
-    padding-block: 10px;
+    position: relative;
+    min-height: 0;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    gap: 5px 10px;
+    overflow: hidden;
+    margin-top: 9px;
+    border: 1px solid var(--line-soft);
+    border-radius: 11px;
+    background: color-mix(in srgb, var(--service-soft) 34%, var(--surface));
+    padding: 12px 12px 12px 15px;
+  }
+
+  .billable-row:first-child {
+    margin-top: 0;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .billable-row::before {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 4px;
+    background: var(--service-color);
+    content: "";
   }
 
   .billable-row > input {
-    grid-row: 1 / span 3;
+    grid-row: 1 / span 4;
     align-self: start;
     margin-top: 2px;
   }
 
   .billable-date {
-    grid-column: 2;
+    grid-column: 2 / -1;
     grid-row: 1;
+    font-size: 0.66rem;
+    font-weight: 690;
   }
 
-  .billable-row > span:nth-of-type(2) {
+  .billable-identity {
     grid-column: 2;
     grid-row: 2;
   }
 
-  .billable-row > span:nth-of-type(3) {
-    grid-column: 2;
-    grid-row: 3;
+  .billable-identity > strong {
+    font-size: 0.86rem;
   }
 
-  .billable-row > strong {
+  .billable-description {
+    grid-column: 2 / -1;
+    grid-row: 3;
+    color: var(--muted);
+    font-size: 0.72rem;
+    line-height: 1.4;
+  }
+
+  .billable-amount {
     grid-column: 3;
-    grid-row: 1 / span 3;
+    grid-row: 2;
+    align-self: start;
+    font-size: 0.87rem;
   }
 
   .selection-bar {

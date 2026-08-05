@@ -316,7 +316,7 @@ export async function DELETE(
     const establishmentId = identity.establishmentId!;
     const db = getDb();
     const [account] = await db
-      .select({ id: customerAccounts.id })
+      .select({ id: customerAccounts.id, displayName: customerAccounts.displayName })
       .from(customerAccounts)
       .where(
         and(
@@ -354,6 +354,7 @@ export async function DELETE(
         entityType: "customer",
         entityId: id,
         requestId,
+        metadataJson: JSON.stringify({ name: account.displayName }),
       }),
     ]);
     return json({ deleted: true });

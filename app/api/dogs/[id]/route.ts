@@ -268,7 +268,7 @@ export async function DELETE(
     const establishmentId = identity.establishmentId!;
     const db = getDb();
     const [dog] = await db
-      .select({ id: dogs.id, photoObjectKey: dogs.photoObjectKey })
+      .select({ id: dogs.id, name: dogs.name, photoObjectKey: dogs.photoObjectKey })
       .from(dogs)
       .where(
         and(
@@ -308,6 +308,7 @@ export async function DELETE(
         entityType: "dog",
         entityId: id,
         requestId,
+        metadataJson: JSON.stringify({ name: dog.name }),
       }),
     ]);
     if (dog.photoObjectKey) {

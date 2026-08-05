@@ -136,6 +136,13 @@ function shortDate(value: string | null) {
   return formatBrazilianDate(value);
 }
 
+function portalTimeLabel(value: string) {
+  if (value === "manha") return "Manhã";
+  if (value === "tarde") return "Tarde";
+  if (value === "noite") return "Noite";
+  return value;
+}
+
 function invoiceItemDetail(item: PortalData["invoices"][number]["items"][number]) {
   if (
     item.serviceCode === "hotel" &&
@@ -939,7 +946,9 @@ function PortalAppointmentList({
               {appointment.endDate !== appointment.startDate
                 ? ` a ${shortDate(appointment.endDate)}`
                 : ""}
-              {appointment.startTime ? ` · ${appointment.startTime}` : ""}
+              {appointment.startTime
+                ? ` · ${portalTimeLabel(appointment.startTime)}`
+                : ""}
             </small>
           </div>
           <span className={`status-pill ${appointment.status}`}>

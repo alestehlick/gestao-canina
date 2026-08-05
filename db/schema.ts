@@ -1110,6 +1110,10 @@ export const auditEvents = sqliteTable(
     occurredAt: text("occurred_at").notNull().default(now),
   },
   (table) => [
+    index("audit_events_establishment_date_idx").on(
+      table.establishmentId,
+      table.occurredAt,
+    ),
     index("audit_events_entity_idx").on(
       table.entityType,
       table.entityId,

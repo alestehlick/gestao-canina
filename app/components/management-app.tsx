@@ -46,6 +46,7 @@ import {
 } from "@/lib/demo-data";
 import {
   isReadyWorkspacePayload,
+  mapWorkspaceActivities,
   toWorkspaceServiceCode,
   transformWorkspacePayload,
   type WorkspaceOnboardingPayload,
@@ -334,6 +335,43 @@ function formatNearbyDate(value: string) {
 }
 
 type InvoiceDeliveryChannel = "whatsapp" | "email" | "save";
+type DayPeriod = "manha" | "tarde" | "noite";
+
+const dayPeriodLabels: Record<DayPeriod, string> = {
+  manha: "Manhã",
+  tarde: "Tarde",
+  noite: "Noite",
+};
+
+function isClockTime(value: string) {
+  return /^\d{2}:\d{2}$/.test(value);
+}
+
+function isDayPeriod(value: string): value is DayPeriod {
+  return value === "manha" || value === "tarde" || value === "noite";
+}
+
+function formatOperationalTime(value: string | undefined) {
+  if (!value || value === "Sem horário") return "Sem horário";
+  return isDayPeriod(value) ? dayPeriodLabels[value] : value;
+}
+
+function operationalTimeOrder(value: string) {
+  if (isDayPeriod(value)) {
+    return { manha: 8 * 60, tarde: 14 * 60, noite: 19 * 60 }[value];
+  }
+  if (!isClockTime(value)) return null;
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function invalidTimeOrder(start: string, end: string) {
+  const startOrder = operationalTimeOrder(start);
+  const endOrder = operationalTimeOrder(end);
+  if (startOrder === null || endOrder === null) return false;
+  if (isDayPeriod(start) && isDayPeriod(end)) return endOrder < startOrder;
+  return endOrder <= startOrder;
+}
 
 function invoiceDateToken(value: string | undefined) {
   if (!value) return operationalToday;
@@ -1638,7 +1676,7 @@ export function ManagementApp() {
       setToast({ message: "Revise os campos do serviço." });
       return;
     }
-    if (time && endTime && endTime <= time && endDate === date) {
+    if (time && endTime && invalidTimeOrder(time, endTime) && endDate === date) {
       setToast({ message: "O horário final deve ser posterior ao inicial." });
       return;
     }
@@ -2212,7 +2250,7 @@ export function ManagementApp() {
         return;
       }
     }
-    if (time && endTime && endDate === date && endTime <= time) {
+    if (time && endTime && endDate === date && invalidTimeOrder(time, endTime)) {
       setToast({ message: "O horário final deve ser posterior ao inicial." });
       return;
     }
@@ -2878,6 +2916,40 @@ export function ManagementApp() {
     setDialog("invoice");
   }
 
+  async function loadActivityPeriod(from: string, to: string) {
+    if (runtimeMode !== "ready" || !workspacePayload) {
+      return {
+        activities: auditFixtures.filter(
+          (event) =>
+            !event.occurredOn ||
+            (event.occurredOn >= from && event.occurredOn <= to),
+        ),
+        truncated: false,
+      };
+    }
+    try {
+      const response = await requestJson<{
+        activities: WorkspaceReadyPayload["activities"];
+        truncated: boolean;
+      }>(`/api/activities?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+      return {
+        activities: mapWorkspaceActivities({
+          ...workspacePayload,
+          activities: response.activities,
+        }),
+        truncated: response.truncated,
+      };
+    } catch (error) {
+      setToast({
+        message:
+          error instanceof Error
+            ? error.message
+            : "Não foi possível consultar esse período.",
+      });
+      return null;
+    }
+  }
+
   async function markInvoiceDelivered(
     invoiceId: string,
     channel: "whatsapp" | "email",
@@ -3370,6 +3442,7 @@ export function ManagementApp() {
                   ? {
                       ...current.invoice,
                       status: "paid",
+                      paidAt,
                       due: `Pago em ${formatShortDate(paidAt)}`,
                     }
                   : current.invoice,
@@ -3384,7 +3457,12 @@ export function ManagementApp() {
     setInvoices((current) =>
       current.map((invoice) =>
         invoice.id === invoiceId
-          ? { ...invoice, status: "paid", due: "Pago agora" }
+          ? {
+              ...invoice,
+              status: "paid",
+              paidAt,
+              due: `Pago em ${formatShortDate(paidAt)}`,
+            }
           : invoice,
       ),
     );
@@ -3431,7 +3509,7 @@ export function ManagementApp() {
     }
     setInvoiceState({
       ...invoiceState,
-      invoice: { ...invoiceState.invoice, status: "paid" },
+      invoice: { ...invoiceState.invoice, status: "paid", paidAt },
       step: "paid",
     });
     setToast({
@@ -4060,6 +4138,12 @@ export function ManagementApp() {
               onAddCredits={() => openCreditPackage()}
               onOpenReceipt={openReceipt}
               onToggleCash={toggleInvoiceCash}
+              receivedLast30DaysCents={
+                workspacePayload?.billing.receivedLast30DaysCents
+              }
+              receivedLast30DaysCount={
+                workspacePayload?.billing.receivedLast30DaysCount
+              }
             />
           )}
           {view === "cash" && signedInRole === "owner" && (
@@ -4069,7 +4153,10 @@ export function ManagementApp() {
             />
           )}
           {view === "activity" && (
-            <ActivityView activities={activities} />
+            <ActivityView
+              activities={activities}
+              onLoadPeriod={loadActivityPeriod}
+            />
           )}
           {view === "access" && signedInRole === "owner" && (
             <AccessView customers={customers} />
@@ -4261,14 +4348,46 @@ export function ManagementApp() {
             </label>
             {serviceDraftType !== "transport" && (
               <>
-                <label className="field">
-                  <span>{serviceDraftType === "hotel" ? "Horário de entrada (opcional)" : "Horário inicial *"}</span>
-                  <input name="time" type="time" defaultValue={serviceDraftType === "daycare" ? daycareStartTime : "09:00"} required={serviceDraftType !== "hotel"} />
-                </label>
-                <label className="field">
-                  <span>{serviceDraftType === "hotel" ? "Horário de saída (opcional)" : "Horário final"}</span>
-                  <input name="endTime" type="time" defaultValue={serviceDraftType === "daycare" ? daycareEndTime : "17:00"} />
-                </label>
+                {serviceDraftType === "hotel" || serviceDraftType === "daycare" ? (
+                  <>
+                    <ServiceTimeInput
+                      key={`new-${serviceDraftType}-start`}
+                      name="time"
+                      label={
+                        serviceDraftType === "hotel"
+                          ? "Entrada (opcional)"
+                          : "Check-in *"
+                      }
+                      defaultValue={
+                        serviceDraftType === "daycare" ? daycareStartTime : ""
+                      }
+                      required={serviceDraftType === "daycare"}
+                    />
+                    <ServiceTimeInput
+                      key={`new-${serviceDraftType}-end`}
+                      name="endTime"
+                      label={
+                        serviceDraftType === "hotel"
+                          ? "Saída (opcional)"
+                          : "Check-out"
+                      }
+                      defaultValue={
+                        serviceDraftType === "daycare" ? daycareEndTime : ""
+                      }
+                    />
+                  </>
+                ) : (
+                  <>
+                    <label className="field">
+                      <span>Horário inicial *</span>
+                      <input name="time" type="time" defaultValue="09:00" required />
+                    </label>
+                    <label className="field">
+                      <span>Horário final</span>
+                      <input name="endTime" type="time" defaultValue="17:00" />
+                    </label>
+                  </>
+                )}
               </>
             )}
             {serviceDraftType === "transport" && (
@@ -4545,35 +4664,51 @@ export function ManagementApp() {
             </label>
             {editDraftType !== "transport" && (
               <>
-                <label className="field">
-                  <span>
-                    {editDraftType === "hotel"
-                      ? "Horário de entrada (opcional)"
-                      : "Horário inicial *"}
-                  </span>
-                  <input
-                    name="time"
-                    type="time"
-                    defaultValue={
-                      bookingToEdit.time === "Sem horário"
-                        ? ""
-                        : bookingToEdit.time
-                    }
-                    required={editDraftType !== "hotel"}
-                  />
-                </label>
-                <label className="field">
-                  <span>
-                    {editDraftType === "hotel"
-                      ? "Horário de saída (opcional)"
-                      : "Horário final"}
-                  </span>
-                  <input
-                    name="endTime"
-                    type="time"
-                    defaultValue={bookingToEdit.endTime}
-                  />
-                </label>
+                {editDraftType === "hotel" || editDraftType === "daycare" ? (
+                  <>
+                    <ServiceTimeInput
+                      key={`edit-${bookingToEdit.id}-${editDraftType}-start`}
+                      name="time"
+                      label={editDraftType === "hotel" ? "Entrada (opcional)" : "Check-in *"}
+                      defaultValue={
+                        bookingToEdit.time === "Sem horário"
+                          ? ""
+                          : bookingToEdit.time
+                      }
+                      required={editDraftType === "daycare"}
+                    />
+                    <ServiceTimeInput
+                      key={`edit-${bookingToEdit.id}-${editDraftType}-end`}
+                      name="endTime"
+                      label={editDraftType === "hotel" ? "Saída (opcional)" : "Check-out"}
+                      defaultValue={bookingToEdit.endTime}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <label className="field">
+                      <span>Horário inicial *</span>
+                      <input
+                        name="time"
+                        type="time"
+                        defaultValue={
+                          bookingToEdit.time === "Sem horário"
+                            ? ""
+                            : bookingToEdit.time
+                        }
+                        required
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Horário final</span>
+                      <input
+                        name="endTime"
+                        type="time"
+                        defaultValue={bookingToEdit.endTime}
+                      />
+                    </label>
+                  </>
+                )}
               </>
             )}
             {editDraftType === "transport" && (
@@ -5964,6 +6099,54 @@ function DateNavigator({
   );
 }
 
+function ServiceTimeInput({
+  name,
+  label,
+  defaultValue = "",
+  required = false,
+}: {
+  name: "time" | "endTime";
+  label: string;
+  defaultValue?: string;
+  required?: boolean;
+}) {
+  const [value, setValue] = useState(defaultValue);
+  return (
+    <label className="field time-choice-field">
+      <span>{label}</span>
+      <div className="time-choice-control">
+        <input type="hidden" name={name} value={value} />
+        <input
+          type="time"
+          value={isClockTime(value) ? value : ""}
+          aria-label={`${label}: horário exato`}
+          onChange={(event) => setValue(event.target.value)}
+        />
+        <div className="day-period-options" aria-label={`${label}: período do dia`}>
+          {(Object.entries(dayPeriodLabels) as [DayPeriod, string][]).map(
+            ([period, periodLabel]) => (
+              <button
+                type="button"
+                key={period}
+                className={value === period ? "active" : ""}
+                onClick={() => setValue(period)}
+                aria-pressed={value === period}
+              >
+                {periodLabel}
+              </button>
+            ),
+          )}
+        </div>
+      </div>
+      <small>
+        {required
+          ? "Escolha um horário exato ou um período do dia."
+          : "Opcional: informe um horário exato ou apenas o período."}
+      </small>
+    </label>
+  );
+}
+
 function AgendaFilters({
   value,
   onChange,
@@ -6089,6 +6272,42 @@ function AgendaCard({
       ? null
       : primaryAction(booking.status);
   const dogAlerts = agendaDate ? agendaAlertsForDog(dog, agendaDate) : [];
+  const lodgingDayPosition =
+    booking.serviceType === "hotel" && agendaDate
+      ? agendaDate === booking.date
+        ? "arrival"
+        : agendaDate === booking.endDate
+          ? "departure"
+          : "stay"
+      : null;
+  const displayedTime =
+    lodgingDayPosition === "arrival"
+      ? booking.time === "Sem horário"
+        ? "Entrada"
+        : formatOperationalTime(booking.time)
+      : lodgingDayPosition === "departure"
+        ? booking.endTime
+          ? formatOperationalTime(booking.endTime)
+          : "Saída"
+        : lodgingDayPosition === "stay"
+          ? "Todo o dia"
+          : formatOperationalTime(booking.time);
+  const displayedTimeCaption =
+    lodgingDayPosition === "arrival"
+      ? booking.time === "Sem horário"
+        ? "dia de chegada"
+        : "chegada"
+      : lodgingDayPosition === "departure"
+        ? booking.endTime
+          ? "saída até este horário"
+          : "dia de saída"
+        : lodgingDayPosition === "stay"
+          ? "hospedado"
+          : booking.time !== "Sem horário"
+            ? booking.endTime
+              ? `até ${formatOperationalTime(booking.endTime)}`
+              : "Horário inicial"
+            : null;
   return (
     <article
       className={`agenda-card service-${booking.serviceType} status-${booking.status}`}
@@ -6102,12 +6321,8 @@ function AgendaCard({
               : ""}
           </span>
         )}
-        <strong>{booking.time}</strong>
-        {booking.time !== "Sem horário" && (
-          <span>
-            {booking.endTime ? `até ${booking.endTime}` : "Horário inicial"}
-          </span>
-        )}
+        <strong>{displayedTime}</strong>
+        {displayedTimeCaption && <span>{displayedTimeCaption}</span>}
       </div>
       <DogAvatar dog={dog} />
       <div className="agenda-main">
@@ -7152,6 +7367,8 @@ function BillingView({
   onAddCredits,
   onOpenReceipt,
   onToggleCash,
+  receivedLast30DaysCents,
+  receivedLast30DaysCount,
 }: {
   invoices: Invoice[];
   billableServices: BillableService[];
@@ -7168,6 +7385,8 @@ function BillingView({
   onAddCredits: () => void;
   onOpenReceipt: (receipt: ServiceReceipt) => void;
   onToggleCash: (invoice: Invoice) => void;
+  receivedLast30DaysCents?: number;
+  receivedLast30DaysCount?: number;
 }) {
   const selectedTotal = billableServices
     .filter((item) => selectedBillables.includes(item.id))
@@ -7178,11 +7397,22 @@ function BillingView({
   const openInvoiceCount = invoices.filter(
     (invoice) => invoice.status !== "paid",
   ).length;
-  const paidInvoices = invoices.filter((invoice) => invoice.status === "paid");
+  const paidWindowStart = shiftDate(operationalToday, -29);
+  const paidInvoices = invoices.filter(
+    (invoice) =>
+      invoice.status === "paid" &&
+      Boolean(
+        invoice.paidAt &&
+          invoice.paidAt >= paidWindowStart &&
+          invoice.paidAt <= operationalToday,
+      ),
+  );
   const recordedPaidTotal = paidInvoices.reduce(
     (total, invoice) => total + invoice.amountCents,
     0,
   );
+  const receivedTotal = receivedLast30DaysCents ?? recordedPaidTotal;
+  const receivedCount = receivedLast30DaysCount ?? paidInvoices.length;
   const availableCredits = customers.reduce(
     (total, customer) => total + totalCredits(creditBalances, customer.id),
     0,
@@ -7203,12 +7433,11 @@ function BillingView({
           </small>
         </div>
         <div>
-          <span>Recebido registrado</span>
-          <strong>{formatCurrency(recordedPaidTotal)}</strong>
+          <span>Recebido · últimos 30 dias</span>
+          <strong>{formatCurrency(receivedTotal)}</strong>
           <small>
-            {paidInvoices.length}{" "}
-            {paidInvoices.length === 1 ? "cobrança paga" : "cobranças pagas"} ·
-            por fatura
+            {receivedCount}{" "}
+            {receivedCount === 1 ? "pagamento" : "pagamentos"} no período
           </small>
         </div>
         <div>
@@ -7795,19 +8024,98 @@ function InvoiceDeliveryStatus({
   );
 }
 
-function ActivityView({ activities }: { activities: AuditActivity[] }) {
+function ActivityView({
+  activities,
+  onLoadPeriod,
+}: {
+  activities: AuditActivity[];
+  onLoadPeriod: (
+    from: string,
+    to: string,
+  ) => Promise<{ activities: AuditActivity[]; truncated: boolean } | null>;
+}) {
+  const defaultFrom = shiftDate(operationalToday, -4);
+  const [customActivities, setCustomActivities] = useState<AuditActivity[]>([]);
+  const [periodFrom, setPeriodFrom] = useState(defaultFrom);
+  const [periodTo, setPeriodTo] = useState(operationalToday);
+  const [appliedFrom, setAppliedFrom] = useState(defaultFrom);
+  const [appliedTo, setAppliedTo] = useState(operationalToday);
+  const [periodOpen, setPeriodOpen] = useState(false);
+  const [periodLoading, setPeriodLoading] = useState(false);
+  const [truncated, setTruncated] = useState(false);
+
+  async function submitPeriod(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!periodFrom || !periodTo || periodTo < periodFrom) return;
+    setPeriodLoading(true);
+    const result = await onLoadPeriod(periodFrom, periodTo);
+    setPeriodLoading(false);
+    if (!result) return;
+    setCustomActivities(result.activities);
+    setTruncated(result.truncated);
+    setAppliedFrom(periodFrom);
+    setAppliedTo(periodTo);
+    setPeriodOpen(false);
+  }
+
+  const defaultPeriod =
+    appliedFrom === defaultFrom && appliedTo === operationalToday;
+  const displayedActivities = defaultPeriod ? activities : customActivities;
   return (
     <section className="panel full-panel">
       <div className="panel-heading">
         <div>
-          <p className="section-kicker">Hoje</p>
+          <p className="section-kicker">
+            {defaultPeriod ? "Últimos 5 dias" : "Período consultado"}
+          </p>
           <h2>Registro de atividades</h2>
+          <small className="audit-period-label">
+            {formatShortDate(appliedFrom)} a {formatShortDate(appliedTo)}
+          </small>
         </div>
-        <span className="audit-badge">Histórico protegido</span>
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={() => setPeriodOpen((open) => !open)}
+          aria-expanded={periodOpen}
+        >
+          {periodOpen ? "Fechar período" : "Consultar outro período"}
+        </button>
       </div>
-      {activities.length ? (
+      {periodOpen && (
+        <form className="audit-period-form" onSubmit={submitPeriod}>
+          <label className="field">
+            <span>Data inicial</span>
+            <BrazilianDateInput
+              value={periodFrom}
+              max={periodTo}
+              ariaLabel="Data inicial do histórico"
+              onChange={setPeriodFrom}
+            />
+          </label>
+          <label className="field">
+            <span>Data final</span>
+            <BrazilianDateInput
+              value={periodTo}
+              min={periodFrom}
+              max={operationalToday}
+              ariaLabel="Data final do histórico"
+              onChange={setPeriodTo}
+            />
+          </label>
+          <button className="primary-button" type="submit" disabled={periodLoading}>
+            {periodLoading ? "Consultando…" : "Mostrar atividades"}
+          </button>
+        </form>
+      )}
+      {truncated && (
+        <p className="audit-limit-note">
+          O período possui muitos registros. Foram mostradas as 1.000 atividades mais recentes.
+        </p>
+      )}
+      {displayedActivities.length ? (
         <div className="audit-list">
-          {activities.map((event) => (
+          {displayedActivities.map((event) => (
             <div className="audit-row" key={event.id}>
               <span className="audit-time">{event.time}</span>
               <span className="audit-line" aria-hidden="true" />
@@ -7821,8 +8129,8 @@ function ActivityView({ activities }: { activities: AuditActivity[] }) {
         </div>
       ) : (
         <EmptyState
-          title="Nenhuma atividade registrada ainda"
-          description="As ações importantes aparecerão aqui conforme a equipe usar o sistema."
+          title="Nenhuma atividade neste período"
+          description="Escolha outro intervalo para consultar registros anteriores."
         />
       )}
       <div className="audit-note">

@@ -301,6 +301,13 @@ export type WorkspaceAuditEvent = {
   result: "success" | "denied" | "failed";
   metadataJson: string | null;
   occurredAt: string;
+  subjectName?: string | null;
+  secondaryName?: string | null;
+  serviceName?: string | null;
+  eventDate?: string | null;
+  amountCents?: number | null;
+  referenceNumber?: string | null;
+  currentStatus?: string | null;
 };
 
 export type WorkspaceReadyPayload = {
@@ -326,6 +333,8 @@ export type WorkspaceReadyPayload = {
   agenda: WorkspaceAppointment[];
   tasks: WorkspaceTask[];
   billing: {
+    receivedLast30DaysCents: number;
+    receivedLast30DaysCount: number;
     invoices: WorkspaceInvoice[];
     creditPackages: WorkspaceCreditPackage[];
     creditPurchases: WorkspaceCreditPurchase[];
@@ -853,6 +862,7 @@ export function mapWorkspaceInvoices(
         amountCents: Math.max(0, invoice.totalCents),
         due: invoiceDueLabel(invoice, referenceDate),
         status,
+        paidAt: invoice.paidAt?.slice(0, 10) ?? undefined,
         sentBy: extractDeliveryChannels(invoice.deliveryChannelsJson).filter(
           (channel): channel is "whatsapp" | "email" =>
             channel === "whatsapp" || channel === "email",
@@ -1085,24 +1095,110 @@ export function mapWorkspaceServicePrices(
 export function mapWorkspaceActivities(
   payload: WorkspaceReadyPayload,
 ): AuditActivity[] {
-  return payload.activities.map((event) => ({
-    id: event.id,
-    time: new Intl.DateTimeFormat("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
+  return payload.activities.map((event) => {
+    const occurredAt = new Date(event.occurredAt);
+    const occurredOn = new Intl.DateTimeFormat("en-CA", {
       year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
+      month: "2-digit",
+      day: "2-digit",
       timeZone: payload.establishment.timezone,
-    }).format(new Date(event.occurredAt)),
-    actor: event.actorName
-      ? `${event.actorName} · ${roleLabel(event.actorRole)}`
-      : "Sistema",
-    action: activityActionLabel(event.action),
-    detail:
-      event.reason?.trim() ||
-      entityTypeLabel(event.entityType),
-  }));
+    }).format(occurredAt);
+    return {
+      id: event.id,
+      time: new Intl.DateTimeFormat("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: payload.establishment.timezone,
+      }).format(occurredAt),
+      occurredOn,
+      actor: event.actorName
+        ? `${event.actorName} · ${roleLabel(event.actorRole)}`
+        : "Sistema",
+      action: activityActionLabel(event.action),
+      detail: activityDetail(event),
+    };
+  });
+}
+
+function activityDetail(event: WorkspaceAuditEvent) {
+  const metadata = parseActivityMetadata(event.metadataJson);
+  const parts: string[] = [];
+
+  if (event.referenceNumber) {
+    parts.push(
+      event.entityType === "credit_receipt"
+        ? `Recibo ${event.referenceNumber}`
+        : `Fatura ${event.referenceNumber}`,
+    );
+  }
+  if (event.subjectName?.trim()) parts.push(event.subjectName.trim());
+  if (event.secondaryName?.trim()) parts.push(event.secondaryName.trim());
+  if (event.serviceName?.trim()) parts.push(event.serviceName.trim());
+  if (event.eventDate && /^\d{4}-\d{2}-\d{2}$/.test(event.eventDate)) {
+    parts.push(formatBrazilianDate(event.eventDate));
+  }
+  if (typeof event.amountCents === "number") {
+    parts.push(
+      new Intl.NumberFormat("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+      }).format(event.amountCents / 100),
+    );
+  }
+
+  const previousStatus = activityStatusLabel(metadata.previousStatus);
+  const nextStatus = activityStatusLabel(metadata.status ?? event.currentStatus);
+  if (previousStatus && nextStatus && previousStatus !== nextStatus) {
+    parts.push(`${previousStatus} → ${nextStatus}`);
+  } else if (nextStatus && event.action === "appointment.status_changed") {
+    parts.push(nextStatus);
+  }
+
+  if (event.reason?.trim()) parts.push(`Motivo: ${event.reason.trim()}`);
+  if (!parts.length) {
+    const metadataName = firstActivityMetadataText(metadata, [
+      "name",
+      "dogName",
+      "customerName",
+      "email",
+      "title",
+      "description",
+    ]);
+    if (metadataName) parts.push(metadataName);
+  }
+  return parts.length ? parts.join(" · ") : entityTypeLabel(event.entityType);
+}
+
+function parseActivityMetadata(value: string | null) {
+  if (!value) return {} as Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {} as Record<string, unknown>;
+  }
+}
+
+function firstActivityMetadataText(
+  metadata: Record<string, unknown>,
+  keys: string[],
+) {
+  for (const key of keys) {
+    if (typeof metadata[key] === "string" && metadata[key].trim()) {
+      return metadata[key].trim();
+    }
+  }
+  return "";
+}
+
+function activityStatusLabel(value: unknown) {
+  if (typeof value !== "string") return "";
+  return statusLabels[value as BookingStatus] ?? value;
 }
 
 export function transformWorkspacePayload(
@@ -1167,6 +1263,8 @@ function activityActionLabel(action: string) {
     "credit_receipt.failed": "Falha no envio do recibo registrada",
     "invoice.created": "Cobrança preparada",
     "invoice.payment_recorded": "Pagamento registrado",
+    "invoice.sent": "Fatura enviada",
+    "invoice.voided": "Fatura cancelada",
     "cash.entry_created": "Lançamento incluído no Caixa",
     "cash.entry_updated": "Lançamento do Caixa atualizado",
     "cash.entry_excluded": "Lançamento desconsiderado do Caixa",
@@ -1186,6 +1284,13 @@ function activityActionLabel(action: string) {
     "customer_request.approved": "Pedido de cliente aprovado",
     "customer_request.rejected": "Pedido de cliente não aprovado",
     "customer.profile_updated": "Cliente atualizou seus dados",
+    "customer.archived": "Cliente inativado",
+    "customer.deleted": "Cliente excluído",
+    "dog.archived": "Cão inativado",
+    "dog.deleted": "Cão excluído",
+    "tasks.completed_cleared": "Tarefas concluídas removidas do quadro",
+    "credit_package.created": "Pacote de créditos criado",
+    "credit_package.updated": "Pacote de créditos atualizado",
   };
   return labels[action] ?? "Ação administrativa registrada";
 }
@@ -1405,7 +1510,9 @@ function stableDogColor(id: string) {
 }
 
 function compareBookings(a: Booking, b: Booking) {
-  return `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`);
+  return `${a.date}T${operationalTimeSortKey(a.time)}`.localeCompare(
+    `${b.date}T${operationalTimeSortKey(b.time)}`,
+  );
 }
 
 function nextServiceLabel(booking: Booking, referenceDate: string) {
@@ -1415,7 +1522,22 @@ function nextServiceLabel(booking: Booking, referenceDate: string) {
       : booking.date === addDays(referenceDate, 1)
         ? "amanhã"
         : formatBrazilianDate(booking.date);
-  return `${booking.service} · ${date}, ${booking.time}`;
+  return `${booking.service} · ${date}, ${operationalTimeLabel(booking.time)}`;
+}
+
+function operationalTimeSortKey(value: string) {
+  if (value === "manha") return "08:00";
+  if (value === "tarde") return "14:00";
+  if (value === "noite") return "19:00";
+  if (value === "Sem horário") return "99:99";
+  return value;
+}
+
+function operationalTimeLabel(value: string) {
+  if (value === "manha") return "Manhã";
+  if (value === "tarde") return "Tarde";
+  if (value === "noite") return "Noite";
+  return value;
 }
 
 function addDays(date: string, days: number) {

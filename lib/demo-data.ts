@@ -111,6 +111,7 @@ export type Invoice = {
   amountCents: number;
   due: string;
   status: "pending" | "paid" | "overdue";
+  paidAt?: string;
   sentBy?: ("whatsapp" | "email")[];
   lastSentAt?: string;
   items: string;
@@ -610,6 +611,7 @@ export const demoInvoices: Invoice[] = [
     amountCents: 18000,
     due: "Pago em 27/07",
     status: "paid",
+    paidAt: "2026-07-27",
     sentBy: ["whatsapp"],
     lastSentAt: "2026-07-27T15:20:00.000Z",
     cashEntryId: "cash-invoice-183",
@@ -737,6 +739,7 @@ export const demoReceipts: ServiceReceipt[] = [
 export type AuditActivity = {
   id: string;
   time: string;
+  occurredOn?: string;
   actor: string;
   action: string;
   detail: string;
@@ -746,6 +749,7 @@ export const auditFixtures: AuditActivity[] = [
   {
     id: "audit-1",
     time: "10:42",
+    occurredOn: "2026-08-05",
     actor: "Administrador fictício",
     action: "Pagamento registrado",
     detail: "Cobrança 000183 · R$ 180,00",
@@ -753,6 +757,7 @@ export const auditFixtures: AuditActivity[] = [
   {
     id: "audit-2",
     time: "09:56",
+    occurredOn: "2026-08-05",
     actor: "Administrador fictício",
     action: "Atendimento concluído",
     detail: "Nina · Taxi-dog de ida",
@@ -760,6 +765,7 @@ export const auditFixtures: AuditActivity[] = [
   {
     id: "audit-3",
     time: "09:18",
+    occurredOn: "2026-08-04",
     actor: "Administrador fictício",
     action: "Chegada registrada",
     detail: "Nina · Creche",
@@ -767,6 +773,7 @@ export const auditFixtures: AuditActivity[] = [
   {
     id: "audit-4",
     time: "08:03",
+    occurredOn: "2026-08-03",
     actor: "Administrador fictício",
     action: "Rota iniciada",
     detail: "Bento · Taxi-dog de ida",

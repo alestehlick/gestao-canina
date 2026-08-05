@@ -17,6 +17,23 @@ import {
 
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
 const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
+const operationalTimePattern = /^(?:\d{2}:\d{2}|manha|tarde|noite)$/;
+
+function operationalTimeOrder(value: string) {
+  if (value === "manha") return 8 * 60;
+  if (value === "tarde") return 14 * 60;
+  if (value === "noite") return 19 * 60;
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function invalidTimeRange(start: string, end: string) {
+  const bothPeriods =
+    !start.includes(":") && !end.includes(":");
+  return bothPeriods
+    ? operationalTimeOrder(end) < operationalTimeOrder(start)
+    : operationalTimeOrder(end) <= operationalTimeOrder(start);
+}
 
 function shiftIsoDate(date: string, days: number) {
   const value = new Date(`${date}T00:00:00.000Z`);
@@ -120,13 +137,18 @@ export async function POST(request: Request) {
         "A data final deve ser igual ou posterior à inicial.",
       );
     }
-    if (startTime && !/^\d{2}:\d{2}$/.test(startTime)) {
+    if (startTime && !operationalTimePattern.test(startTime)) {
       throw new HttpError(400, "invalid_time", "O horário inicial é inválido.");
     }
-    if (endTime && !/^\d{2}:\d{2}$/.test(endTime)) {
+    if (endTime && !operationalTimePattern.test(endTime)) {
       throw new HttpError(400, "invalid_time", "O horário final é inválido.");
     }
-    if (startDate === endDate && startTime && endTime && endTime <= startTime) {
+    if (
+      startDate === endDate &&
+      startTime &&
+      endTime &&
+      invalidTimeRange(startTime, endTime)
+    ) {
       throw new HttpError(
         400,
         "invalid_time_range",

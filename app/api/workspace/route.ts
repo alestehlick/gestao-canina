@@ -9,10 +9,8 @@ import {
 } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
-  appUsers,
   appointmentItems,
   appointments,
-  auditEvents,
   cashEntries,
   creditMovements,
   creditPackages,
@@ -30,6 +28,7 @@ import {
   tutors,
 } from "@/db/schema";
 import { getIdentity } from "@/lib/server/auth";
+import { loadAuditLog } from "@/lib/server/audit-log";
 import { errorResponse, HttpError, json } from "@/lib/server/http";
 
 export const dynamic = "force-dynamic";
@@ -151,6 +150,7 @@ export async function GET(request: Request) {
       invoiceRows,
       invoiceItemRows,
       invoicePaymentRows,
+      invoicePaymentSummaryRows,
       packageRows,
       purchaseRows,
       balanceRows,
@@ -329,6 +329,19 @@ export async function GET(request: Request) {
         .where(eq(invoicePayments.establishmentId, establishmentId)),
       db
         .select({
+          amountCents: sql<number>`coalesce(sum(${invoicePayments.amountCents}), 0)`,
+          paymentCount: sql<number>`count(*)`,
+        })
+        .from(invoicePayments)
+        .where(
+          and(
+            eq(invoicePayments.establishmentId, establishmentId),
+            gte(invoicePayments.paidAt, `${addDays(defaultFrom, -29)}T00:00:00.000Z`),
+            lte(invoicePayments.paidAt, `${defaultFrom}T23:59:59.999Z`),
+          ),
+        ),
+      db
+        .select({
           id: creditPackages.id,
           serviceCatalogId: creditPackages.serviceCatalogId,
           serviceCode: serviceCatalog.code,
@@ -370,24 +383,12 @@ export async function GET(request: Request) {
         .where(eq(creditReceipts.establishmentId, establishmentId))
         .orderBy(desc(creditReceipts.issuedAt))
         .limit(300),
-      db
-        .select({
-          id: auditEvents.id,
-          actorRole: auditEvents.actorRole,
-          actorName: appUsers.displayName,
-          action: auditEvents.action,
-          entityType: auditEvents.entityType,
-          entityId: auditEvents.entityId,
-          reason: auditEvents.reason,
-          result: auditEvents.result,
-          metadataJson: auditEvents.metadataJson,
-          occurredAt: auditEvents.occurredAt,
-        })
-        .from(auditEvents)
-        .leftJoin(appUsers, eq(appUsers.id, auditEvents.actorUserId))
-        .where(eq(auditEvents.establishmentId, establishmentId))
-        .orderBy(desc(auditEvents.occurredAt))
-        .limit(200),
+      loadAuditLog(
+        establishmentId,
+        addDays(defaultFrom, -4),
+        defaultFrom,
+        500,
+      ),
     ]);
 
     const tutorsByAccount = new Map<
@@ -532,6 +533,12 @@ export async function GET(request: Request) {
       agenda: [...agendaById.values()],
       tasks: taskRows,
       billing: {
+        receivedLast30DaysCents: Number(
+          invoicePaymentSummaryRows[0]?.amountCents ?? 0,
+        ),
+        receivedLast30DaysCount: Number(
+          invoicePaymentSummaryRows[0]?.paymentCount ?? 0,
+        ),
         invoices:
           identity.role === "staff"
             ? []

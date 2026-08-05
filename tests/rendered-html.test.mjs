@@ -451,3 +451,30 @@ test("separa acessos, protege o portal e registra pedidos dos clientes", async (
   assert.match(schema, /sqliteTable\(\s*"customer_requests"/);
   assert.match(migration, /CREATE TABLE `password_reset_tokens`/);
 });
+
+test("mantém histórico descritivo, indicadores recentes e horários flexíveis", async () => {
+  const [app, workspace, activities, auditLog, appointments, appointmentEdit] =
+    await Promise.all([
+      readFile(new URL("../app/components/management-app.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/workspace/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/activities/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../lib/server/audit-log.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/appointments/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/appointments/[id]/route.ts", import.meta.url), "utf8"),
+    ]);
+
+  assert.match(app, /Últimos 5 dias/);
+  assert.match(app, /Consultar outro período/);
+  assert.match(app, /Recebido · últimos 30 dias/);
+  assert.match(app, /Todo o dia/);
+  assert.match(app, /Manhã/);
+  assert.match(app, /Tarde/);
+  assert.match(app, /Noite/);
+  assert.match(workspace, /receivedLast30DaysCents/);
+  assert.match(workspace, /loadAuditLog/);
+  assert.match(activities, /rangeDays > 365/);
+  assert.match(auditLog, /subjectName/);
+  assert.match(auditLog, /recipient_name_snapshot/);
+  assert.match(appointments, /manha\|tarde\|noite/);
+  assert.match(appointmentEdit, /manha\|tarde\|noite/);
+});

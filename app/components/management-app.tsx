@@ -468,11 +468,12 @@ function agendaBookingOrder(left: Booking, right: Booking) {
     agendaServiceOrder(left.serviceType) - agendaServiceOrder(right.serviceType);
   if (serviceDifference !== 0) return serviceDifference;
 
+  const nameDifference = left.dogName.localeCompare(right.dogName, "pt-BR");
+  if (nameDifference !== 0) return nameDifference;
+
   const leftTime = operationalTimeOrder(left.time) ?? Number.MAX_SAFE_INTEGER;
   const rightTime = operationalTimeOrder(right.time) ?? Number.MAX_SAFE_INTEGER;
-  if (leftTime !== rightTime) return leftTime - rightTime;
-
-  return left.dogName.localeCompare(right.dogName, "pt-BR");
+  return leftTime - rightTime;
 }
 
 function invalidTimeOrder(start: string, end: string) {

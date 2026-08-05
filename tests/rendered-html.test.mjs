@@ -38,6 +38,7 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.match(app, /serviceType === "daycare"\) return 2/);
   assert.match(app, /serviceType === "hotel"\) return 3/);
   assert.match(app, /\.sort\(agendaBookingOrder\)/);
+  assert.match(app, /nameDifference = left\.dogName\.localeCompare/);
   assert.match(app, /Não aplicar desconto por longa estadia/);
   assert.match(app, /Total pela diária padrão/);
   assert.match(app, /Valor tabelado:/);

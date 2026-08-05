@@ -180,6 +180,13 @@ function lodgingRateLabel(profile: LodgingRateProfile) {
   return "Diária padrão";
 }
 
+function creditUnitsForBooking(booking: Booking) {
+  return booking.serviceType === "transport" &&
+    booking.transportDirection === "round_trip"
+    ? 2
+    : 1;
+}
+
 type AuthStatusPayload = {
   setupRequired: boolean;
   authenticated: boolean;
@@ -1565,9 +1572,10 @@ export function ManagementApp() {
       }
       const serviceType = booking.serviceType as CreditServiceType;
       const available = creditBalances[booking.customerId]?.[serviceType] ?? 0;
-      if (available < 1) {
+      const creditUnits = creditUnitsForBooking(booking);
+      if (available < creditUnits) {
         setToast({
-          message: `Não há crédito de ${serviceLabels[serviceType].toLowerCase()} disponível. Gere uma fatura ou venda um pacote.`,
+          message: `São necessários ${creditUnits} ${creditUnits === 1 ? "crédito" : "créditos"} de ${serviceLabels[serviceType].toLowerCase()} para este atendimento.`,
         });
         return;
       }
@@ -1581,8 +1589,8 @@ export function ManagementApp() {
         serviceType,
         service: booking.service,
         date: formatShortDate(booking.date),
-        creditUnits: 1,
-        remainingBalance: available - 1,
+        creditUnits,
+        remainingBalance: available - creditUnits,
         deliveryStatus: "ready",
       };
       const nextBalances: CreditBalances = {
@@ -1594,7 +1602,7 @@ export function ManagementApp() {
             grooming: 0,
             transport: 0,
           }),
-          [serviceType]: available - 1,
+          [serviceType]: available - creditUnits,
         },
       };
       setCreditBalances(nextBalances);
@@ -3015,7 +3023,7 @@ export function ManagementApp() {
         `Recibo ${receipt.number}`,
         `${receipt.service} para ${receipt.dogName}`,
         `Data: ${receipt.date}`,
-        `${receipt.creditUnits} crédito pré-pago utilizado.`,
+        `${receipt.creditUnits} ${receipt.creditUnits === 1 ? "crédito pré-pago utilizado" : "créditos pré-pagos utilizados"}.`,
         "Nenhuma nova fatura foi gerada.",
       ].join("\n");
 
@@ -9365,7 +9373,9 @@ function ReceiptDialog({
           </div>
           <div>
             <span>Forma de quitação</span>
-            <strong>{receipt.creditUnits} crédito utilizado</strong>
+            <strong>
+              {receipt.creditUnits} {receipt.creditUnits === 1 ? "crédito utilizado" : "créditos utilizados"}
+            </strong>
           </div>
           {receipt.remainingBalance !== undefined && (
             <div>

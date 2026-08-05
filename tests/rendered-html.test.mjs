@@ -375,6 +375,9 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
   assert.match(consume, /payment_preference = 'credit'/);
   assert.match(consume, /credit_not_selected/);
   assert.match(consume, /taxi_dog/);
+  assert.match(consume, /item\.description === "Ida e volta"/);
+  assert.match(consume, /\? 2\s*:\s*1/);
+  assert.match(consume, /\) >= \?/);
   assert.match(purchases, /default_price_required/);
   assert.match(prices, /value < 1/);
   assert.match(prices, /daycareStartTime/);

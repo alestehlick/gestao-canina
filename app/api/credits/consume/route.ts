@@ -64,6 +64,7 @@ export async function POST(request: Request) {
         serviceCatalogId: appointmentItems.serviceCatalogId,
         serviceCode: serviceCatalog.code,
         serviceName: appointmentItems.serviceNameSnapshot,
+        description: appointmentItems.descriptionSnapshot,
         serviceDate: appointments.startDate,
         dogName: dogs.name,
         customerName: customerAccounts.displayName,
@@ -141,6 +142,11 @@ export async function POST(request: Request) {
       );
     }
 
+    const creditUnits =
+      item.serviceCode === "taxi_dog" && item.description === "Ida e volta"
+        ? 2
+        : 1;
+
     const contacts = await db
       .select({
         email: tutors.email,
@@ -179,7 +185,7 @@ export async function POST(request: Request) {
             occurred_at
           )
           SELECT ?, a.establishment_id, a.account_id, a.dog_id,
-            ai.service_catalog_id, ai.id, NULL, NULL, 'consume', -1,
+            ai.service_catalog_id, ai.id, NULL, NULL, 'consume', ?,
             'Serviço concluído com crédito pré-pago', ?, ?, ${nowExpression}
           FROM appointment_items ai
           INNER JOIN appointments a ON a.id = ai.appointment_id
@@ -196,14 +202,16 @@ export async function POST(request: Request) {
               WHERE cm.establishment_id = a.establishment_id
                 AND cm.account_id = a.account_id
                 AND cm.service_catalog_id = ai.service_catalog_id
-            ) >= 1`,
+            ) >= ?`,
         )
         .bind(
           movementId,
+          -creditUnits,
           idempotencyKey,
           identity.userId,
           appointmentItemId,
           establishmentId,
+          creditUnits,
         ),
       d1
         .prepare(
@@ -244,7 +252,7 @@ export async function POST(request: Request) {
             credit_units, delivery_status, delivery_channels_json, issued_at,
             created_at, updated_at
           )
-          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'pending', ?,
+          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?,
             ${nowExpression}, ${nowExpression}, ${nowExpression}
           WHERE EXISTS (
             SELECT 1 FROM credit_movements WHERE id = ?
@@ -262,6 +270,7 @@ export async function POST(request: Request) {
           item.dogName,
           item.serviceName,
           item.serviceDate,
+          creditUnits,
           JSON.stringify([...channels]),
           movementId,
         ),
@@ -290,6 +299,7 @@ export async function POST(request: Request) {
             receiptId: newReceiptId,
             serviceCatalogId: item.serviceCatalogId,
             accountId: item.accountId,
+            creditUnits,
           }),
           movementId,
         ),
@@ -313,11 +323,11 @@ export async function POST(request: Request) {
         );
       throw new HttpError(
         409,
-        Number(balance?.value ?? 0) < 1
+        Number(balance?.value ?? 0) < creditUnits
           ? "insufficient_credits"
           : "service_settlement_conflict",
-        Number(balance?.value ?? 0) < 1
-          ? "O cliente não possui crédito disponível para este serviço."
+        Number(balance?.value ?? 0) < creditUnits
+          ? `O cliente precisa de ${creditUnits} ${creditUnits === 1 ? "crédito" : "créditos"} disponível${creditUnits === 1 ? "" : "is"} para este serviço.`
           : "O pagamento deste serviço foi alterado por outra operação.",
       );
     }

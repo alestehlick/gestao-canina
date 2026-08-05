@@ -180,11 +180,20 @@ function lodgingRateLabel(profile: LodgingRateProfile) {
   return "Diária padrão";
 }
 
-function creditUnitsForBooking(booking: Booking) {
-  return booking.serviceType === "transport" &&
-    booking.transportDirection === "round_trip"
+function creditUnitsForService(
+  serviceType: ServiceType,
+  transportDirection?: Booking["transportDirection"],
+) {
+  return serviceType === "transport" && transportDirection === "round_trip"
     ? 2
     : 1;
+}
+
+function creditUnitsForBooking(booking: Booking) {
+  return creditUnitsForService(
+    booking.serviceType,
+    booking.transportDirection,
+  );
 }
 
 type AuthStatusPayload = {
@@ -4885,13 +4894,27 @@ export function ManagementApp() {
                   value="credit"
                   disabled={
                     !serviceDraftCreditEligible ||
-                    serviceDraftCreditBalance < 1 ||
+                    serviceDraftCreditBalance <
+                      creditUnitsForService(
+                        serviceDraftType,
+                        serviceDraftTransportDirection,
+                      ) ||
                     !serviceDraftDog
                   }
                 >
                   {serviceDraftCreditEligible && serviceDraftDog
-                    ? `Usar 1 crédito (${serviceDraftCreditBalance} disponíveis)`
-                    : "Usar 1 crédito"}
+                    ? `Usar ${creditUnitsForService(
+                        serviceDraftType,
+                        serviceDraftTransportDirection,
+                      )} ${
+                        creditUnitsForService(
+                          serviceDraftType,
+                          serviceDraftTransportDirection,
+                        ) === 1
+                          ? "crédito"
+                          : "créditos"
+                      } (${serviceDraftCreditBalance} disponíveis)`
+                    : "Usar crédito"}
                 </option>
               </select>
               <small>
@@ -5285,7 +5308,12 @@ export function ManagementApp() {
                 defaultValue={bookingToEdit.paymentPreference}
               >
                 <option value="invoice">Gerar fatura</option>
-                <option value="credit">Usar 1 crédito</option>
+                <option value="credit">
+                  Usar {creditUnitsForService(editDraftType, editDraftTransportDirection)}{" "}
+                  {creditUnitsForService(editDraftType, editDraftTransportDirection) === 1
+                    ? "crédito"
+                    : "créditos"}
+                </option>
               </select>
             </label>
             <label className="field full">
@@ -6733,6 +6761,9 @@ function AgendaCard({
       ? null
       : primaryAction(booking.status);
   const dogAlerts = agendaDate ? agendaAlertsForDog(dog, agendaDate) : [];
+  const showsOperationalTime = booking.serviceType !== "transport";
+  const showsTimeBlock = showsOperationalTime || showDate;
+  const creditUnits = creditUnitsForBooking(booking);
   const lodgingDayPosition =
     booking.serviceType === "hotel" && agendaDate
       ? agendaDate === booking.date
@@ -6771,20 +6802,26 @@ function AgendaCard({
             : null;
   return (
     <article
-      className={`agenda-card service-${booking.serviceType} status-${booking.status}`}
+      className={`agenda-card service-${booking.serviceType} status-${booking.status}${
+        showsTimeBlock ? "" : " without-time"
+      }`}
     >
-      <div className="time-block">
-        {showDate && (
-          <span className="booking-card-date">
-            {formatShortDate(booking.date)}
-            {booking.endDate && booking.endDate !== booking.date
-              ? ` a ${formatShortDate(booking.endDate)}`
-              : ""}
-          </span>
-        )}
-        <strong>{displayedTime}</strong>
-        {displayedTimeCaption && <span>{displayedTimeCaption}</span>}
-      </div>
+      {showsTimeBlock && (
+        <div className="time-block">
+          {showDate && (
+            <span className="booking-card-date">
+              {formatShortDate(booking.date)}
+              {booking.endDate && booking.endDate !== booking.date
+                ? ` a ${formatShortDate(booking.endDate)}`
+                : ""}
+            </span>
+          )}
+          {showsOperationalTime && <strong>{displayedTime}</strong>}
+          {showsOperationalTime && displayedTimeCaption && (
+            <span>{displayedTimeCaption}</span>
+          )}
+        </div>
+      )}
       <DogAvatar dog={dog} />
       <div className="agenda-main">
         <div className="agenda-title-row">
@@ -6814,12 +6851,14 @@ function AgendaCard({
         {booking.paymentPreference === "credit" &&
           booking.settlementStatus !== "credit_used" && (
             <span className="settlement-note credit">
-              Usará 1 crédito ao concluir
+              Usará {creditUnits} {creditUnits === 1 ? "crédito" : "créditos"} ao
+              concluir
             </span>
           )}
         {booking.settlementStatus === "credit_used" && (
           <span className="settlement-note settled">
-            Quitado com 1 crédito · sem nova fatura
+            Quitado com {creditUnits} {creditUnits === 1 ? "crédito" : "créditos"}
+            {" · sem nova fatura"}
           </span>
         )}
         {booking.settlementStatus === "invoice_pending" && (

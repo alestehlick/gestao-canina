@@ -326,7 +326,7 @@ test("mantém o primeiro acesso e o login protegidos sem bloqueio global da cont
 });
 
 test("preserva as regras de faturas, sinais e créditos", async () => {
-  const [invoices, payments, deposit, balance, lodgingHelper, consume, purchases, prices, workspaceData] = await Promise.all([
+  const [invoices, payments, deposit, balance, lodgingHelper, consume, purchases, prices, workspaceData, managementApp] = await Promise.all([
     readFile(new URL("../app/api/invoices/route.ts", import.meta.url), "utf8"),
     readFile(
       new URL("../app/api/invoices/[id]/payments/route.ts", import.meta.url),
@@ -354,6 +354,10 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
       "utf8",
     ),
     readFile(new URL("../lib/workspace-data.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../app/components/management-app.tsx", import.meta.url),
+      "utf8",
+    ),
   ]);
 
   assert.match(invoices, /active_invoice_id = \?/);
@@ -384,6 +388,11 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
   assert.match(workspaceData, /id: `deposit:\$\{item\.id\}`/);
   assert.match(workspaceData, /id: `balance:\$\{item\.id\}`/);
   assert.match(workspaceData, /Fature e registre o sinal antes de cobrar o saldo/);
+  assert.match(managementApp, /function creditUnitsForService/);
+  assert.match(managementApp, /serviceDraftCreditBalance\s*</);
+  assert.match(managementApp, /booking\.serviceType !== "transport"/);
+  assert.match(managementApp, /agenda-card[\s\S]*without-time/);
+  assert.doesNotMatch(managementApp, /Usará 1 crédito ao concluir/);
 });
 
 test("mantém o manual e os detalhes das faturas disponíveis", async () => {

@@ -1170,6 +1170,10 @@ h3 {
   padding: 15px 20px 15px 24px;
 }
 
+.agenda-card.without-time {
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+}
+
 .agenda-card::before {
   position: absolute;
   inset: 13px auto 13px 0;
@@ -5110,6 +5114,10 @@ h3 {
     grid-template-columns: 54px 38px minmax(0, 1fr);
     gap: 9px;
     padding: 14px 12px 14px 16px;
+  }
+
+  .agenda-card.without-time {
+    grid-template-columns: 38px minmax(0, 1fr);
   }
 
   .agenda-card::before {

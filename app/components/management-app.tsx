@@ -3226,7 +3226,10 @@ export function ManagementApp() {
     });
   }
 
-  async function registerInvoicePayment(paidAt = operationalToday) {
+  async function registerInvoicePayment(
+    paidAt = operationalToday,
+    withoutDiscount = false,
+  ) {
     if (!invoiceState?.invoice) return;
     const invoiceId = invoiceState.invoice.id;
     if (runtimeMode === "ready") {
@@ -3235,17 +3238,20 @@ export function ManagementApp() {
         () =>
           requestJson<{
             invoice: { id: string; status: "paid"; paidAt: string };
+            payment: { amountCents: number };
             creditsGranted: number;
           }>(`/api/invoices/${invoiceId}/payments`, {
             method: "POST",
-            body: JSON.stringify({ paidAt }),
+            body: JSON.stringify({ paidAt, withoutDiscount }),
           }),
         {
           refresh: true,
           successMessage:
             invoiceState.kind === "credit_package"
               ? "Pagamento registrado. Os créditos já estão disponíveis."
-              : "Pagamento registrado e fatura concluída.",
+              : withoutDiscount
+                ? "Pagamento sem desconto registrado e fatura concluída."
+                : "Pagamento registrado e fatura concluída.",
         },
       );
       if (result) {
@@ -3260,6 +3266,7 @@ export function ManagementApp() {
                       due: `Pago em ${formatShortDate(paidAt)}`,
                     }
                   : current.invoice,
+                amountCents: result.payment.amountCents,
                 step: "paid",
               }
             : current,
@@ -8389,7 +8396,10 @@ function InvoiceDialog({
   state: InvoiceState;
   onClose: () => void;
   onIssue: () => void;
-  onRegisterPayment: (paidAt: string) => void | Promise<void>;
+  onRegisterPayment: (
+    paidAt: string,
+    withoutDiscount?: boolean,
+  ) => void | Promise<void>;
   onVoid: () => void | Promise<void>;
   onFeedback: (message: string) => void;
   liveMode: boolean;
@@ -8398,6 +8408,8 @@ function InvoiceDialog({
   const [deliveryBusy, setDeliveryBusy] =
     useState<InvoiceDeliveryChannel | null>(null);
   const [paidAt, setPaidAt] = useState(operationalToday);
+  const [registerWithoutDiscount, setRegisterWithoutDiscount] =
+    useState(false);
 
   async function handleDelivery(channel: InvoiceDeliveryChannel) {
     if (deliveryBusy) return;
@@ -8540,6 +8552,8 @@ function InvoiceDialog({
     const hasLodging = rows.some(
       (row) => row.tableAmountCents !== undefined,
     );
+    const canRegisterWithoutDiscount =
+      hasLodging && tableTotalCents > state.amountCents;
     const isPaid = state.invoice?.status === "paid";
     return (
       <Dialog
@@ -8655,6 +8669,23 @@ function InvoiceDialog({
               <span>
                 Use esta ação somente depois de confirmar o recebimento do valor.
               </span>
+              {canRegisterWithoutDiscount && (
+                <label className="invoice-without-discount">
+                  <input
+                    type="checkbox"
+                    checked={registerWithoutDiscount}
+                    onChange={(event) =>
+                      setRegisterWithoutDiscount(event.target.checked)
+                    }
+                  />
+                  <span>
+                    Registrar pagamento sem desconto
+                    <small>
+                      Receber {formatCurrency(tableTotalCents)} conforme tabela
+                    </small>
+                  </span>
+                </label>
+              )}
             </div>
           )}
 
@@ -8672,9 +8703,15 @@ function InvoiceDialog({
                 className="primary-button"
                 type="button"
                 disabled={busy || !paidAt}
-                onClick={() => onRegisterPayment(paidAt)}
+                onClick={() =>
+                  onRegisterPayment(paidAt, registerWithoutDiscount)
+                }
               >
-                {busy ? "Registrando…" : "Registrar pagamento"}
+                {busy
+                  ? "Registrando…"
+                  : registerWithoutDiscount
+                    ? "Registrar sem desconto"
+                    : "Registrar pagamento"}
               </button>
             )}
           </div>

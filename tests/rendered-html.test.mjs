@@ -30,6 +30,7 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.match(app, /Registrar pagamento/);
   assert.match(app, /Gerar fatura do sinal/);
   assert.match(app, /Gerar fatura do saldo/);
+  assert.match(app, /Registrar pagamento sem desconto/);
   assert.match(app, /Total sem desconto/);
   assert.match(app, /Valor tabelado:/);
   assert.match(app, /lodgingTableAmountCents/);
@@ -356,6 +357,9 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
   assert.match(invoices, /FAT-/);
   assert.doesNotMatch(invoices, /pix/i);
   assert.match(payments, /invoice\.payment_recorded/);
+  assert.match(payments, /withoutDiscount/);
+  assert.match(payments, /lodging_table_value_unavailable/);
+  assert.match(payments, /sem desconto/);
   assert.match(payments, /Créditos liberados após pagamento da fatura/);
   assert.match(payments, /settlement_method = 'invoice'/);
   assert.match(payments, /service_name_snapshot <> 'Sinal da hospedagem'/);

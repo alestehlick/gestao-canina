@@ -1,6 +1,13 @@
 import { and, eq } from "drizzle-orm";
 import { getD1Database, getDb } from "@/db";
-import { creditPurchases, invoices } from "@/db/schema";
+import {
+  appointmentItems,
+  appointments,
+  creditPurchases,
+  invoiceItems,
+  invoices,
+  serviceCatalog,
+} from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
 import {
   assertSameOrigin,
@@ -35,6 +42,7 @@ export async function POST(
     const body = await readJsonObject(request);
     const paidAt = paidAtTimestamp(optionalString(body, "paidAt", 10));
     const note = optionalString(body, "note", 500);
+    const withoutDiscount = body.withoutDiscount === true;
     const establishmentId = identity.establishmentId!;
     const db = getDb();
 
@@ -73,6 +81,81 @@ export async function POST(
       );
     }
 
+    let paymentAmountCents = invoice.totalCents;
+    if (withoutDiscount) {
+      const lodgingLines = await db
+        .select({
+          serviceName: invoiceItems.serviceNameSnapshot,
+          invoiceAmountCents: invoiceItems.amountCents,
+          nights: appointments.lodgingNights,
+          depositPercent: appointments.depositPercent,
+          dailyRateCents: serviceCatalog.basePriceCents,
+        })
+        .from(invoiceItems)
+        .innerJoin(
+          appointmentItems,
+          eq(appointmentItems.id, invoiceItems.appointmentItemId),
+        )
+        .innerJoin(
+          appointments,
+          eq(appointments.id, appointmentItems.appointmentId),
+        )
+        .innerJoin(
+          serviceCatalog,
+          eq(serviceCatalog.id, appointmentItems.serviceCatalogId),
+        )
+        .where(
+          and(
+            eq(invoiceItems.invoiceId, invoiceId),
+            eq(serviceCatalog.code, "hotel"),
+          ),
+        );
+      if (!lodgingLines.length) {
+        throw new HttpError(
+          400,
+          "without_discount_not_available",
+          "Esta opção está disponível somente para faturas com hospedagem.",
+        );
+      }
+      const tableAmountForLine = (line: (typeof lodgingLines)[number]) => {
+        if (line.nights === null || line.dailyRateCents < 1) {
+          throw new HttpError(
+            409,
+            "lodging_table_value_unavailable",
+            "Não foi possível calcular o valor tabelado desta hospedagem.",
+          );
+        }
+        const fullStayCents = Math.round(line.nights * line.dailyRateCents);
+        if (
+          line.serviceName === "Sinal da hospedagem" &&
+          line.depositPercent
+        ) {
+          return Math.round((fullStayCents * line.depositPercent) / 100);
+        }
+        if (
+          line.serviceName === "Saldo da hospedagem" &&
+          line.depositPercent
+        ) {
+          return Math.round(
+            (fullStayCents * (100 - line.depositPercent)) / 100,
+          );
+        }
+        return fullStayCents;
+      };
+      const lodgingInvoiceCents = lodgingLines.reduce(
+        (total, line) => total + line.invoiceAmountCents,
+        0,
+      );
+      const lodgingTableCents = lodgingLines.reduce(
+        (total, line) => total + tableAmountForLine(line),
+        0,
+      );
+      paymentAmountCents = Math.max(
+        1,
+        invoice.totalCents - lodgingInvoiceCents + lodgingTableCents,
+      );
+    }
+
     const [purchase] =
       invoice.sourceType === "credit_package"
         ? await db
@@ -105,7 +188,7 @@ export async function POST(
             id, establishment_id, invoice_id, amount_cents, method, note,
             paid_at, recorded_by_user_id, created_at
           )
-          SELECT ?, ?, id, total_cents, 'manual', ?, ?, ?, ${nowExpression}
+          SELECT ?, ?, id, ?, 'manual', ?, ?, ?, ${nowExpression}
           FROM invoices
           WHERE id = ? AND establishment_id = ? AND status = 'issued'
             AND NOT EXISTS (
@@ -115,6 +198,7 @@ export async function POST(
         .bind(
           paymentId,
           establishmentId,
+          paymentAmountCents,
           note,
           paidAt,
           identity.userId,
@@ -153,7 +237,8 @@ export async function POST(
               WHEN 'lodging_balance' THEN 'Hospedagem'
               ELSE 'Serviços'
             END,
-            'Recebimento da fatura ' || i.invoice_number,
+            'Recebimento da fatura ' || i.invoice_number ||
+              CASE WHEN ? THEN ' · sem desconto' ELSE '' END,
             ip.note, 'included', NULL, ?, ?, NULL, NULL,
             ${nowExpression}, ${nowExpression}
           FROM invoice_payments ip
@@ -165,6 +250,7 @@ export async function POST(
         )
         .bind(
           cashEntryId,
+          withoutDiscount ? 1 : 0,
           identity.userId,
           identity.userId,
           paymentId,
@@ -263,7 +349,12 @@ export async function POST(
           identity.role,
           invoiceId,
           requestId,
-          JSON.stringify({ amountCents: invoice.totalCents, paidAt, note }),
+          JSON.stringify({
+            amountCents: paymentAmountCents,
+            paidAt,
+            note,
+            withoutDiscount,
+          }),
           paymentId,
         ),
     );
@@ -289,7 +380,7 @@ export async function POST(
         totalCents: invoice.totalCents,
         paidAt,
       },
-      payment: { id: paymentId, amountCents: invoice.totalCents, paidAt, note },
+      payment: { id: paymentId, amountCents: paymentAmountCents, paidAt, note },
       creditsGranted: purchase?.creditUnits ?? 0,
     });
   } catch (error) {

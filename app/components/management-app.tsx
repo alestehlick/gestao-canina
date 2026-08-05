@@ -883,6 +883,7 @@ export function ManagementApp() {
   const [editDraftDaycareCustomer, setEditDraftDaycareCustomer] =
     useState(false);
   const [editDraftAdditionalDog, setEditDraftAdditionalDog] = useState(false);
+  const [editDraftPrice, setEditDraftPrice] = useState("0.00");
   const [editDraftDate, setEditDraftDate] = useState(operationalToday);
   const [editDraftEndDate, setEditDraftEndDate] = useState(
     shiftDate(operationalToday, 1),
@@ -908,6 +909,7 @@ export function ManagementApp() {
     useState(false);
   const [serviceDraftAdditionalDog, setServiceDraftAdditionalDog] =
     useState(false);
+  const [serviceDraftPrice, setServiceDraftPrice] = useState("0.00");
   const [serviceDraftDate, setServiceDraftDate] = useState(operationalToday);
   const [serviceDraftEndDate, setServiceDraftEndDate] = useState(
     shiftDate(operationalToday, 1),
@@ -1012,14 +1014,20 @@ export function ManagementApp() {
     setServicePrices(data.servicePrices);
     setLodgingPricing({
       standardDailyRateCents:
-        payload.establishment.hotelStandardDailyRateCents,
-      daycareDailyRateCents: payload.establishment.hotelDaycareDailyRateCents,
+        payload.establishment.hotelStandardDailyRateCents ??
+        defaultLodgingPricing.standardDailyRateCents,
+      daycareDailyRateCents:
+        payload.establishment.hotelDaycareDailyRateCents ??
+        defaultLodgingPricing.daycareDailyRateCents,
       additionalDogDailyRateCents:
-        payload.establishment.hotelAdditionalDogDailyRateCents,
+        payload.establishment.hotelAdditionalDogDailyRateCents ??
+        defaultLodgingPricing.additionalDogDailyRateCents,
       daycareAdditionalDogDailyRateCents:
-        payload.establishment.hotelDaycareAdditionalDogDailyRateCents,
+        payload.establishment.hotelDaycareAdditionalDogDailyRateCents ??
+        defaultLodgingPricing.daycareAdditionalDogDailyRateCents,
       longStayDiscountPercent:
-        payload.establishment.hotelLongStayDiscountPercent,
+        payload.establishment.hotelLongStayDiscountPercent ??
+        defaultLodgingPricing.longStayDiscountPercent,
     });
     setDaycareStartTime(payload.establishment.daycareStartTime || "07:30");
     setDaycareEndTime(payload.establishment.daycareEndTime || "19:30");
@@ -1383,6 +1391,7 @@ export function ManagementApp() {
     setServiceDraftHasDeposit(false);
     setServiceDraftDaycareCustomer(false);
     setServiceDraftAdditionalDog(false);
+    setServiceDraftPrice((servicePrices.daycare / 100).toFixed(2));
     setServiceDraftRecurrence("none");
     setServiceDraftDate(selectedDateRef.current);
     setServiceDraftEndDate(shiftDate(selectedDateRef.current, 1));
@@ -1731,6 +1740,7 @@ export function ManagementApp() {
       booking.lodgingRateProfile === "additional_dog" ||
         booking.lodgingRateProfile === "daycare_additional_dog",
     );
+    setEditDraftPrice((booking.priceCents / 100).toFixed(2));
     setEditDraftDate(booking.date);
     setEditDraftEndDate(
       booking.endDate ?? shiftDate(booking.date, 1),
@@ -4453,6 +4463,17 @@ export function ManagementApp() {
                     const nextEndDate = shiftDate(nextDate, 1);
                     setServiceDraftEndDate(nextEndDate);
                     setServiceDraftLodgingNights(1);
+                    setServiceDraftPrice(
+                      (
+                        lodgingDailyRate(
+                          lodgingPricing,
+                          lodgingRateProfile(
+                            serviceDraftDaycareCustomer,
+                            serviceDraftAdditionalDog,
+                          ),
+                        ) / 100
+                      ).toFixed(2),
+                    );
                   }
                 }}
               />
@@ -4474,6 +4495,18 @@ export function ManagementApp() {
                     );
                     if (options.length) {
                       setServiceDraftLodgingNights(options[0]);
+                      setServiceDraftPrice(
+                        (
+                          (lodgingDailyRate(
+                            lodgingPricing,
+                            lodgingRateProfile(
+                              serviceDraftDaycareCustomer,
+                              serviceDraftAdditionalDog,
+                            ),
+                          ) * options[0]) /
+                          100
+                        ).toFixed(2),
+                      );
                     }
                   }}
                 />
@@ -4503,7 +4536,28 @@ export function ManagementApp() {
                       nextEndDate,
                     );
                     setServiceDraftEndDate(nextEndDate);
-                    setServiceDraftLodgingNights(options[0] ?? 1);
+                    const nextNights = options[0] ?? 1;
+                    setServiceDraftLodgingNights(nextNights);
+                    setServiceDraftPrice(
+                      (
+                        (lodgingDailyRate(
+                          lodgingPricing,
+                          lodgingRateProfile(
+                            serviceDraftDaycareCustomer,
+                            serviceDraftAdditionalDog,
+                          ),
+                        ) * nextNights) /
+                        100
+                      ).toFixed(2),
+                    );
+                  } else if (next === "transport") {
+                    setServiceDraftPrice(
+                      serviceDraftTransportDirection === "round_trip"
+                        ? "10.00"
+                        : "5.00",
+                    );
+                  } else {
+                    setServiceDraftPrice((servicePrices[next] / 100).toFixed(2));
                   }
                 }}
               >
@@ -4561,7 +4615,11 @@ export function ManagementApp() {
             {serviceDraftType === "transport" && (
               <label className="field">
                 <span>Trajeto *</span>
-                <select name="transportDirection" value={serviceDraftTransportDirection} onChange={(event) => setServiceDraftTransportDirection(event.target.value as "one_way" | "round_trip")}>
+                <select name="transportDirection" value={serviceDraftTransportDirection} onChange={(event) => {
+                  const nextDirection = event.target.value as "one_way" | "round_trip";
+                  setServiceDraftTransportDirection(nextDirection);
+                  setServiceDraftPrice(nextDirection === "round_trip" ? "10.00" : "5.00");
+                }}>
                   <option value="one_way">Ida · R$ 5,00</option>
                   <option value="round_trip">Ida e volta · R$ 10,00</option>
                 </select>
@@ -4574,11 +4632,22 @@ export function ManagementApp() {
                   <select
                     name="lodgingNights"
                     value={serviceDraftLodgingNights}
-                    onChange={(event) =>
-                      setServiceDraftLodgingNights(
-                        Number(event.target.value),
-                      )
-                    }
+                    onChange={(event) => {
+                      const nextNights = Number(event.target.value);
+                      setServiceDraftLodgingNights(nextNights);
+                      setServiceDraftPrice(
+                        (
+                          (lodgingDailyRate(
+                            lodgingPricing,
+                            lodgingRateProfile(
+                              serviceDraftDaycareCustomer,
+                              serviceDraftAdditionalDog,
+                            ),
+                          ) * nextNights) /
+                          100
+                        ).toFixed(2),
+                      );
+                    }}
                     required
                   >
                     {lodgingNightOptions(
@@ -4595,13 +4664,28 @@ export function ManagementApp() {
                     Opções compatíveis com o período de entrada e saída.
                   </small>
                 </label>
+                <fieldset className="lodging-rate-options">
+                  <legend>Condição da diária</legend>
                 <label className="check-field">
                   <input
                     type="checkbox"
                     checked={serviceDraftDaycareCustomer}
-                    onChange={(event) =>
-                      setServiceDraftDaycareCustomer(event.target.checked)
-                    }
+                    onChange={(event) => {
+                      const checked = event.target.checked;
+                      setServiceDraftDaycareCustomer(checked);
+                      setServiceDraftPrice(
+                        (
+                          (lodgingDailyRate(
+                            lodgingPricing,
+                            lodgingRateProfile(
+                              checked,
+                              serviceDraftAdditionalDog,
+                            ),
+                          ) * serviceDraftLodgingNights) /
+                          100
+                        ).toFixed(2),
+                      );
+                    }}
                   />
                   <span>Aplicar diária para cliente de creche regular</span>
                 </label>
@@ -4609,9 +4693,22 @@ export function ManagementApp() {
                   <input
                     type="checkbox"
                     checked={serviceDraftAdditionalDog}
-                    onChange={(event) =>
-                      setServiceDraftAdditionalDog(event.target.checked)
-                    }
+                    onChange={(event) => {
+                      const checked = event.target.checked;
+                      setServiceDraftAdditionalDog(checked);
+                      setServiceDraftPrice(
+                        (
+                          (lodgingDailyRate(
+                            lodgingPricing,
+                            lodgingRateProfile(
+                              serviceDraftDaycareCustomer,
+                              checked,
+                            ),
+                          ) * serviceDraftLodgingNights) /
+                          100
+                        ).toFixed(2),
+                      );
+                    }}
                   />
                   <span>Aplicar diária para segundo cão ou mais nesta reserva</span>
                 </label>
@@ -4631,6 +4728,7 @@ export function ManagementApp() {
                     ),
                   )} por diária.
                 </small>
+                </fieldset>
                 <label className="check-field">
                   <input
                     name="hasDeposit"
@@ -4658,30 +4756,18 @@ export function ManagementApp() {
               </>
             )}
             <label className="field">
-              <span>Valor aplicado (R$) *</span>
+              <span>
+                {serviceDraftType === "hotel"
+                  ? "Valor total da hospedagem (R$) *"
+                  : "Valor aplicado (R$) *"}
+              </span>
               <input
-                key={`${serviceDraftType}-${serviceDraftTransportDirection}-${serviceDraftLodgingNights}-${serviceDraftDaycareCustomer}-${serviceDraftAdditionalDog}`}
                 name="price"
                 type="number"
                 min="0"
                 step="0.01"
-                defaultValue={(
-                  serviceDraftType === "transport"
-                    ? serviceDraftTransportDirection === "round_trip"
-                      ? 10
-                      : 5
-                    : serviceDraftType === "hotel"
-                      ? (lodgingDailyRate(
-                          lodgingPricing,
-                          lodgingRateProfile(
-                            serviceDraftDaycareCustomer,
-                            serviceDraftAdditionalDog,
-                          ),
-                        ) *
-                          serviceDraftLodgingNights) /
-                        100
-                      : servicePrices[serviceDraftType] / 100
-                ).toFixed(2)}
+                value={serviceDraftPrice}
+                onChange={(event) => setServiceDraftPrice(event.target.value)}
                 readOnly={
                   serviceDraftType === "transport" || signedInRole !== "owner"
                 }
@@ -4807,6 +4893,17 @@ export function ManagementApp() {
                     const nextEndDate = shiftDate(nextDate, 1);
                     setEditDraftEndDate(nextEndDate);
                     setEditDraftLodgingNights(1);
+                    setEditDraftPrice(
+                      (
+                        lodgingDailyRate(
+                          lodgingPricing,
+                          lodgingRateProfile(
+                            editDraftDaycareCustomer,
+                            editDraftAdditionalDog,
+                          ),
+                        ) / 100
+                      ).toFixed(2),
+                    );
                   }
                 }}
               />
@@ -4828,6 +4925,18 @@ export function ManagementApp() {
                     );
                     if (options.length) {
                       setEditDraftLodgingNights(options[0]);
+                      setEditDraftPrice(
+                        (
+                          (lodgingDailyRate(
+                            lodgingPricing,
+                            lodgingRateProfile(
+                              editDraftDaycareCustomer,
+                              editDraftAdditionalDog,
+                            ),
+                          ) * options[0]) /
+                          100
+                        ).toFixed(2),
+                      );
                     }
                   }}
                 />
@@ -4852,16 +4961,28 @@ export function ManagementApp() {
                       nextEndDate,
                     );
                     setEditDraftEndDate(nextEndDate);
-                    setEditDraftLodgingNights(options[0] ?? 1);
-                  }
-                  const form = event.currentTarget.form;
-                  const price = form?.elements.namedItem("price") as
-                    | HTMLInputElement
-                    | null;
-                  if (price) {
-                    price.value = String(
-                      servicePrices[next] / 100,
+                    const nextNights = options[0] ?? 1;
+                    setEditDraftLodgingNights(nextNights);
+                    setEditDraftPrice(
+                      (
+                        (lodgingDailyRate(
+                          lodgingPricing,
+                          lodgingRateProfile(
+                            editDraftDaycareCustomer,
+                            editDraftAdditionalDog,
+                          ),
+                        ) * nextNights) /
+                        100
+                      ).toFixed(2),
                     );
+                  } else if (next === "transport") {
+                    setEditDraftPrice(
+                      editDraftTransportDirection === "round_trip"
+                        ? "10.00"
+                        : "5.00",
+                    );
+                  } else {
+                    setEditDraftPrice((servicePrices[next] / 100).toFixed(2));
                   }
                 }}
               >
@@ -4927,11 +5048,15 @@ export function ManagementApp() {
                 <select
                   name="transportDirection"
                   value={editDraftTransportDirection}
-                  onChange={(event) =>
-                    setEditDraftTransportDirection(
-                      event.target.value as "one_way" | "round_trip",
-                    )
-                  }
+                  onChange={(event) => {
+                    const nextDirection = event.target.value as
+                      | "one_way"
+                      | "round_trip";
+                    setEditDraftTransportDirection(nextDirection);
+                    setEditDraftPrice(
+                      nextDirection === "round_trip" ? "10.00" : "5.00",
+                    );
+                  }}
                 >
                   <option value="one_way">Ida · R$ 5,00</option>
                   <option value="round_trip">
@@ -4947,11 +5072,22 @@ export function ManagementApp() {
                   <select
                     name="lodgingNights"
                     value={editDraftLodgingNights}
-                    onChange={(event) =>
-                      setEditDraftLodgingNights(
-                        Number(event.target.value),
-                      )
-                    }
+                    onChange={(event) => {
+                      const nextNights = Number(event.target.value);
+                      setEditDraftLodgingNights(nextNights);
+                      setEditDraftPrice(
+                        (
+                          (lodgingDailyRate(
+                            lodgingPricing,
+                            lodgingRateProfile(
+                              editDraftDaycareCustomer,
+                              editDraftAdditionalDog,
+                            ),
+                          ) * nextNights) /
+                          100
+                        ).toFixed(2),
+                      );
+                    }}
                     required
                   >
                     {lodgingNightOptions(
@@ -4968,13 +5104,28 @@ export function ManagementApp() {
                     Opções compatíveis com o período de entrada e saída.
                   </small>
                 </label>
+                <fieldset className="lodging-rate-options">
+                  <legend>Condição da diária</legend>
                 <label className="check-field">
                   <input
                     type="checkbox"
                     checked={editDraftDaycareCustomer}
-                    onChange={(event) =>
-                      setEditDraftDaycareCustomer(event.target.checked)
-                    }
+                    onChange={(event) => {
+                      const checked = event.target.checked;
+                      setEditDraftDaycareCustomer(checked);
+                      setEditDraftPrice(
+                        (
+                          (lodgingDailyRate(
+                            lodgingPricing,
+                            lodgingRateProfile(
+                              checked,
+                              editDraftAdditionalDog,
+                            ),
+                          ) * editDraftLodgingNights) /
+                          100
+                        ).toFixed(2),
+                      );
+                    }}
                   />
                   <span>Aplicar diária para cliente de creche regular</span>
                 </label>
@@ -4982,9 +5133,22 @@ export function ManagementApp() {
                   <input
                     type="checkbox"
                     checked={editDraftAdditionalDog}
-                    onChange={(event) =>
-                      setEditDraftAdditionalDog(event.target.checked)
-                    }
+                    onChange={(event) => {
+                      const checked = event.target.checked;
+                      setEditDraftAdditionalDog(checked);
+                      setEditDraftPrice(
+                        (
+                          (lodgingDailyRate(
+                            lodgingPricing,
+                            lodgingRateProfile(
+                              editDraftDaycareCustomer,
+                              checked,
+                            ),
+                          ) * editDraftLodgingNights) /
+                          100
+                        ).toFixed(2),
+                      );
+                    }}
                   />
                   <span>Aplicar diária para segundo cão ou mais nesta reserva</span>
                 </label>
@@ -5004,6 +5168,7 @@ export function ManagementApp() {
                     ),
                   )} por diária.
                 </small>
+                </fieldset>
                 <label className="check-field">
                   <input
                     name="hasDeposit"
@@ -5031,38 +5196,18 @@ export function ManagementApp() {
               </>
             )}
             <label className="field">
-              <span>Valor aplicado (R$) *</span>
+              <span>
+                {editDraftType === "hotel"
+                  ? "Valor total da hospedagem (R$) *"
+                  : "Valor aplicado (R$) *"}
+              </span>
               <input
-                key={`${editDraftType}-${editDraftTransportDirection}-${editDraftLodgingNights}-${editDraftDaycareCustomer}-${editDraftAdditionalDog}`}
                 name="price"
                 type="number"
                 min="0"
                 step="0.01"
-                defaultValue={
-                  editDraftType === "transport"
-                    ? editDraftTransportDirection === "round_trip"
-                      ? "10.00"
-                      : "5.00"
-                    : editDraftType === "hotel" &&
-                        editDraftLodgingNights !==
-                          bookingToEdit.lodgingNights
-                      ? (
-                          (lodgingDailyRate(
-                            lodgingPricing,
-                            lodgingRateProfile(
-                              editDraftDaycareCustomer,
-                              editDraftAdditionalDog,
-                            ),
-                          ) *
-                            editDraftLodgingNights) /
-                          100
-                        ).toFixed(2)
-                    : editDraftType === bookingToEdit.serviceType
-                    ? (bookingToEdit.priceCents / 100).toFixed(2)
-                    : (
-                        servicePrices[editDraftType] / 100
-                      ).toFixed(2)
-                }
+                value={editDraftPrice}
+                onChange={(event) => setEditDraftPrice(event.target.value)}
                 readOnly={
                   editDraftType === "transport" ||
                   signedInRole !== "owner"

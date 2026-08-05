@@ -3679,6 +3679,36 @@ h3 {
   accent-color: var(--forest);
 }
 
+.lodging-rate-options {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--hotel) 22%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--hotel-soft) 52%, #fffefa);
+  padding: 12px;
+}
+
+.lodging-rate-options legend {
+  padding: 0 5px;
+  color: #4e544f;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.lodging-rate-options .check-field {
+  min-height: 42px;
+  background: rgba(255, 254, 250, 0.78);
+}
+
+.lodging-rate-options .field-help {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
 .radio-option {
   display: flex;
   align-items: flex-start;
@@ -5533,6 +5563,10 @@ h3 {
   }
 
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lodging-rate-options {
     grid-template-columns: 1fr;
   }
 

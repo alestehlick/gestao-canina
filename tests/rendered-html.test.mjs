@@ -494,6 +494,10 @@ test("mantém a política de hospedagem clara e auditável", async () => {
 
   assert.match(app, /cliente de creche regular/);
   assert.match(app, /segundo cão ou mais/);
+  assert.match(app, /value=\{serviceDraftPrice\}/);
+  assert.match(app, /setServiceDraftPrice/);
+  assert.match(app, /value=\{editDraftPrice\}/);
+  assert.match(app, /setEditDraftPrice/);
   assert.match(app, /Não aplicar desconto por longa estadia/);
   assert.match(createAppointment, /lodging_rate_profile/);
   assert.match(editAppointment, /lodgingRateProfile/);

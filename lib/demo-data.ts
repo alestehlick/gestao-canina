@@ -126,6 +126,8 @@ export type Invoice = {
       checkInDate: string;
       checkOutDate: string;
       nights: number;
+      dailyRateCents?: number;
+      depositPercent?: number;
     };
   }[];
 };
@@ -146,6 +148,8 @@ export type BillableService = {
     checkInDate: string;
     checkOutDate: string;
     nights: number;
+    dailyRateCents?: number;
+    depositPercent?: number;
   };
 };
 

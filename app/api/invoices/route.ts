@@ -112,6 +112,7 @@ export async function POST(request: Request) {
         endDate: appointments.endDate,
         lodgingNights: appointments.lodgingNights,
         depositPercent: appointments.depositPercent,
+        lodgingDailyRateCents: serviceCatalog.basePriceCents,
         dogName: dogs.name,
         customerName: customerAccounts.displayName,
       })
@@ -570,6 +571,8 @@ export async function POST(request: Request) {
                     checkInDate: row.startDate,
                     checkOutDate: row.endDate,
                     nights: row.lodgingNights,
+                    dailyRateCents: row.lodgingDailyRateCents,
+                    depositPercent: row.depositPercent,
                   }
                 : null,
           })),

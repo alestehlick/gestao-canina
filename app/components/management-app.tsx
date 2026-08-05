@@ -370,7 +370,35 @@ function lodgingInvoiceDetail(lodging: {
   return `Check-in: ${formatBrazilianDate(lodging.checkInDate)} · Check-out: ${formatBrazilianDate(lodging.checkOutDate)} · ${nights} ${lodging.nights === 1 ? "diária" : "diárias"}`;
 }
 
-function invoiceDescriptionLines(state: InvoiceState) {
+function lodgingTableAmountCents(
+  lodging: {
+    nights: number;
+    dailyRateCents?: number;
+    depositPercent?: number;
+  },
+  service: string,
+) {
+  if (!lodging.dailyRateCents || lodging.dailyRateCents < 1) return undefined;
+  const fullStayCents = Math.round(lodging.dailyRateCents * lodging.nights);
+  if (service === "Sinal da hospedagem" && lodging.depositPercent) {
+    return Math.round((fullStayCents * lodging.depositPercent) / 100);
+  }
+  if (service === "Saldo da hospedagem" && lodging.depositPercent) {
+    return Math.round(
+      (fullStayCents * (100 - lodging.depositPercent)) / 100,
+    );
+  }
+  return fullStayCents;
+}
+
+type InvoiceDescriptionLine = {
+  title: string;
+  detail: string;
+  amountCents: number;
+  tableAmountCents?: number;
+};
+
+function invoiceDescriptionLines(state: InvoiceState): InvoiceDescriptionLine[] {
   if (state.kind === "credit_package" && state.creditPurchase) {
     return [
       {
@@ -389,6 +417,9 @@ function invoiceDescriptionLines(state: InvoiceState) {
         ? lodgingInvoiceDetail(service.lodging)
         : service.date,
       amountCents: service.amountCents,
+      tableAmountCents: service.lodging
+        ? lodgingTableAmountCents(service.lodging, service.service)
+        : undefined,
     }));
   }
   if (state.invoice?.lines.length) {
@@ -398,6 +429,9 @@ function invoiceDescriptionLines(state: InvoiceState) {
         ? lodgingInvoiceDetail(line.lodging)
         : formatShortDate(line.date),
       amountCents: line.amountCents,
+      tableAmountCents: line.lodging
+        ? lodgingTableAmountCents(line.lodging, line.service)
+        : undefined,
     }));
   }
   return [
@@ -418,6 +452,11 @@ async function createInvoicePdf(state: InvoiceState) {
   });
   const invoiceNumber = state.invoice?.number ?? "NOVA";
   const rows = invoiceDescriptionLines(state);
+  const tableTotalCents = rows.reduce(
+    (total, row) => total + (row.tableAmountCents ?? row.amountCents),
+    0,
+  );
+  const hasLodging = rows.some((row) => row.tableAmountCents !== undefined);
   const issuedAt = formatBrazilianDate(operationalToday);
 
   document.setProperties({
@@ -483,13 +522,26 @@ async function createInvoicePdf(state: InvoiceState) {
     document.text(titleLines, 18, y);
     document.setFont("helvetica", "normal");
     document.text(formatCurrency(row.amountCents), 192, y, { align: "right" });
+    if (row.tableAmountCents !== undefined) {
+      document.setTextColor(128, 134, 131);
+      document.setFontSize(7);
+      document.text(
+        `Tabela: ${formatCurrency(row.tableAmountCents)}`,
+        192,
+        y + 4,
+        { align: "right" },
+      );
+    }
     const detailY = y + titleLines.length * 5;
     document.setTextColor(102, 108, 104);
     document.setFontSize(8.5);
     const detailLines = document.splitTextToSize(row.detail, 145) as string[];
     document.text(detailLines, 18, detailY);
     document.setDrawColor(232, 234, 232);
-    const rowEnd = detailY + detailLines.length * 4 + 3;
+    const rowEnd = Math.max(
+      detailY + detailLines.length * 4 + 3,
+      row.tableAmountCents !== undefined ? y + 8 : 0,
+    );
     document.line(18, rowEnd, 192, rowEnd);
     y = rowEnd + 8;
   }
@@ -505,6 +557,15 @@ async function createInvoicePdf(state: InvoiceState) {
   document.text(formatCurrency(state.amountCents), 192, y + 7, {
     align: "right",
   });
+  if (hasLodging) {
+    document.setTextColor(112, 118, 115);
+    document.setFont("helvetica", "normal");
+    document.setFontSize(7.5);
+    document.text("Total sem desconto", 145, y + 13);
+    document.text(formatCurrency(tableTotalCents), 192, y + 13, {
+      align: "right",
+    });
+  }
   document.setDrawColor(30, 55, 46);
   document.line(145, y - 1, 192, y - 1);
 
@@ -2844,6 +2905,13 @@ export function ManagementApp() {
             service: item.serviceNameSnapshot,
             date: item.serviceDateSnapshot,
             amountCents: item.amountCents,
+            lodging: {
+              checkInDate: booking.date,
+              checkOutDate: booking.endDate ?? booking.date,
+              nights: booking.lodgingNights ?? 1,
+              dailyRateCents: servicePrices.hotel,
+              depositPercent: booking.depositPercent,
+            },
           })) ?? [
             {
               dogName: booking.dogName,
@@ -2853,6 +2921,13 @@ export function ManagementApp() {
                   : "Saldo da hospedagem",
               date: booking.date,
               amountCents: response.invoice.totalCents,
+              lodging: {
+                checkInDate: booking.date,
+                checkOutDate: booking.endDate ?? booking.date,
+                nights: booking.lodgingNights ?? 1,
+                dailyRateCents: servicePrices.hotel,
+                depositPercent: booking.depositPercent,
+              },
             },
           ],
       };
@@ -2898,6 +2973,13 @@ export function ManagementApp() {
               : "Saldo da hospedagem",
           date: booking.date,
           amountCents,
+          lodging: {
+            checkInDate: booking.date,
+            checkOutDate: booking.endDate ?? booking.date,
+            nights: booking.lodgingNights ?? 1,
+            dailyRateCents: servicePrices.hotel,
+            depositPercent: booking.depositPercent,
+          },
         },
       ],
     };
@@ -2992,6 +3074,8 @@ export function ManagementApp() {
                     checkInDate: string;
                     checkOutDate: string;
                     nights: number;
+                    dailyRateCents: number;
+                    depositPercent: number | null;
                   } | null;
                 }>;
               };
@@ -3022,7 +3106,12 @@ export function ManagementApp() {
                 service: item.serviceNameSnapshot,
                 date: item.serviceDateSnapshot,
                 amountCents: item.amountCents,
-                lodging: item.lodging ?? undefined,
+                lodging: item.lodging
+                  ? {
+                      ...item.lodging,
+                      depositPercent: item.lodging.depositPercent ?? undefined,
+                    }
+                  : undefined,
               })),
             };
           }
@@ -8444,6 +8533,13 @@ function InvoiceDialog({
 
   if (state.step === "code") {
     const rows = invoiceDescriptionLines(state);
+    const tableTotalCents = rows.reduce(
+      (total, row) => total + (row.tableAmountCents ?? row.amountCents),
+      0,
+    );
+    const hasLodging = rows.some(
+      (row) => row.tableAmountCents !== undefined,
+    );
     const isPaid = state.invoice?.status === "paid";
     return (
       <Dialog
@@ -8471,6 +8567,11 @@ function InvoiceDialog({
                 <span>
                   <strong>{row.title}</strong>
                   <small>{row.detail}</small>
+                  {row.tableAmountCents !== undefined && (
+                    <small className="invoice-table-value">
+                      Valor tabelado: {formatCurrency(row.tableAmountCents)}
+                    </small>
+                  )}
                 </span>
                 <strong>{formatCurrency(row.amountCents)}</strong>
               </div>
@@ -8478,7 +8579,14 @@ function InvoiceDialog({
           </div>
 
           <div className="invoice-share-total">
-            <span>Total da fatura</span>
+            <span>
+              Total da fatura
+              {hasLodging && (
+                <small>
+                  Total sem desconto: {formatCurrency(tableTotalCents)}
+                </small>
+              )}
+            </span>
             <strong>{formatCurrency(state.amountCents)}</strong>
           </div>
 

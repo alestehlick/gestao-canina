@@ -295,6 +295,8 @@ export async function GET(request: Request) {
           lodgingStartDate: appointments.startDate,
           lodgingEndDate: appointments.endDate,
           lodgingNights: appointments.lodgingNights,
+          lodgingDailyRateCents: serviceCatalog.basePriceCents,
+          depositPercent: appointments.depositPercent,
         })
         .from(invoiceItems)
         .innerJoin(invoices, eq(invoices.id, invoiceItems.invoiceId))

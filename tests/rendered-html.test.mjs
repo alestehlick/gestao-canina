@@ -30,6 +30,9 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.match(app, /Registrar pagamento/);
   assert.match(app, /Gerar fatura do sinal/);
   assert.match(app, /Gerar fatura do saldo/);
+  assert.match(app, /Total sem desconto/);
+  assert.match(app, /Valor tabelado:/);
+  assert.match(app, /lodgingTableAmountCents/);
   assert.doesNotMatch(app, /pix/i);
   assert.match(data, /@example\.com/);
   assert.doesNotMatch(app, /Mastercard|VISA|cart[aã]o de cr[eé]dito/);
@@ -91,6 +94,7 @@ test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () =
   assert.match(cashSettings, /max: 28/);
   assert.match(payments, /INSERT INTO cash_entries/);
   assert.match(workspace, /cashEntryId/);
+  assert.match(workspace, /lodgingDailyRateCents/);
   assert.match(cashView, /Entradas consideradas/);
   assert.match(cashRoute, /credit_sold_cents/);
   assert.match(cashRoute, /ce\.status = 'included'/);

@@ -3941,8 +3941,20 @@ h3 {
 }
 
 .invoice-share-total span {
+  display: grid;
+  gap: 3px;
   color: #cfddd6;
   font-size: 0.72rem;
+}
+
+.invoice-share-total small {
+  color: #dce7e1;
+  font-size: 0.67rem;
+}
+
+.invoice-table-value {
+  color: #748077 !important;
+  font-size: 0.65rem !important;
 }
 
 .invoice-share-total strong {

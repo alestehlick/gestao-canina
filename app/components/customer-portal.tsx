@@ -82,6 +82,8 @@ type PortalData = {
       lodgingStartDate: string | null;
       lodgingEndDate: string | null;
       lodgingNights: number | null;
+      lodgingDailyRateCents: number | null;
+      depositPercent: number | null;
     }>;
   }>;
   credits: Array<{
@@ -147,6 +149,30 @@ function invoiceItemDetail(item: PortalData["invoices"][number]["items"][number]
     return `Check-in: ${shortDate(item.lodgingStartDate)} · Check-out: ${shortDate(item.lodgingEndDate)} · ${nights} ${item.lodgingNights === 1 ? "diária" : "diárias"}`;
   }
   return shortDate(item.serviceDate);
+}
+
+function invoiceItemTableAmount(
+  item: PortalData["invoices"][number]["items"][number],
+) {
+  if (
+    item.serviceCode !== "hotel" ||
+    item.lodgingNights === null ||
+    !item.lodgingDailyRateCents
+  ) {
+    return undefined;
+  }
+  const fullStayCents = Math.round(
+    item.lodgingNights * item.lodgingDailyRateCents,
+  );
+  if (item.serviceName === "Sinal da hospedagem" && item.depositPercent) {
+    return Math.round((fullStayCents * item.depositPercent) / 100);
+  }
+  if (item.serviceName === "Saldo da hospedagem" && item.depositPercent) {
+    return Math.round(
+      (fullStayCents * (100 - item.depositPercent)) / 100,
+    );
+  }
+  return fullStayCents;
 }
 
 function statusLabel(status: string) {
@@ -366,6 +392,13 @@ export default function CustomerPortal() {
       pdf.setFontSize(9);
       pdf.text(shortDate(invoice.issuedAt), 145, 60);
       let y = 79;
+      const tableTotalCents = invoice.items.reduce(
+        (total, item) => total + (invoiceItemTableAmount(item) ?? item.amountCents),
+        0,
+      );
+      const hasLodging = invoice.items.some(
+        (item) => invoiceItemTableAmount(item) !== undefined,
+      );
       pdf.setFont("helvetica", "bold");
       pdf.setTextColor(86, 93, 89);
       pdf.setFontSize(7.5);
@@ -385,12 +418,23 @@ export default function CustomerPortal() {
         pdf.text(`${item.dogName ?? "Cliente"} · ${item.serviceName}`, 18, y);
         pdf.setFont("helvetica", "normal");
         pdf.text(money(item.amountCents), 192, y, { align: "right" });
+        const tableAmountCents = invoiceItemTableAmount(item);
+        if (tableAmountCents !== undefined) {
+          pdf.setTextColor(128, 134, 131);
+          pdf.setFontSize(7);
+          pdf.text(`Tabela: ${money(tableAmountCents)}`, 192, y + 4, {
+            align: "right",
+          });
+        }
         pdf.setTextColor(102, 108, 104);
         pdf.setFontSize(8.5);
         const detailLines = pdf.splitTextToSize(invoiceItemDetail(item), 150) as string[];
         pdf.text(detailLines, 18, y + 5);
         pdf.setDrawColor(232, 234, 232);
-        const rowHeight = 11 + detailLines.length * 4;
+        const rowHeight = Math.max(
+          11 + detailLines.length * 4,
+          tableAmountCents !== undefined ? 12 : 0,
+        );
         pdf.line(18, y + rowHeight, 192, y + rowHeight);
         y += rowHeight + 8;
       }
@@ -405,6 +449,13 @@ export default function CustomerPortal() {
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(13);
       pdf.text(money(invoice.totalCents), 192, y + 8, { align: "right" });
+      if (hasLodging) {
+        pdf.setTextColor(112, 118, 115);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(7.5);
+        pdf.text("Total sem desconto", 145, y + 14);
+        pdf.text(money(tableTotalCents), 192, y + 14, { align: "right" });
+      }
       const safeName = (data?.account.displayName ?? "cliente")
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")

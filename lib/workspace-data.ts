@@ -191,6 +191,8 @@ export type WorkspaceInvoiceItem = {
   lodgingStartDate: string | null;
   lodgingEndDate: string | null;
   lodgingNights: number | null;
+  lodgingDailyRateCents: number | null;
+  depositPercent: number | null;
 };
 
 export type WorkspaceInvoice = {
@@ -691,6 +693,8 @@ export function mapWorkspaceBillableServices(
               checkInDate: appointment.startDate,
               checkOutDate: appointment.endDate,
               nights: appointment.lodgingNights,
+              dailyRateCents: servicesById.get(item.serviceCatalogId)?.basePriceCents,
+              depositPercent: appointment.depositPercent ?? undefined,
             }
           : undefined;
       const base = {
@@ -875,6 +879,8 @@ export function mapWorkspaceInvoices(
                     checkInDate: item.lodgingStartDate,
                     checkOutDate: item.lodgingEndDate,
                     nights: item.lodgingNights,
+                    dailyRateCents: item.lodgingDailyRateCents ?? undefined,
+                    depositPercent: item.depositPercent ?? undefined,
                   }
                 : undefined,
           })) ?? [

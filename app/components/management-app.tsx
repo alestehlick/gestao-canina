@@ -2095,7 +2095,7 @@ export function ManagementApp() {
         return;
       }
     }
-    if (endTime && endTime <= time) {
+    if (time && endTime && endDate === date && endTime <= time) {
       setToast({ message: "O horário final deve ser posterior ao inicial." });
       return;
     }

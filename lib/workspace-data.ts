@@ -186,6 +186,10 @@ export type WorkspaceInvoiceItem = {
   serviceDateSnapshot: string;
   descriptionSnapshot: string;
   amountCents: number;
+  serviceCode: WorkspaceServiceCode | null;
+  lodgingStartDate: string | null;
+  lodgingEndDate: string | null;
+  lodgingNights: number | null;
 };
 
 export type WorkspaceInvoice = {
@@ -728,6 +732,17 @@ export function mapWorkspaceInvoices(
             service: item.serviceNameSnapshot,
             date: item.serviceDateSnapshot,
             amountCents: Math.max(0, item.amountCents),
+            lodging:
+              item.serviceCode === "hotel" &&
+              item.lodgingStartDate &&
+              item.lodgingEndDate &&
+              item.lodgingNights !== null
+                ? {
+                    checkInDate: item.lodgingStartDate,
+                    checkOutDate: item.lodgingEndDate,
+                    nights: item.lodgingNights,
+                  }
+                : undefined,
           })) ?? [
             {
               dogName: "Não se aplica",

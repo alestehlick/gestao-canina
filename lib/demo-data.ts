@@ -122,6 +122,11 @@ export type Invoice = {
     service: string;
     date: string;
     amountCents: number;
+    lodging?: {
+      checkInDate: string;
+      checkOutDate: string;
+      nights: number;
+    };
   }[];
 };
 

@@ -78,6 +78,10 @@ type PortalData = {
       serviceDate: string;
       description: string | null;
       amountCents: number;
+      serviceCode: string;
+      lodgingStartDate: string | null;
+      lodgingEndDate: string | null;
+      lodgingNights: number | null;
     }>;
   }>;
   credits: Array<{
@@ -128,6 +132,21 @@ function money(cents: number | null) {
 function shortDate(value: string | null) {
   if (!value) return "—";
   return formatBrazilianDate(value);
+}
+
+function invoiceItemDetail(item: PortalData["invoices"][number]["items"][number]) {
+  if (
+    item.serviceCode === "hotel" &&
+    item.lodgingStartDate &&
+    item.lodgingEndDate &&
+    item.lodgingNights !== null
+  ) {
+    const nights = new Intl.NumberFormat("pt-BR", {
+      maximumFractionDigits: 1,
+    }).format(item.lodgingNights);
+    return `Check-in: ${shortDate(item.lodgingStartDate)} · Check-out: ${shortDate(item.lodgingEndDate)} · ${nights} ${item.lodgingNights === 1 ? "diária" : "diárias"}`;
+  }
+  return shortDate(item.serviceDate);
 }
 
 function statusLabel(status: string) {
@@ -368,10 +387,12 @@ export default function CustomerPortal() {
         pdf.text(money(item.amountCents), 192, y, { align: "right" });
         pdf.setTextColor(102, 108, 104);
         pdf.setFontSize(8.5);
-        pdf.text(shortDate(item.serviceDate), 18, y + 5);
+        const detailLines = pdf.splitTextToSize(invoiceItemDetail(item), 150) as string[];
+        pdf.text(detailLines, 18, y + 5);
         pdf.setDrawColor(232, 234, 232);
-        pdf.line(18, y + 11, 192, y + 11);
-        y += 19;
+        const rowHeight = 11 + detailLines.length * 4;
+        pdf.line(18, y + rowHeight, 192, y + rowHeight);
+        y += rowHeight + 8;
       }
       y += 4;
       pdf.setDrawColor(30, 55, 46);

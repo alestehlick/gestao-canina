@@ -359,6 +359,17 @@ function invoiceFileName(state: InvoiceState) {
   return `fatura-${customer || "cliente"}-${period}.pdf`;
 }
 
+function lodgingInvoiceDetail(lodging: {
+  checkInDate: string;
+  checkOutDate: string;
+  nights: number;
+}) {
+  const nights = new Intl.NumberFormat("pt-BR", {
+    maximumFractionDigits: 1,
+  }).format(lodging.nights);
+  return `Check-in: ${formatBrazilianDate(lodging.checkInDate)} · Check-out: ${formatBrazilianDate(lodging.checkOutDate)} · ${nights} ${lodging.nights === 1 ? "diária" : "diárias"}`;
+}
+
 function invoiceDescriptionLines(state: InvoiceState) {
   if (state.kind === "credit_package" && state.creditPurchase) {
     return [
@@ -381,7 +392,9 @@ function invoiceDescriptionLines(state: InvoiceState) {
   if (state.invoice?.lines.length) {
     return state.invoice.lines.map((line) => ({
       title: `${line.dogName} · ${line.service}`,
-      detail: formatShortDate(line.date),
+      detail: line.lodging
+        ? lodgingInvoiceDetail(line.lodging)
+        : formatShortDate(line.date),
       amountCents: line.amountCents,
     }));
   }
@@ -471,10 +484,12 @@ async function createInvoicePdf(state: InvoiceState) {
     const detailY = y + titleLines.length * 5;
     document.setTextColor(102, 108, 104);
     document.setFontSize(8.5);
-    document.text(row.detail, 18, detailY);
+    const detailLines = document.splitTextToSize(row.detail, 145) as string[];
+    document.text(detailLines, 18, detailY);
     document.setDrawColor(232, 234, 232);
-    document.line(18, detailY + 6, 192, detailY + 6);
-    y = detailY + 14;
+    const rowEnd = detailY + detailLines.length * 4 + 3;
+    document.line(18, rowEnd, 192, rowEnd);
+    y = rowEnd + 8;
   }
 
   y = Math.min(Math.max(y + 4, 118), 252);

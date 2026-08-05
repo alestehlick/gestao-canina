@@ -207,9 +207,25 @@ export async function GET(request: Request) {
           serviceDate: invoiceItems.serviceDateSnapshot,
           description: invoiceItems.descriptionSnapshot,
           amountCents: invoiceItems.amountCents,
+          serviceCode: serviceCatalog.code,
+          lodgingStartDate: appointments.startDate,
+          lodgingEndDate: appointments.endDate,
+          lodgingNights: appointments.lodgingNights,
         })
         .from(invoiceItems)
         .innerJoin(invoices, eq(invoices.id, invoiceItems.invoiceId))
+        .innerJoin(
+          appointmentItems,
+          eq(appointmentItems.id, invoiceItems.appointmentItemId),
+        )
+        .innerJoin(
+          appointments,
+          eq(appointments.id, appointmentItems.appointmentId),
+        )
+        .innerJoin(
+          serviceCatalog,
+          eq(serviceCatalog.id, appointmentItems.serviceCatalogId),
+        )
         .where(
           and(
             eq(invoices.establishmentId, establishmentId),

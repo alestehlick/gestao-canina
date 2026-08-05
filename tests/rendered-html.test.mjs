@@ -92,6 +92,13 @@ test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () =
   assert.match(payments, /INSERT INTO cash_entries/);
   assert.match(workspace, /cashEntryId/);
   assert.match(cashView, /Entradas consideradas/);
+  assert.match(cashRoute, /credit_sold_cents/);
+  assert.match(cashRoute, /ce\.status = 'included'/);
+  assert.match(cashRoute, /ce\.occurred_on BETWEEN \? AND \?/);
+  assert.match(cashView, /Receita recebida no período/);
+  assert.match(cashView, /Créditos vendidos:/);
+  assert.match(cashView, /Avulsos recebidos:/);
+  assert.match(cashView, /Resultado acumulado do período/);
   assert.match(cashView, /Desconsiderar/);
   assert.match(cashView, /Configurar início do mês financeiro/);
   assert.match(app, /Considerar no Caixa/);

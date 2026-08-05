@@ -50,18 +50,15 @@ type CashPayload = {
     serviceStats: Array<{
       code: string;
       label: string;
-      count: number;
-      unit: string;
-      billedCents: number;
+      creditUnits: number;
+      creditSoldCents: number;
+      standaloneCount: number;
+      standaloneReceivedCents: number;
       receivedCents: number;
     }>;
     previousTotals: { inflowCents: number; outflowCents: number };
-    activity: {
-      invoiceCount: number;
-      customerCount: number;
-      dogCount: number;
-      averageTicketCents: number;
-    };
+    automaticInflowCents: number;
+    otherInflowCents: number;
     credits: {
       soldUnits: number;
       soldCents: number;
@@ -90,7 +87,6 @@ type CashDraft = {
 
 const inflowCategories = [
   "Serviços fora do sistema",
-  "Créditos",
   "Aporte dos sócios",
   "Reembolso",
   "Outros",
@@ -428,7 +424,7 @@ export function CashView({
           </strong>
         </div>
         <div>
-          <span>A receber</span>
+          <span>Em aberto hoje</span>
           <strong>{formatCurrency(payload?.totals.receivableCents ?? 0)}</strong>
           <small>
             {payload?.totals.receivableCount ?? 0} faturas em aberto
@@ -439,23 +435,29 @@ export function CashView({
       <section className="panel cash-service-overview">
         <div className="panel-heading">
           <div>
-            <p className="section-kicker">Atividade do período</p>
-            <h2>Serviços</h2>
+            <p className="section-kicker">Receita recebida no período</p>
+            <h2>Por serviço</h2>
           </div>
-          <small>Valores faturados · recebimentos identificados à parte</small>
+          <small>Somente valores incluídos no Caixa</small>
         </div>
         <div className="cash-service-grid">
           {(payload?.analytics.serviceStats ?? []).map((service) => (
             <article key={service.code}>
               <span>{service.label}</span>
-              <strong>{formatCurrency(service.billedCents)}</strong>
-              <small>
-                {new Intl.NumberFormat("pt-BR", {
-                  maximumFractionDigits: 1,
-                }).format(service.count)}{" "}
-                {service.unit}
-              </small>
-              <small>Recebido: {formatCurrency(service.receivedCents)}</small>
+              <strong>{formatCurrency(service.receivedCents)}</strong>
+              {service.creditUnits > 0 && (
+                <small>
+                  Créditos vendidos: {service.creditUnits} · {formatCurrency(service.creditSoldCents)}
+                </small>
+              )}
+              {service.standaloneCount > 0 && (
+                <small>
+                  Avulsos recebidos: {service.standaloneCount} · {formatCurrency(service.standaloneReceivedCents)}
+                </small>
+              )}
+              {service.creditUnits === 0 && service.standaloneCount === 0 && (
+                <small>Nenhum recebimento no período</small>
+              )}
             </article>
           ))}
         </div>
@@ -473,20 +475,12 @@ export function CashView({
           <div className="cash-analytics-body">
             <div className="cash-analysis-metrics">
               <article>
-                <span>Ticket médio</span>
-                <strong>{formatCurrency(payload.analytics.activity.averageTicketCents)}</strong>
+                <span>Receita de serviços e créditos</span>
+                <strong>{formatCurrency(payload.analytics.automaticInflowCents)}</strong>
               </article>
               <article>
-                <span>Faturas emitidas</span>
-                <strong>{payload.analytics.activity.invoiceCount}</strong>
-              </article>
-              <article>
-                <span>Clientes faturados</span>
-                <strong>{payload.analytics.activity.customerCount}</strong>
-              </article>
-              <article>
-                <span>Cães atendidos</span>
-                <strong>{payload.analytics.activity.dogCount}</strong>
+                <span>Outras entradas e ajustes</span>
+                <strong>{formatCurrency(payload.analytics.otherInflowCents)}</strong>
               </article>
             </div>
 
@@ -549,21 +543,21 @@ export function CashView({
               <article className="cash-chart-card">
                 <div>
                   <p className="section-kicker">Composição</p>
-                  <h3>Faturamento por serviço</h3>
+                  <h3>Receita por serviço</h3>
                 </div>
                 <div className="cash-service-chart">
                   {payload.analytics.serviceStats.map((service) => {
                     const maximum = Math.max(
-                      ...payload.analytics.serviceStats.map((item) => item.billedCents),
+                      ...payload.analytics.serviceStats.map((item) => item.receivedCents),
                       1,
                     );
                     return (
                       <div key={`chart-${service.code}`}>
                         <span>{service.label}</span>
                         <i>
-                          <b style={{ width: `${barSize(service.billedCents, maximum)}%` }} />
+                          <b style={{ width: `${barSize(service.receivedCents, maximum)}%` }} />
                         </i>
-                        <small>{formatCurrency(service.billedCents)}</small>
+                        <small>{formatCurrency(service.receivedCents)}</small>
                       </div>
                     );
                   })}
@@ -573,10 +567,10 @@ export function CashView({
               <article className="cash-chart-card cash-daily-card">
                 <div>
                   <p className="section-kicker">Evolução</p>
-                  <h3>Saldo acumulado</h3>
+                  <h3>Resultado acumulado do período</h3>
                 </div>
                 {payload.analytics.dailyCash.length ? (
-                  <div className="cash-daily-chart" aria-label="Saldo acumulado por dia">
+                  <div className="cash-daily-chart" aria-label="Resultado acumulado por dia no período">
                     {(() => {
                       const maximum = Math.max(
                         ...payload.analytics.dailyCash.map((day) => Math.abs(day.cumulativeCents)),
@@ -606,7 +600,7 @@ export function CashView({
                 <h3>Pacotes pré-pagos</h3>
                 <dl>
                   <div><dt>Vendidos no período</dt><dd>{payload.analytics.credits.soldUnits}</dd></div>
-                  <div><dt>Valor vendido</dt><dd>{formatCurrency(payload.analytics.credits.soldCents)}</dd></div>
+                  <div><dt>Receita de vendas</dt><dd>{formatCurrency(payload.analytics.credits.soldCents)}</dd></div>
                   <div><dt>Utilizados</dt><dd>{payload.analytics.credits.usedUnits}</dd></div>
                   <div><dt>Disponíveis</dt><dd>{payload.analytics.credits.availableUnits}</dd></div>
                 </dl>

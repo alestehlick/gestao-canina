@@ -135,7 +135,7 @@ export async function GET(request: Request) {
       monthStartDay,
     );
     const d1 = getD1Database();
-    const [serviceResult, previousResult, receivableResult, activityResult, creditResult] =
+    const [serviceResult, previousResult, receivableResult, creditSalesResult, creditResult] =
       await d1.batch([
         d1
           .prepare(
@@ -146,18 +146,17 @@ export async function GET(request: Request) {
               a.dog_id AS dog_id,
               a.lodging_nights AS lodging_nights,
               ii.amount_cents AS amount_cents,
-              ip.id AS payment_id,
-              ce.status AS cash_status
+              ip.id AS payment_id
             FROM invoice_items ii
             INNER JOIN invoices i ON i.id = ii.invoice_id
             INNER JOIN appointment_items ai ON ai.id = ii.appointment_item_id
             INNER JOIN appointments a ON a.id = ai.appointment_id
             INNER JOIN service_catalog sc ON sc.id = ai.service_catalog_id
-            LEFT JOIN invoice_payments ip ON ip.invoice_id = i.id
-            LEFT JOIN cash_entries ce ON ce.source_payment_id = ip.id
+            INNER JOIN invoice_payments ip ON ip.invoice_id = i.id
+            INNER JOIN cash_entries ce ON ce.source_payment_id = ip.id
             WHERE i.establishment_id = ?
-              AND i.status IN ('issued', 'paid')
-              AND ii.service_date_snapshot BETWEEN ? AND ?`,
+              AND ce.status = 'included'
+              AND ce.occurred_on BETWEEN ? AND ?`,
           )
           .bind(establishmentId, period.start, period.end),
         d1
@@ -179,37 +178,33 @@ export async function GET(request: Request) {
           .bind(establishmentId),
         d1
           .prepare(
-            `SELECT
-              COUNT(DISTINCT i.id) AS invoice_count,
-              COUNT(DISTINCT i.account_id) AS customer_count,
-              COALESCE(SUM(i.total_cents), 0) AS invoiced_cents
-            FROM invoices i
-            WHERE i.establishment_id = ? AND i.status <> 'void'
-              AND date(i.issued_at, '-3 hours') BETWEEN ? AND ?`,
+            `SELECT sc.code AS service_code,
+              COALESCE(SUM(cp.credit_units), 0) AS credit_units,
+              COALESCE(SUM(cp.amount_cents), 0) AS credit_sold_cents
+            FROM credit_purchases cp
+            INNER JOIN service_catalog sc ON sc.id = cp.service_catalog_id
+            INNER JOIN invoice_payments ip ON ip.invoice_id = cp.invoice_id
+            INNER JOIN cash_entries ce ON ce.source_payment_id = ip.id
+            WHERE cp.establishment_id = ?
+              AND cp.status = 'paid'
+              AND ce.status = 'included'
+              AND ce.occurred_on BETWEEN ? AND ?
+            GROUP BY sc.code`,
           )
           .bind(establishmentId, period.start, period.end),
         d1
           .prepare(
             `SELECT
-              COALESCE(SUM(CASE WHEN cp.status = 'paid' AND substr(cp.paid_at, 1, 10) BETWEEN ? AND ? THEN cp.credit_units ELSE 0 END), 0) AS sold_units,
-              COALESCE(SUM(CASE WHEN cp.status = 'paid' AND substr(cp.paid_at, 1, 10) BETWEEN ? AND ? THEN cp.amount_cents ELSE 0 END), 0) AS sold_cents,
               (SELECT COALESCE(-SUM(delta_units), 0) FROM credit_movements
                 WHERE establishment_id = ? AND movement_type = 'consume'
                   AND date(occurred_at, '-3 hours') BETWEEN ? AND ?) AS used_units,
               (SELECT COALESCE(SUM(delta_units), 0) FROM credit_movements
-                WHERE establishment_id = ?) AS available_units
-            FROM credit_purchases cp
-            WHERE cp.establishment_id = ?`,
+                WHERE establishment_id = ?) AS available_units`,
           )
           .bind(
-            period.start,
-            period.end,
-            period.start,
-            period.end,
             establishmentId,
             period.start,
             period.end,
-            establishmentId,
             establishmentId,
           ),
       ]);
@@ -222,10 +217,15 @@ export async function GET(request: Request) {
       dog_id: string;
       lodging_nights: number | null;
       amount_cents: number;
-      payment_id: string | null;
-      cash_status: "included" | "excluded" | null;
+      payment_id: string;
+    };
+    type CreditSaleRow = {
+      service_code: string;
+      credit_units: number;
+      credit_sold_cents: number;
     };
     const serviceRows = serviceResult.results as ServiceRow[];
+    const creditSales = creditSalesResult.results as CreditSaleRow[];
     const serviceCodes = [
       ["bath", "Banho"],
       ["bath_grooming", "Banho e tosa"],
@@ -235,33 +235,23 @@ export async function GET(request: Request) {
     ] as const;
     const serviceStats = serviceCodes.map(([code, label]) => {
       const rows = serviceRows.filter((row) => row.service_code === code);
+      const creditSale = creditSales.find(
+        (sale) => sale.service_code === code,
+      );
       const uniqueItems = new Set(rows.map((row) => row.item_id));
-      const lodgingByAppointment = new Map<string, number>();
-      if (code === "lodging") {
-        for (const row of rows) {
-          lodgingByAppointment.set(
-            row.appointment_id,
-            Number(row.lodging_nights ?? 0),
-          );
-        }
-      }
+      const standaloneReceivedCents = rows.reduce(
+        (total, row) => total + row.amount_cents,
+        0,
+      );
+      const creditSoldCents = Number(creditSale?.credit_sold_cents ?? 0);
       return {
         code,
         label,
-        count:
-          code === "lodging"
-            ? [...lodgingByAppointment.values()].reduce(
-                (total, nights) => total + nights,
-                0,
-              )
-            : uniqueItems.size,
-        unit: code === "lodging" ? "diárias" : "atendimentos",
-        billedCents: rows.reduce((total, row) => total + row.amount_cents, 0),
-        receivedCents: rows
-          .filter(
-            (row) => row.payment_id && row.cash_status === "included",
-          )
-          .reduce((total, row) => total + row.amount_cents, 0),
+        creditUnits: Number(creditSale?.credit_units ?? 0),
+        creditSoldCents,
+        standaloneCount: uniqueItems.size,
+        standaloneReceivedCents,
+        receivedCents: creditSoldCents + standaloneReceivedCents,
       };
     });
     const previous = previousResult.results[0] as
@@ -270,17 +260,8 @@ export async function GET(request: Request) {
     const receivable = receivableResult.results[0] as
       | { invoice_count?: number; total_cents?: number }
       | undefined;
-    const activity = activityResult.results[0] as
-      | {
-          invoice_count?: number;
-          customer_count?: number;
-          invoiced_cents?: number;
-        }
-      | undefined;
     const credits = creditResult.results[0] as
       | {
-          sold_units?: number;
-          sold_cents?: number;
           used_units?: number;
           available_units?: number;
         }
@@ -313,7 +294,10 @@ export async function GET(request: Request) {
         cumulativeCents += day.inflowCents - day.outflowCents;
         return { ...day, cumulativeCents };
       });
-    const invoiceCount = Number(activity?.invoice_count ?? 0);
+    const automaticInflowCents = serviceStats.reduce(
+      (total, service) => total + service.receivedCents,
+      0,
+    );
 
     return json({
       anchorMonth,
@@ -333,17 +317,17 @@ export async function GET(request: Request) {
           inflowCents: Number(previous?.inflow_cents ?? 0),
           outflowCents: Number(previous?.outflow_cents ?? 0),
         },
-        activity: {
-          invoiceCount,
-          customerCount: new Set(serviceRows.map((row) => row.account_id)).size,
-          dogCount: new Set(serviceRows.map((row) => row.dog_id)).size,
-          averageTicketCents: invoiceCount
-            ? Math.round(Number(activity?.invoiced_cents ?? 0) / invoiceCount)
-            : 0,
-        },
+        automaticInflowCents,
+        otherInflowCents: Math.max(0, inflowCents - automaticInflowCents),
         credits: {
-          soldUnits: Number(credits?.sold_units ?? 0),
-          soldCents: Number(credits?.sold_cents ?? 0),
+          soldUnits: creditSales.reduce(
+            (total, sale) => total + Number(sale.credit_units),
+            0,
+          ),
+          soldCents: creditSales.reduce(
+            (total, sale) => total + Number(sale.credit_sold_cents),
+            0,
+          ),
           usedUnits: Number(credits?.used_units ?? 0),
           availableUnits: Number(credits?.available_units ?? 0),
         },

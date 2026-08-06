@@ -893,6 +893,8 @@ export function mapWorkspaceInvoices(
         amountCents: Math.max(0, invoice.totalCents),
         due: invoiceDueLabel(invoice, referenceDate),
         status,
+        issuedAt:
+          invoice.issuedAt?.slice(0, 10) ?? invoice.createdAt.slice(0, 10),
         paidAt: invoice.paidAt?.slice(0, 10) ?? undefined,
         sentBy: extractDeliveryChannels(invoice.deliveryChannelsJson).filter(
           (channel): channel is "whatsapp" | "email" =>

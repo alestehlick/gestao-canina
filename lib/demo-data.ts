@@ -117,6 +117,7 @@ export type Invoice = {
   amountCents: number;
   due: string;
   status: "pending" | "paid" | "overdue";
+  issuedAt?: string;
   paidAt?: string;
   sentBy?: ("whatsapp" | "email")[];
   lastSentAt?: string;
@@ -610,6 +611,7 @@ export const demoInvoices: Invoice[] = [
     amountCents: 21500,
     due: "Vence hoje",
     status: "pending",
+    issuedAt: "2026-08-05",
     items: "Banho de Bento e 2 outros serviços",
     periodStart: "2026-07-28",
     periodEnd: "2026-07-29",
@@ -627,6 +629,7 @@ export const demoInvoices: Invoice[] = [
     amountCents: 18000,
     due: "Pago em 27/07",
     status: "paid",
+    issuedAt: "2026-08-02",
     paidAt: "2026-07-27",
     sentBy: ["whatsapp"],
     lastSentAt: "2026-07-27T15:20:00.000Z",
@@ -648,6 +651,7 @@ export const demoInvoices: Invoice[] = [
     amountCents: 9500,
     due: "Venceu em 25/07",
     status: "overdue",
+    issuedAt: "2026-08-01",
     items: "Banho do Theo",
     periodStart: "2026-07-25",
     periodEnd: "2026-07-25",

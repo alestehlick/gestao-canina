@@ -880,15 +880,11 @@ function initials(value: string) {
     .join("");
 }
 
-function skipsArrivalStep(booking: Booking) {
-  return booking.serviceType === "daycare" || booking.serviceType === "hotel";
-}
-
 function nextStatus(booking: Booking): BookingStatus {
   const { status } = booking;
   const progression: Partial<Record<BookingStatus, BookingStatus>> = {
     scheduled: "confirmed",
-    confirmed: skipsArrivalStep(booking) ? "completed" : "present",
+    confirmed: "completed",
     in_transit: "completed",
     present: "completed",
     in_service: "completed",
@@ -901,9 +897,7 @@ function primaryAction(booking: Booking) {
   const { status } = booking;
   const actions: Partial<Record<BookingStatus, string>> = {
     scheduled: "Confirmar",
-    confirmed: skipsArrivalStep(booking)
-      ? "Concluir atendimento"
-      : "Registrar chegada",
+    confirmed: "Concluir atendimento",
     in_transit: "Concluir rota",
     present: "Concluir atendimento",
     in_service: "Concluir atendimento",
@@ -3380,6 +3374,7 @@ export function ManagementApp() {
       amountCents,
       due: "Vence hoje",
       status: "pending",
+      issuedAt: operationalToday,
       items:
         kind === "deposit"
           ? `Sinal da hospedagem de ${booking.dogName}`
@@ -3465,6 +3460,7 @@ export function ManagementApp() {
               amountCents: response.invoice.totalCents,
               due: "Vence hoje",
               status: "pending",
+              issuedAt: operationalToday,
               items: `Pacote de ${purchase.units} créditos de ${
                 serviceLabels[purchase.serviceType]
               }`,
@@ -3528,6 +3524,7 @@ export function ManagementApp() {
               amountCents: response.invoice.totalCents,
               due: "Vence hoje",
               status: "pending",
+              issuedAt: operationalToday,
               items: `${invoiceState.selectedServices.length} serviços selecionados`,
               sourceType: "services",
               lines: response.invoice.items.map((item) => ({
@@ -3618,6 +3615,7 @@ export function ManagementApp() {
         ),
         due: "Vence hoje",
         status: "pending",
+        issuedAt: operationalToday,
         items:
           invoiceState.kind === "credit_package" && invoiceState.creditPurchase
             ? `Pacote de ${invoiceState.creditPurchase.units} créditos de ${
@@ -7966,6 +7964,12 @@ function BillingView({
   const [noteEditorInvoiceId, setNoteEditorInvoiceId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteSaving, setNoteSaving] = useState(false);
+  const defaultInvoiceFrom = shiftDate(operationalToday, -6);
+  const [invoicePeriodOpen, setInvoicePeriodOpen] = useState(false);
+  const [invoicePeriodFrom, setInvoicePeriodFrom] = useState(defaultInvoiceFrom);
+  const [invoicePeriodTo, setInvoicePeriodTo] = useState(operationalToday);
+  const [appliedInvoiceFrom, setAppliedInvoiceFrom] = useState(defaultInvoiceFrom);
+  const [appliedInvoiceTo, setAppliedInvoiceTo] = useState(operationalToday);
   const selectedTotal = billableServices
     .filter((item) => selectedBillables.includes(item.id))
     .reduce((total, item) => total + item.amountCents, 0);
@@ -8006,6 +8010,54 @@ function BillingView({
   const awaitingPackages = creditPurchases.filter(
     (purchase) => purchase.status === "awaiting_payment",
   ).length;
+  const displayedInvoices = invoices
+    .filter((invoice) => {
+      const entryDate =
+        invoice.issuedAt ??
+        invoice.paidAt ??
+        invoice.periodEnd ??
+        invoice.periodStart;
+      return (
+        Boolean(entryDate) &&
+        entryDate! >= appliedInvoiceFrom &&
+        entryDate! <= appliedInvoiceTo
+      );
+    })
+    .sort((left, right) => {
+      const leftPaid = left.status === "paid";
+      const rightPaid = right.status === "paid";
+      if (leftPaid !== rightPaid) return leftPaid ? 1 : -1;
+      const leftDate =
+        left.issuedAt ?? left.paidAt ?? left.periodEnd ?? left.periodStart ?? "";
+      const rightDate =
+        right.issuedAt ?? right.paidAt ?? right.periodEnd ?? right.periodStart ?? "";
+      return rightDate.localeCompare(leftDate) || right.number.localeCompare(left.number);
+    });
+  const isDefaultInvoicePeriod =
+    appliedInvoiceFrom === defaultInvoiceFrom &&
+    appliedInvoiceTo === operationalToday;
+
+  function applyInvoicePeriod(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (
+      !invoicePeriodFrom ||
+      !invoicePeriodTo ||
+      invoicePeriodTo < invoicePeriodFrom
+    ) {
+      return;
+    }
+    setAppliedInvoiceFrom(invoicePeriodFrom);
+    setAppliedInvoiceTo(invoicePeriodTo);
+    setInvoicePeriodOpen(false);
+  }
+
+  function resetInvoicePeriod() {
+    setInvoicePeriodFrom(defaultInvoiceFrom);
+    setInvoicePeriodTo(operationalToday);
+    setAppliedInvoiceFrom(defaultInvoiceFrom);
+    setAppliedInvoiceTo(operationalToday);
+    setInvoicePeriodOpen(false);
+  }
 
   function openInvoiceNote(invoice: Invoice) {
     setNoteEditorInvoiceId(invoice.id);
@@ -8145,10 +8197,63 @@ function BillingView({
           <section className="panel full-panel">
             <div className="panel-heading">
               <div>
-                <p className="section-kicker">Histórico</p>
+                <p className="section-kicker">
+                  {isDefaultInvoicePeriod ? "Últimos 7 dias" : "Período consultado"}
+                </p>
                 <h2>Cobranças recentes</h2>
+                <small className="audit-period-label">
+                  {formatShortDate(appliedInvoiceFrom)} a {formatShortDate(appliedInvoiceTo)}
+                  {` · ${displayedInvoices.length} ${
+                    displayedInvoices.length === 1 ? "cobrança" : "cobranças"
+                  }`}
+                </small>
+              </div>
+              <div className="billing-period-actions">
+                {!isDefaultInvoicePeriod && (
+                  <button
+                    type="button"
+                    className="text-button muted"
+                    onClick={resetInvoicePeriod}
+                  >
+                    Voltar aos últimos 7 dias
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setInvoicePeriodOpen((open) => !open)}
+                  aria-expanded={invoicePeriodOpen}
+                >
+                  {invoicePeriodOpen ? "Fechar período" : "Escolher período"}
+                </button>
               </div>
             </div>
+            {invoicePeriodOpen && (
+              <form className="audit-period-form billing-period-form" onSubmit={applyInvoicePeriod}>
+                <label className="field">
+                  <span>Data inicial</span>
+                  <BrazilianDateInput
+                    value={invoicePeriodFrom}
+                    max={invoicePeriodTo}
+                    ariaLabel="Data inicial das cobranças"
+                    onChange={setInvoicePeriodFrom}
+                  />
+                </label>
+                <label className="field">
+                  <span>Data final</span>
+                  <BrazilianDateInput
+                    value={invoicePeriodTo}
+                    min={invoicePeriodFrom}
+                    max={operationalToday}
+                    ariaLabel="Data final das cobranças"
+                    onChange={setInvoicePeriodTo}
+                  />
+                </label>
+                <button className="primary-button" type="submit">
+                  Mostrar cobranças
+                </button>
+              </form>
+            )}
             <div className="table-wrap">
               <table className="data-table invoices-table">
                 <thead>
@@ -8167,7 +8272,7 @@ function BillingView({
                   </tr>
                 </thead>
                 <tbody>
-                  {invoices.map((invoice) => (
+                  {displayedInvoices.map((invoice) => (
                     <Fragment key={invoice.id}>
                     <tr>
                       <td>#{invoice.number}</td>
@@ -8262,7 +8367,7 @@ function BillingView({
               </table>
             </div>
             <div className="mobile-card-list invoice-mobile-list">
-              {invoices.map((invoice) => (
+              {displayedInvoices.map((invoice) => (
                 <article
                   className={`mobile-data-card invoice-${invoice.status}`}
                   key={`mobile-${invoice.id}`}
@@ -8335,6 +8440,12 @@ function BillingView({
                 </article>
               ))}
             </div>
+            {!displayedInvoices.length && (
+              <EmptyState
+                title="Nenhuma cobrança neste período"
+                description="Escolha outro intervalo para consultar cobranças anteriores."
+              />
+            )}
           </section>
         </>
       )}

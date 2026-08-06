@@ -119,6 +119,12 @@ function billableLongStayDiscountCents(
 }
 
 type BillingTab = "invoice" | "credits" | "receipts";
+type AgendaServiceFilter =
+  | "all"
+  | "hotel"
+  | "daycare"
+  | "bath"
+  | "transport";
 type RuntimeMode =
   | "loading"
   | "setup"
@@ -945,6 +951,8 @@ export function ManagementApp() {
   const [agendaFilter, setAgendaFilter] = useState<
     "all" | "upcoming" | "active" | "completed"
   >("all");
+  const [agendaServiceFilter, setAgendaServiceFilter] =
+    useState<AgendaServiceFilter>("all");
   const [search, setSearch] = useState("");
   const [searchCursor, setSearchCursor] = useState(0);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -4371,6 +4379,8 @@ export function ManagementApp() {
               onDateChange={selectAgendaDate}
               agendaFilter={agendaFilter}
               setAgendaFilter={setAgendaFilter}
+              agendaServiceFilter={agendaServiceFilter}
+              setAgendaServiceFilter={setAgendaServiceFilter}
               onAdvance={advanceBooking}
               onMenu={setOpenMenuId}
               openMenuId={openMenuId}
@@ -6354,6 +6364,8 @@ function TodayView({
   onDateChange,
   agendaFilter,
   setAgendaFilter,
+  agendaServiceFilter,
+  setAgendaServiceFilter,
   onAdvance,
   onMenu,
   openMenuId,
@@ -6379,6 +6391,8 @@ function TodayView({
   setAgendaFilter: (
     value: "all" | "upcoming" | "active" | "completed",
   ) => void;
+  agendaServiceFilter: AgendaServiceFilter;
+  setAgendaServiceFilter: (value: AgendaServiceFilter) => void;
   onAdvance: (booking: Booking) => void;
   onMenu: (id: string | null) => void;
   openMenuId: string | null;
@@ -6405,8 +6419,11 @@ function TodayView({
   const visibleBookings = dayBookings.filter(
     (booking) => booking.status !== "cancelled",
   );
-  const filteredBookings = filterBookings(dayBookings, agendaFilter).filter(
-    (booking) => booking.status !== "cancelled",
+  const filteredBookings = filterBookingsByService(
+    filterBookings(dayBookings, agendaFilter).filter(
+      (booking) => booking.status !== "cancelled",
+    ),
+    agendaServiceFilter,
   ).sort(agendaBookingOrder);
   const isToday = selectedDate === operationalToday;
   const dogsForDay = new Set(
@@ -6503,7 +6520,13 @@ function TodayView({
               </p>
               <h2>{isToday ? "Agenda de hoje" : "Agenda do dia"}</h2>
             </div>
-            <AgendaFilters value={agendaFilter} onChange={setAgendaFilter} />
+            <div className="agenda-filter-groups">
+              <AgendaFilters value={agendaFilter} onChange={setAgendaFilter} />
+              <AgendaServiceFilters
+                value={agendaServiceFilter}
+                onChange={setAgendaServiceFilter}
+              />
+            </div>
           </div>
           <div className="agenda-list">
             {filteredBookings.map((booking) => (
@@ -6807,6 +6830,36 @@ function AgendaFilters({
   );
 }
 
+function AgendaServiceFilters({
+  value,
+  onChange,
+}: {
+  value: AgendaServiceFilter;
+  onChange: (value: AgendaServiceFilter) => void;
+}) {
+  const filters = [
+    ["all", "Todos os serviços"],
+    ["hotel", "Hospedagens"],
+    ["daycare", "Creches"],
+    ["bath", "Banhos e tosa"],
+    ["transport", "Taxi-dogs"],
+  ] as const;
+  return (
+    <div className="filter-chips service-filter-chips" aria-label="Filtrar por serviço">
+      {filters.map(([id, label]) => (
+        <button
+          key={id}
+          className={value === id ? "active" : ""}
+          onClick={() => onChange(id)}
+          aria-pressed={value === id}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function filterBookings(
   bookings: Booking[],
   filter: "all" | "upcoming" | "active" | "completed",
@@ -6823,6 +6876,22 @@ function filterBookings(
   }
   if (filter === "completed") {
     return bookings.filter((booking) => booking.status === "completed");
+  }
+  return bookings;
+}
+
+function filterBookingsByService(
+  bookings: Booking[],
+  filter: AgendaServiceFilter,
+) {
+  if (filter === "hotel" || filter === "daycare" || filter === "transport") {
+    return bookings.filter((booking) => booking.serviceType === filter);
+  }
+  if (filter === "bath") {
+    return bookings.filter(
+      (booking) =>
+        booking.serviceType === "bath" || booking.serviceType === "grooming",
+    );
   }
   return bookings;
 }

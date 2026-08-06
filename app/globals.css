@@ -1177,6 +1177,12 @@ h3 {
   align-items: flex-end;
 }
 
+.agenda-filter-groups {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
 .heading-actions {
   display: flex;
   flex-wrap: wrap;
@@ -5236,6 +5242,11 @@ h3 {
   .agenda-heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .agenda-filter-groups {
+    justify-items: start;
+    width: 100%;
   }
 
   .agenda-panel > .panel-heading,

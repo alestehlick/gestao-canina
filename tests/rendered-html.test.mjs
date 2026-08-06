@@ -161,6 +161,10 @@ test("mantém perfis e navegação móveis enxutos e completos", async () => {
   assert.match(app, /label="creches"/);
   assert.match(app, /label="banhos"/);
   assert.match(app, /label="Taxi-dogs"/);
+  assert.match(app, /function AgendaServiceFilters/);
+  assert.match(app, /Todos os serviços/);
+  assert.match(app, /Banhos e tosa/);
+  assert.match(app, /function filterBookingsByService/);
   assert.doesNotMatch(app, /label="programados"/);
   assert.doesNotMatch(app, /label="serviços no dia"/);
   assert.match(workspace, /lte\(appointments\.startDate, to\)/);

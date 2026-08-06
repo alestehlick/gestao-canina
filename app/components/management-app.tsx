@@ -1006,6 +1006,7 @@ export function ManagementApp() {
     key: string;
     promise: Promise<WorkspaceReadyPayload | null>;
   } | null>(null);
+  const workspaceRefreshRevisionRef = useRef(0);
 
   const clearOperationalData = useCallback(() => {
     setWorkspacePayload(null);
@@ -1122,14 +1123,16 @@ export function ManagementApp() {
       options: {
         allowDemoFallback?: boolean;
         referenceDate?: string;
+        force?: boolean;
       } = {},
     ): Promise<WorkspaceReadyPayload | null> => {
       const referenceDate =
         options.referenceDate ?? selectedDateRef.current;
       const key = `${referenceDate}:${options.allowDemoFallback ? "demo" : "live"}`;
-      if (workspaceRefreshRef.current?.key === key) {
+      if (!options.force && workspaceRefreshRef.current?.key === key) {
         return workspaceRefreshRef.current.promise;
       }
+      const revision = ++workspaceRefreshRevisionRef.current;
 
       const promise = (async () => {
         try {
@@ -1137,15 +1140,19 @@ export function ManagementApp() {
             workspaceRequestUrl(referenceDate),
           );
           if (isReadyWorkspacePayload(payload)) {
-            applyReadyWorkspace(payload);
+            if (revision === workspaceRefreshRevisionRef.current) {
+              applyReadyWorkspace(payload);
+            }
             return payload;
           }
+          if (revision !== workspaceRefreshRevisionRef.current) return null;
           setWorkspacePayload(null);
           setOnboardingPayload(payload);
           setRuntimeMode("onboarding");
           setLoadError("");
           return null;
         } catch (error) {
+          if (revision !== workspaceRefreshRevisionRef.current) return null;
           if (isSessionError(error)) {
             endSession();
             return null;
@@ -1366,7 +1373,7 @@ export function ManagementApp() {
         // Confirma a ação assim que a gravação termina e sincroniza a visão
         // completa em segundo plano. Isso evita que cada botão espere uma nova
         // leitura de toda a área de trabalho.
-        void refreshWorkspace();
+        void refreshWorkspace({ force: true });
       }
       if (options.successMessage) {
         setToast({ message: options.successMessage });

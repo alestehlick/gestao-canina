@@ -4,7 +4,9 @@ import {
   desc,
   eq,
   gte,
+  isNull,
   lte,
+  or,
   sql,
 } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -260,8 +262,19 @@ export async function GET(request: Request) {
         .where(
           and(
             eq(appointments.establishmentId, establishmentId),
-            lte(appointments.startDate, to),
-            gte(appointments.endDate, from),
+            or(
+              and(
+                lte(appointments.startDate, to),
+                gte(appointments.endDate, from),
+              ),
+              and(
+                eq(appointments.status, "completed"),
+                eq(appointmentItems.status, "completed"),
+                eq(appointmentItems.paymentPreference, "invoice"),
+                eq(appointmentItems.settlementMethod, "unsettled"),
+                isNull(appointmentItems.activeInvoiceId),
+              ),
+            ),
           ),
         )
         .orderBy(

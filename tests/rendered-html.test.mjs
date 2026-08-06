@@ -157,6 +157,11 @@ test("mantém perfis e navegação móveis enxutos e completos", async () => {
   assert.match(app, /function bookingOccursOn/);
   assert.match(workspace, /lte\(appointments\.startDate, to\)/);
   assert.match(workspace, /gte\(appointments\.endDate, from\)/);
+  assert.match(workspace, /eq\(appointmentItems\.paymentPreference, "invoice"\)/);
+  assert.match(workspace, /eq\(appointmentItems\.settlementMethod, "unsettled"\)/);
+  assert.match(workspace, /isNull\(appointmentItems\.activeInvoiceId\)/);
+  assert.match(app, /refreshWorkspace\(\{ force: true \}\)/);
+  assert.match(app, /workspaceRefreshRevisionRef/);
 });
 
 test("mantém dados operacionais fora do repositório público", async () => {

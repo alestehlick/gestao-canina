@@ -2405,7 +2405,7 @@ h3 {
 
 .invoice-note-link.has-note {
   max-width: 170px;
-  color: var(--ink);
+  color: var(--danger);
   font-style: italic;
   line-height: 1.35;
   text-align: left;

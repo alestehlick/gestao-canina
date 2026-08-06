@@ -754,7 +754,6 @@ export function mapWorkspaceBillableServices(
 
       if (!isLodging) {
         return appointment.status === "completed" &&
-          item.status === "completed" &&
           !item.activeInvoiceId
           ? [
               {
@@ -812,7 +811,6 @@ export function mapWorkspaceBillableServices(
 
       if (
         appointment.status === "completed" &&
-        item.status === "completed" &&
         !item.activeInvoiceId
       ) {
         const paidDepositCents =

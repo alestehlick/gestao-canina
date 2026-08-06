@@ -195,7 +195,7 @@ export async function POST(request: Request) {
               row.depositPercent <= 0 ||
               row.depositPercent >= 100
             : row.appointmentStatus !== "completed" ||
-              row.itemStatus !== "completed",
+              row.itemStatus === "cancelled",
       )
     ) {
       throw new HttpError(
@@ -458,9 +458,10 @@ export async function POST(request: Request) {
         d1
         .prepare(
           `UPDATE appointment_items
-          SET active_invoice_id = ?, updated_at = ${nowExpression}
+          SET status = 'completed', active_invoice_id = ?,
+            updated_at = ${nowExpression}
           WHERE id IN (${lockedPlaceholders})
-            AND status = 'completed'
+            AND status <> 'cancelled'
             AND payment_preference = 'invoice'
             AND settlement_method = 'unsettled'
             AND active_invoice_id IS NULL

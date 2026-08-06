@@ -269,7 +269,6 @@ export async function GET(request: Request) {
               ),
               and(
                 eq(appointments.status, "completed"),
-                eq(appointmentItems.status, "completed"),
                 eq(appointmentItems.paymentPreference, "invoice"),
                 eq(appointmentItems.settlementMethod, "unsettled"),
                 isNull(appointmentItems.activeInvoiceId),

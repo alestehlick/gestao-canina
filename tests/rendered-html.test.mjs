@@ -135,7 +135,7 @@ test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () =
 });
 
 test("mantém perfis e navegação móveis enxutos e completos", async () => {
-  const [app, styles, data, workspace] = await Promise.all([
+  const [app, styles, data, workspace, invoices] = await Promise.all([
     readFile(
       new URL("../app/components/management-app.tsx", import.meta.url),
       "utf8",
@@ -143,6 +143,7 @@ test("mantém perfis e navegação móveis enxutos e completos", async () => {
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../lib/workspace-data.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/workspace/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/invoices/route.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(app, /showDate/);
@@ -160,6 +161,16 @@ test("mantém perfis e navegação móveis enxutos e completos", async () => {
   assert.match(workspace, /eq\(appointmentItems\.paymentPreference, "invoice"\)/);
   assert.match(workspace, /eq\(appointmentItems\.settlementMethod, "unsettled"\)/);
   assert.match(workspace, /isNull\(appointmentItems\.activeInvoiceId\)/);
+  assert.doesNotMatch(
+    workspace,
+    /eq\(appointmentItems\.status, "completed"\)/,
+  );
+  assert.match(data, /appointment\.status === "completed"/);
+  assert.doesNotMatch(
+    data,
+    /appointment\.status === "completed"\s*&&\s*item\.status === "completed"/,
+  );
+  assert.match(invoices, /SET status = 'completed', active_invoice_id = \?/);
   assert.match(app, /refreshWorkspace\(\{ force: true \}\)/);
   assert.match(app, /workspaceRefreshRevisionRef/);
 });

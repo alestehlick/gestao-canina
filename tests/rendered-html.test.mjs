@@ -117,6 +117,7 @@ test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () =
   assert.match(cashRoute, /ce\.status = 'included'/);
   assert.match(cashRoute, /ce\.occurred_on BETWEEN \? AND \?/);
   assert.match(cashView, /Receita recebida no período/);
+  assert.match(cashRoute, /\["hotel", "Hospedagem"\]/);
   assert.match(cashView, /Créditos vendidos:/);
   assert.match(cashView, /Avulsos recebidos:/);
   assert.match(cashView, /Resultado acumulado do período/);

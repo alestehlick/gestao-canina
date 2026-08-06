@@ -230,7 +230,7 @@ export async function GET(request: Request) {
       ["bath", "Banho"],
       ["bath_grooming", "Banho e tosa"],
       ["daycare", "Creche"],
-      ["lodging", "Hospedagem"],
+      ["hotel", "Hospedagem"],
       ["taxi_dog", "Taxi-dog"],
     ] as const;
     const serviceStats = serviceCodes.map(([code, label]) => {

@@ -43,6 +43,9 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.match(app, /Mostrar cobranças/);
   assert.match(app, /whatsapp:\/\/send\?phone=/);
   assert.match(app, /isWindowsWhatsApp/);
+  assert.match(app, /Digite o nome do cão/);
+  assert.match(app, /service-dog-suggestions/);
+  assert.match(app, /normalize\(`\$\{dog\.name\} \$\{dog\.customerName\}`\)\.includes\(query\)/);
   assert.match(app, /readOnly=\{signedInRole !== "owner"\}/);
   assert.match(app, /const priceCents = Math\.round\(price \* 100\)/);
   assert.doesNotMatch(app, /serviceType === "transport" \? \(transportDirection === "round_trip"/);

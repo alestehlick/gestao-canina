@@ -973,6 +973,8 @@ export function ManagementApp() {
   const [selectedReceipt, setSelectedReceipt] =
     useState<ServiceReceipt | null>(null);
   const [serviceDraftDogId, setServiceDraftDogId] = useState("");
+  const [serviceDraftDogSearch, setServiceDraftDogSearch] = useState("");
+  const [serviceDogPickerOpen, setServiceDogPickerOpen] = useState(false);
   const [serviceDraftType, setServiceDraftType] =
     useState<ServiceType>("daycare");
   const [serviceDraftPayment, setServiceDraftPayment] =
@@ -1461,6 +1463,10 @@ export function ManagementApp() {
 
   function openServiceDialog(dogId = "") {
     setServiceDraftDogId(dogId);
+    setServiceDraftDogSearch(
+      dogs.find((dog) => dog.id === dogId)?.name ?? "",
+    );
+    setServiceDogPickerOpen(false);
     setServiceDraftType("daycare");
     setServiceDraftPayment("invoice");
     setServiceDraftHasDeposit(false);
@@ -4114,6 +4120,16 @@ export function ManagementApp() {
     customers.find((customer) => customer.id === selectedCustomerId) ?? null;
   const serviceDraftDog =
     dogs.find((dog) => dog.id === serviceDraftDogId) ?? null;
+  const serviceDogMatches = (() => {
+    const query = normalize(serviceDraftDogSearch);
+    return dogs
+      .filter((dog) =>
+        !query ||
+        normalize(`${dog.name} ${dog.customerName}`).includes(query),
+      )
+      .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"))
+      .slice(0, 8);
+  })();
   const serviceDraftCreditEligible = creditServiceTypes.includes(
     serviceDraftType as CreditServiceType,
   );
@@ -4569,25 +4585,71 @@ export function ManagementApp() {
           <form className="form-grid" onSubmit={submitService}>
             <label className="field full">
               <span>Cão *</span>
-              <select
-                name="dogId"
-                value={serviceDraftDogId}
-                onChange={(event) => {
-                  setServiceDraftDogId(event.target.value);
-                  setServiceDraftPayment("invoice");
-                }}
-                autoFocus
-                required
-              >
-                <option value="" disabled>
-                  Selecione um cão
-                </option>
-                {dogs.map((dog) => (
-                  <option key={dog.id} value={dog.id}>
-                    {dog.name} · {dog.customerName}
-                  </option>
-                ))}
-              </select>
+              <div className="service-dog-picker">
+                <input type="hidden" name="dogId" value={serviceDraftDogId} />
+                <input
+                  type="search"
+                  value={serviceDraftDogSearch}
+                  onChange={(event) => {
+                    setServiceDraftDogSearch(event.target.value);
+                    setServiceDraftDogId("");
+                    setServiceDogPickerOpen(true);
+                    setServiceDraftPayment("invoice");
+                  }}
+                  onFocus={() => setServiceDogPickerOpen(true)}
+                  onBlur={() =>
+                    window.setTimeout(() => setServiceDogPickerOpen(false), 120)
+                  }
+                  placeholder="Digite o nome do cão…"
+                  autoComplete="off"
+                  autoFocus
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={serviceDogPickerOpen}
+                  aria-controls="new-service-dog-results"
+                  aria-describedby={
+                    serviceDraftDog ? "new-service-dog-selection" : undefined
+                  }
+                />
+                {serviceDogPickerOpen && (
+                  <div
+                    className="service-dog-suggestions"
+                    id="new-service-dog-results"
+                    role="listbox"
+                  >
+                    {serviceDogMatches.length ? (
+                      serviceDogMatches.map((dog) => (
+                        <button
+                          key={dog.id}
+                          type="button"
+                          role="option"
+                          aria-selected={dog.id === serviceDraftDogId}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            setServiceDraftDogId(dog.id);
+                            setServiceDraftDogSearch(dog.name);
+                            setServiceDraftPayment("invoice");
+                            setServiceDogPickerOpen(false);
+                          }}
+                        >
+                          <strong>{dog.name}</strong>
+                          <small>{dog.customerName}</small>
+                        </button>
+                      ))
+                    ) : (
+                      <p>Nenhum cão encontrado.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+              {serviceDraftDog && (
+                <small
+                  className="service-dog-selection"
+                  id="new-service-dog-selection"
+                >
+                  Cliente: {serviceDraftDog.customerName}
+                </small>
+              )}
             </label>
             <label className="field">
               <span>{serviceDraftType === "hotel" ? "Entrada *" : "Data *"}</span>

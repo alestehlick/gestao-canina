@@ -901,6 +901,71 @@ h3 {
   text-align: center;
 }
 
+.service-dog-picker {
+  position: relative;
+}
+
+.service-dog-picker > input[type="search"] {
+  width: 100%;
+}
+
+.service-dog-suggestions {
+  position: absolute;
+  top: calc(100% + 5px);
+  z-index: 80;
+  width: 100%;
+  max-height: 248px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  box-shadow: 0 14px 30px rgb(37 42 39 / 14%);
+}
+
+.service-dog-suggestions button {
+  display: grid;
+  width: 100%;
+  gap: 2px;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  background: transparent;
+  padding: 10px 12px;
+  color: var(--ink);
+  text-align: left;
+}
+
+.service-dog-suggestions button:last-child {
+  border-bottom: 0;
+}
+
+.service-dog-suggestions button:hover,
+.service-dog-suggestions button:focus-visible,
+.service-dog-suggestions button[aria-selected="true"] {
+  background: var(--forest-soft);
+}
+
+.service-dog-suggestions strong,
+.service-dog-suggestions small {
+  display: block;
+}
+
+.service-dog-suggestions small,
+.service-dog-selection {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.service-dog-suggestions p {
+  margin: 0;
+  padding: 12px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.service-dog-selection {
+  margin-top: 5px;
+}
+
 .day-heading {
   display: flex;
   align-items: center;

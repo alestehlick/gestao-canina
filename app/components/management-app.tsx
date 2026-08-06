@@ -456,19 +456,7 @@ function operationalTimeOrder(value: string) {
   return hours * 60 + minutes;
 }
 
-function agendaServiceOrder(serviceType: ServiceType) {
-  if (serviceType === "transport") return 0;
-  if (serviceType === "bath" || serviceType === "grooming") return 1;
-  if (serviceType === "daycare") return 2;
-  if (serviceType === "hotel") return 3;
-  return 4;
-}
-
 function agendaBookingOrder(left: Booking, right: Booking) {
-  const serviceDifference =
-    agendaServiceOrder(left.serviceType) - agendaServiceOrder(right.serviceType);
-  if (serviceDifference !== 0) return serviceDifference;
-
   const nameDifference = left.dogName.localeCompare(right.dogName, "pt-BR");
   if (nameDifference !== 0) return nameDifference;
 
@@ -808,6 +796,20 @@ async function deliverInvoice(
     files: [generated.file],
   };
 
+  const phone = state.customerPhone?.replace(/\D/g, "") ?? "";
+  const normalizedPhone =
+    phone.length === 10 || phone.length === 11 ? `55${phone}` : phone;
+  const isWindowsWhatsApp =
+    channel === "whatsapp" && /Windows/i.test(navigator.userAgent);
+
+  if (isWindowsWhatsApp) {
+    downloadInvoice(generated.blob, generated.filename);
+    window.location.href = `whatsapp://send?phone=${normalizedPhone}&text=${encodeURIComponent(
+      `${text}\n\nO PDF foi salvo em Downloads; anexe-o a esta conversa.`,
+    )}`;
+    return "downloaded";
+  }
+
   if (
     channel !== "save" &&
     navigator.share &&
@@ -821,9 +823,6 @@ async function deliverInvoice(
   if (channel === "save") return "saved";
 
   if (channel === "whatsapp") {
-    const phone = state.customerPhone?.replace(/\D/g, "") ?? "";
-    const normalizedPhone =
-      phone.length === 10 || phone.length === 11 ? `55${phone}` : phone;
     window.open(
       `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(
         `${text}\n\nO PDF foi salvo neste aparelho; selecione-o para anexar se o menu de compartilhamento não aparecer.`,
@@ -881,10 +880,15 @@ function initials(value: string) {
     .join("");
 }
 
-function nextStatus(status: BookingStatus): BookingStatus {
+function skipsArrivalStep(booking: Booking) {
+  return booking.serviceType === "daycare" || booking.serviceType === "hotel";
+}
+
+function nextStatus(booking: Booking): BookingStatus {
+  const { status } = booking;
   const progression: Partial<Record<BookingStatus, BookingStatus>> = {
     scheduled: "confirmed",
-    confirmed: "present",
+    confirmed: skipsArrivalStep(booking) ? "completed" : "present",
     in_transit: "completed",
     present: "completed",
     in_service: "completed",
@@ -893,10 +897,13 @@ function nextStatus(status: BookingStatus): BookingStatus {
   return progression[status] ?? status;
 }
 
-function primaryAction(status: BookingStatus) {
+function primaryAction(booking: Booking) {
+  const { status } = booking;
   const actions: Partial<Record<BookingStatus, string>> = {
     scheduled: "Confirmar",
-    confirmed: "Registrar chegada",
+    confirmed: skipsArrivalStep(booking)
+      ? "Concluir atendimento"
+      : "Registrar chegada",
     in_transit: "Concluir rota",
     present: "Concluir atendimento",
     in_service: "Concluir atendimento",
@@ -1791,7 +1798,7 @@ export function ManagementApp() {
   }
 
   function advanceBooking(booking: Booking) {
-    updateBookingStatus(booking, nextStatus(booking.status));
+    updateBookingStatus(booking, nextStatus(booking));
   }
 
   function askToCancel(booking: Booking) {
@@ -6340,9 +6347,6 @@ function TodayView({
     (booking) =>
       booking.status !== "completed" && booking.status !== "cancelled",
   );
-  const presentDogs = visibleBookings.filter((booking) =>
-    ["present", "in_service"].includes(booking.status),
-  );
   const filteredBookings = filterBookings(dayBookings, agendaFilter).filter(
     (booking) => booking.status !== "cancelled",
   ).sort(agendaBookingOrder);
@@ -6397,8 +6401,8 @@ function TodayView({
       >
         <SummaryItem value={activeBookings.length} label="programados" />
         <SummaryItem
-          value={isToday ? presentDogs.length : visibleBookings.length}
-          label={isToday ? "presentes" : "serviços no dia"}
+          value={visibleBookings.length}
+          label="serviços no dia"
         />
         <SummaryItem
           value={
@@ -6828,7 +6832,7 @@ function AgendaCard({
     booking.status !== "scheduled" &&
     booking.status !== "completed"
       ? null
-      : primaryAction(booking.status);
+      : primaryAction(booking);
   const dogAlerts = agendaDate ? agendaAlertsForDog(dog, agendaDate) : [];
   const showsOperationalTime = booking.serviceType !== "transport";
   const showsTimeBlock = showsOperationalTime || showDate;

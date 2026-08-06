@@ -32,13 +32,12 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.match(app, /Confirmar disponibilidade/);
   assert.match(app, /Gerar fatura do sinal/);
   assert.match(app, /Gerar fatura do saldo/);
-  assert.match(app, /function agendaServiceOrder/);
-  assert.match(app, /serviceType === "transport"\) return 0/);
-  assert.match(app, /serviceType === "bath" \|\| serviceType === "grooming"\) return 1/);
-  assert.match(app, /serviceType === "daycare"\) return 2/);
-  assert.match(app, /serviceType === "hotel"\) return 3/);
   assert.match(app, /\.sort\(agendaBookingOrder\)/);
   assert.match(app, /nameDifference = left\.dogName\.localeCompare/);
+  assert.match(app, /function skipsArrivalStep/);
+  assert.match(app, /confirmed: skipsArrivalStep\(booking\) \? "completed" : "present"/);
+  assert.match(app, /whatsapp:\/\/send\?phone=/);
+  assert.match(app, /isWindowsWhatsApp/);
   assert.match(app, /Não aplicar desconto por longa estadia/);
   assert.match(app, /Total pela diária padrão/);
   assert.match(app, /Valor tabelado:/);

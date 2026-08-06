@@ -76,6 +76,7 @@ type DialogKind =
   | "cancel"
   | "invoice"
   | "creditPackage"
+  | "creditAdjustment"
   | "receipt"
   | null;
 
@@ -978,6 +979,8 @@ export function ManagementApp() {
   const [invoiceState, setInvoiceState] = useState<InvoiceState | null>(null);
   const [billingTab, setBillingTab] = useState<BillingTab>("invoice");
   const [creditCustomerId, setCreditCustomerId] = useState<string>("");
+  const [creditAdjustmentCustomerId, setCreditAdjustmentCustomerId] =
+    useState<string>("");
   const [selectedReceipt, setSelectedReceipt] =
     useState<ServiceReceipt | null>(null);
   const [serviceDraftDogId, setServiceDraftDogId] = useState("");
@@ -2912,6 +2915,49 @@ export function ManagementApp() {
     setDialog("creditPackage");
   }
 
+  function openCreditAdjustment(customerId: string) {
+    setCreditAdjustmentCustomerId(customerId);
+    setDialog("creditAdjustment");
+  }
+
+  async function submitCreditAdjustment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const accountId = String(form.get("customerId") ?? "");
+    const serviceType = String(form.get("serviceType") ?? "");
+    const targetUnits = Number(form.get("targetUnits") ?? "");
+    const reason = String(form.get("reason") ?? "").trim();
+    if (
+      !customers.some((customer) => customer.id === accountId) ||
+      !creditServiceTypes.includes(serviceType as CreditServiceType) ||
+      !Number.isInteger(targetUnits) ||
+      targetUnits < 0 ||
+      targetUnits > 10_000 ||
+      reason.length < 3
+    ) {
+      setToast({ message: "Informe o serviço, o novo saldo e um motivo breve." });
+      return;
+    }
+    const result = await runLiveAction(
+      `adjust-credit:${accountId}:${serviceType}`,
+      () =>
+        requestJson<{ targetUnits: number }>("/api/credits", {
+          method: "POST",
+          body: JSON.stringify({
+            accountId,
+            serviceCode: toWorkspaceServiceCode(serviceType as ServiceType),
+            targetUnits,
+            reason,
+          }),
+        }),
+      {
+        refresh: true,
+        successMessage: "Saldo de créditos ajustado e registrado no histórico.",
+      },
+    );
+    if (result) setDialog(null);
+  }
+
   function submitCreditPackage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -4456,6 +4502,8 @@ export function ManagementApp() {
                   (receipt) => receipt.customerId === selectedCustomer.id,
                 )}
                 onAddCredits={() => openCreditPackage(selectedCustomer.id)}
+                onAdjustCredits={() => openCreditAdjustment(selectedCustomer.id)}
+                canAdjustCredits={signedInRole === "owner"}
                 onOpenReceipt={openReceipt}
                 onNewService={() => openServiceDialog()}
                 onAdvance={advanceBooking}
@@ -6008,6 +6056,23 @@ export function ManagementApp() {
           prices={servicePrices}
           onClose={() => setDialog(null)}
           onSubmit={submitCreditPackage}
+        />
+      )}
+
+      {dialog === "creditAdjustment" && creditAdjustmentCustomerId && (
+        <CreditAdjustmentDialog
+          customer={customers.find(
+            (customer) => customer.id === creditAdjustmentCustomerId,
+          )}
+          balances={creditBalances[creditAdjustmentCustomerId] ?? {
+            daycare: 0,
+            bath: 0,
+            grooming: 0,
+            transport: 0,
+          }}
+          busy={busyAction?.startsWith("adjust-credit:") ?? false}
+          onClose={() => setDialog(null)}
+          onSubmit={submitCreditAdjustment}
         />
       )}
 
@@ -7753,6 +7818,8 @@ function CustomerProfile({
   onOpenDog,
   onOpenInvoice,
   onAddCredits,
+  onAdjustCredits,
+  canAdjustCredits,
   onOpenReceipt,
   onNewService,
   onAdvance,
@@ -7774,6 +7841,8 @@ function CustomerProfile({
   onOpenDog: (id: string) => void;
   onOpenInvoice: (invoice: Invoice) => void;
   onAddCredits: () => void;
+  onAdjustCredits: () => void;
+  canAdjustCredits: boolean;
   onOpenReceipt: (receipt: ServiceReceipt) => void;
   onNewService: () => void;
   onAdvance: (booking: Booking) => void;
@@ -7945,9 +8014,16 @@ function CustomerProfile({
                 <p className="section-kicker">Créditos</p>
                 <h3>Saldo por serviço</h3>
               </div>
-              <button className="text-button" onClick={onAddCredits}>
-                Vender pacote
-              </button>
+              <div className="heading-actions">
+                {canAdjustCredits && (
+                  <button className="text-button" onClick={onAdjustCredits}>
+                    Ajustar saldo
+                  </button>
+                )}
+                <button className="text-button" onClick={onAddCredits}>
+                  Vender pacote
+                </button>
+              </div>
             </div>
             <div className="credit-list">
               <div>
@@ -7968,8 +8044,8 @@ function CustomerProfile({
               </div>
             </div>
             <p className="ledger-note">
-              O saldo é calculado pelo extrato e não pode ser alterado sem uma
-              movimentação registrada.
+              O saldo é calculado pelo extrato. Ajustes administrativos ficam
+              registrados no histórico.
             </p>
           </section>
           <section className="panel profile-full-card">
@@ -9795,6 +9871,97 @@ function CreditPackageDialog({
           </button>
           <button className="primary-button" type="submit">
             Revisar fatura
+          </button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+function CreditAdjustmentDialog({
+  customer,
+  balances,
+  busy,
+  onClose,
+  onSubmit,
+}: {
+  customer?: Customer;
+  balances: Record<CreditServiceType, number>;
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const [serviceType, setServiceType] =
+    useState<CreditServiceType>("daycare");
+  const [targetUnits, setTargetUnits] = useState(balances.daycare);
+
+  if (!customer) return null;
+
+  return (
+    <Dialog
+      title="Ajustar créditos"
+      description="Defina o saldo correto. O ajuste ficará registrado no histórico deste cliente."
+      onClose={onClose}
+      size="small"
+    >
+      <form className="form-grid" onSubmit={onSubmit}>
+        <input type="hidden" name="customerId" value={customer.id} />
+        <label className="field full">
+          <span>Cliente</span>
+          <input value={customer.name} readOnly />
+        </label>
+        <label className="field">
+          <span>Tipo de crédito *</span>
+          <select
+            name="serviceType"
+            value={serviceType}
+            onChange={(event) => {
+              const next = event.target.value as CreditServiceType;
+              setServiceType(next);
+              setTargetUnits(balances[next]);
+            }}
+          >
+            {creditServiceTypes.map((type) => (
+              <option key={type} value={type}>
+                {serviceLabels[type]}
+              </option>
+            ))}
+          </select>
+          <small>Saldo atual: {balances[serviceType]}</small>
+        </label>
+        <label className="field">
+          <span>Novo saldo *</span>
+          <input
+            name="targetUnits"
+            type="number"
+            min="0"
+            max="10000"
+            step="1"
+            value={targetUnits}
+            onChange={(event) => setTargetUnits(event.target.valueAsNumber)}
+            required
+          />
+        </label>
+        <label className="field full">
+          <span>Motivo do ajuste *</span>
+          <textarea
+            name="reason"
+            rows={3}
+            minLength={3}
+            maxLength={500}
+            placeholder="Ex.: correção de saldo após conferência"
+            required
+          />
+          <small>
+            Esta correção não cria uma venda nem altera faturas já emitidas.
+          </small>
+        </label>
+        <div className="dialog-actions full">
+          <button className="secondary-button" type="button" onClick={onClose}>
+            Cancelar
+          </button>
+          <button className="primary-button" type="submit" disabled={busy}>
+            {busy ? "Salvando…" : "Salvar ajuste"}
           </button>
         </div>
       </form>

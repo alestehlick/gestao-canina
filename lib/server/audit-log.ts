@@ -58,6 +58,10 @@ export async function loadAuditLog(
           WHEN ae.entity_type = 'credit_receipt' THEN (
             SELECT cr.dog_name_snapshot FROM credit_receipts cr WHERE cr.id = ae.entity_id
           )
+          WHEN ae.entity_type = 'credit_movement' THEN (
+            SELECT ca.display_name FROM credit_movements cm
+            JOIN customer_accounts ca ON ca.id = cm.account_id WHERE cm.id = ae.entity_id
+          )
           WHEN ae.entity_type = 'cash_entry' THEN (
             SELECT ce.description FROM cash_entries ce WHERE ce.id = ae.entity_id
           )
@@ -91,6 +95,10 @@ export async function loadAuditLog(
           WHEN ae.entity_type = 'credit_receipt' THEN (
             SELECT cr.service_name_snapshot FROM credit_receipts cr WHERE cr.id = ae.entity_id
           )
+          WHEN ae.entity_type = 'credit_movement' THEN (
+            SELECT sc.name FROM credit_movements cm
+            JOIN service_catalog sc ON sc.id = cm.service_catalog_id WHERE cm.id = ae.entity_id
+          )
           ELSE NULL
         END AS serviceName,
         CASE
@@ -105,6 +113,9 @@ export async function loadAuditLog(
           )
           WHEN ae.entity_type = 'cash_entry' THEN (
             SELECT ce.occurred_on FROM cash_entries ce WHERE ce.id = ae.entity_id
+          )
+          WHEN ae.entity_type = 'credit_movement' THEN (
+            SELECT substr(cm.occurred_at, 1, 10) FROM credit_movements cm WHERE cm.id = ae.entity_id
           )
           ELSE NULL
         END AS eventDate,

@@ -165,6 +165,11 @@ test("mantém perfis e navegação móveis enxutos e completos", async () => {
   assert.match(app, /Todos os serviços/);
   assert.match(app, /Banhos e tosa/);
   assert.match(app, /function filterBookingsByService/);
+  assert.match(app, /function CreditAdjustmentDialog/);
+  assert.match(app, /Ajustar saldo/);
+  assert.match(app, /Motivo do ajuste/);
+  assert.match(app, /\/api\/credits/);
+  assert.match(data, /"credit\.adjusted": "Saldo de créditos ajustado"/);
   assert.doesNotMatch(app, /label="programados"/);
   assert.doesNotMatch(app, /label="serviços no dia"/);
   assert.match(workspace, /lte\(appointments\.startDate, to\)/);

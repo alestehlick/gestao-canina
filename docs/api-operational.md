@@ -126,7 +126,7 @@ Perfis aceitos: proprietário e equipe.
 Alteração comum:
 
 ```json
-{ "status": "present" }
+{ "status": "confirmed" }
 ```
 
 Cancelamento:
@@ -138,18 +138,16 @@ Cancelamento:
 }
 ```
 
-Status aceitos: `scheduled`, `confirmed`, `in_transit`, `present`,
-`in_service`, `completed` e `cancelled`.
+Status aceitos: `scheduled`, `confirmed`, `completed` e `cancelled`.
 
-- Estados operacionais não finais podem ser corrigidos entre si.
+- O fluxo normal é `scheduled` → `confirmed` → `completed`.
 - `completed` e `cancelled` são finais.
 - Cancelar exige motivo.
 - Um serviço com cobrança ou pagamento já ligado não pode ser cancelado até a
   parte financeira ser resolvida.
-- Um item marcado para pagamento com crédito deve ser liquidado antes da
-  conclusão. Nesse caso, use `POST /api/credits/consume` com
-  `appointmentItemId`; esse endpoint consome o crédito, conclui o item e
-  prepara o recibo sem criar uma nova fatura.
+- Depois da conclusão, use `POST /api/credits/consume` com
+  `appointmentItemId` para quitar com créditos e preparar o recibo sem criar
+  uma nova fatura.
 - Repetir o status atual é seguro e devolve `idempotent: true`.
 
 ## Concluir ou reabrir tarefa

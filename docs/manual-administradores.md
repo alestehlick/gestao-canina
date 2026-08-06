@@ -27,11 +27,10 @@ Use os botões de data para consultar qualquer dia futuro sem sair da tela princ
 
 ### 3. Conduzir um atendimento
 
-Cada cartão da agenda mostra o cão, o cliente, o serviço e a situação atual. Avance na ordem apresentada:
+Cada cartão da agenda mostra o cão, o cliente, o serviço e a situação atual. O fluxo tem somente duas etapas:
 
 1. **Confirmar**: confirma o agendamento.
-2. **Registrar chegada**: informa que o cão chegou.
-3. **Concluir atendimento**: encerra o serviço.
+2. **Concluir atendimento**: encerra o serviço.
 
 Use **Opções** para editar ou cancelar. O cancelamento exige um motivo e permanece no histórico.
 
@@ -74,10 +73,10 @@ Use **Novo serviço**, selecione o cão e escolha o tipo:
 
 O valor sugerido vem das configurações. Um administrador pode alterá-lo para um atendimento específico sem mudar o preço padrão. Funcionários sempre usam o valor definido pela administração.
 
-Na forma de quitação, escolha:
-
-- **Gerar fatura**: o serviço será cobrado depois da conclusão.
-- **Usar 1 crédito**: disponível para creche, banho, banho e tosa e Taxi-dog, desde que o cliente tenha saldo.
+O agendamento não define a forma de quitação. Primeiro realize e conclua o
+serviço. Depois, em **Cobranças > Faturas**, escolha entre criar uma fatura ou
+usar créditos disponíveis. Assim, uma mudança combinada com o cliente não exige
+editar a Agenda.
 
 Para repetir semanalmente, escolha **Toda semana** e informe a quantidade de
 semanas, entre 2 e 52. A série inteira é salva de uma vez.
@@ -85,6 +84,7 @@ semanas, entre 2 e 52. A série inteira é salva de uma vez.
 Ao cancelar um dia de uma série semanal, escolha com atenção:
 
 - **Somente este dia** mantém as outras semanas;
+- **Deste dia em diante** mantém as ocorrências anteriores e cancela esta e as próximas;
 - **Toda a recorrência** cancela todos os agendamentos ainda abertos da série.
 
 Atendimentos já concluídos permanecem no histórico. Se uma das semanas já tiver
@@ -143,6 +143,17 @@ Quando o valor realmente tiver sido recebido:
 
 Não use esse botão antes de confirmar o recebimento. A fatura passará para **Pago** e os serviços serão quitados.
 
+Se o valor ainda estiver sendo processado pelo banco ou pela operadora, escolha
+**Em compensação** e informe a previsão. A fatura continuará aberta e o valor
+só entrará no Caixa quando você confirmar que ele ficou disponível. A previsão
+pode ser alterada ou cancelada.
+
+Se um pagamento for registrado por engano, um administrador pode abrir a fatura
+paga e usar **Estornar pagamento**. É obrigatório informar o motivo. A fatura
+volta a ficar aberta; o lançamento do Caixa e eventuais créditos liberados são
+revertidos sem apagar o histórico. O estorno será bloqueado se créditos daquele
+pacote já tiverem sido utilizados.
+
 ## Caixa
 
 ### 11. Acompanhar entradas e saídas
@@ -183,15 +194,19 @@ Ao confirmar, será criada uma fatura. Os créditos ainda não entram no saldo.
 
 Depois que o cliente pagar, abra a fatura e registre o pagamento. Somente então os créditos são liberados.
 
-### 14. Usar um crédito
+### 14. Usar créditos em um serviço concluído
 
-Ao criar ou editar um serviço, escolha **Usar 1 crédito**. Ao concluir o atendimento:
+Conclua o atendimento e abra **Cobranças > Faturas**. Na linha do serviço,
+escolha **Usar crédito**. O botão informa a quantidade necessária e só fica
+disponível quando há saldo suficiente. Em Taxi-dog, ida usa 1 crédito e ida e
+volta usa 2 créditos. Ao confirmar:
 
 - um crédito é retirado do saldo;
 - nenhuma nova fatura é criada;
 - um recibo fica disponível para compartilhar por WhatsApp ou e-mail.
 
-Se não houver saldo suficiente, o sistema interrompe a conclusão para evitar cobrança errada.
+Se não houver saldo suficiente, mantenha o item para faturamento ou venda um
+novo pacote. A Agenda nunca consome créditos automaticamente.
 
 ## Pessoas e acessos
 
@@ -199,7 +214,7 @@ Se não houver saldo suficiente, o sistema interrompe a conclusão para evitar c
 
 Abra **Acessos**, escolha **Funcionário**, informe o e-mail da pessoa e crie o convite. Se o envio automático estiver ativo, ela receberá o link por e-mail. Caso contrário, use **Copiar link** e envie por um canal particular.
 
-O link vale por 48 horas e pode ser usado uma única vez. O funcionário escolhe o próprio nome e senha. Sua conta mostra somente a operação: Hoje, Agenda, Pedidos, Cães e Clientes. Ela não abre cobranças, configurações, histórico global nem gestão de acessos.
+O link vale por 48 horas e pode ser usado uma única vez. O funcionário escolhe o próprio nome e senha. Sua conta mostra somente a operação: Hoje, Pedidos, Cães e Clientes. Ela não abre cobranças, configurações, histórico global nem gestão de acessos.
 
 Cada pessoa deve usar sua própria conta. Assim, o histórico identifica quem realizou cada ação.
 

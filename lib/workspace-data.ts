@@ -16,6 +16,7 @@ import {
   type ServiceType,
   type Task,
 } from "@/lib/demo-data";
+import { creditUnitsForServiceCode } from "@/lib/service-rules";
 
 export type WorkspaceServiceCode =
   | "daycare"
@@ -590,7 +591,6 @@ export function mapWorkspaceBookings(
       !usesCredit &&
       displayItems.some(
         (item) =>
-          item.paymentPreference === "invoice" &&
           item.settlementMethod === "unsettled" &&
           !item.activeInvoiceId,
       );
@@ -665,11 +665,7 @@ export function mapWorkspaceBookings(
         (total, item) => total + Math.max(0, item.totalCents),
         0,
       ),
-      paymentPreference:
-        displayItems.length > 0 &&
-        displayItems.every((item) => item.paymentPreference === "credit")
-          ? "credit"
-          : "invoice",
+      paymentPreference: "invoice",
       settlementStatus: usesCredit
         ? "credit_used"
         : awaitingInvoice
@@ -717,7 +713,6 @@ export function mapWorkspaceBillableServices(
   return payload.agenda.flatMap((appointment) =>
     appointment.items.flatMap((item): BillableService[] => {
       if (
-        item.paymentPreference !== "invoice" ||
         item.settlementMethod !== "unsettled"
       ) {
         return [];
@@ -725,6 +720,7 @@ export function mapWorkspaceBillableServices(
 
       const isLodging =
         servicesById.get(item.serviceCatalogId)?.code === "hotel";
+      const serviceCode = servicesById.get(item.serviceCatalogId)?.code;
       const serviceType = toUiServiceType(
         servicesById.get(item.serviceCatalogId)?.code,
       );
@@ -750,6 +746,13 @@ export function mapWorkspaceBillableServices(
         dogName: appointment.dogName,
         date: formatBrazilianDate(appointment.startDate),
         serviceType,
+        creditUnits:
+          serviceCode &&
+          ["daycare", "bath", "bath_grooming", "taxi_dog"].includes(
+            serviceCode,
+          )
+            ? creditUnitsForServiceCode(serviceCode, item.description)
+            : undefined,
         lodging,
       };
 
@@ -787,12 +790,9 @@ export function mapWorkspaceBillableServices(
         Boolean(appointment.depositPercent) &&
         appointment.depositPercent! > 0 &&
         appointment.depositPercent! < 100;
-      const canOfferDeposit = [
-        "confirmed",
-        "present",
-        "in_service",
-        "completed",
-      ].includes(appointment.status);
+      const canOfferDeposit = ["confirmed", "completed"].includes(
+        appointment.status,
+      );
       const entries: BillableService[] = [];
 
       if (depositConfigured && canOfferDeposit && !depositInvoice) {
@@ -1362,6 +1362,10 @@ function activityActionLabel(action: string) {
     "invoice.merged": "Faturas unificadas",
     "invoice.merge_reversed": "União de faturas desfeita",
     "invoice.payment_recorded": "Pagamento registrado",
+    "invoice.payment_reversed": "Pagamento corrigido e estornado",
+    "invoice.settlement_scheduled": "Recebimento em compensação registrado",
+    "invoice.settlement_updated": "Data de compensação atualizada",
+    "invoice.settlement_cancelled": "Compensação cancelada",
     "invoice.sent": "Fatura enviada",
     "invoice.note_updated": "Observação da fatura atualizada",
     "invoice.voided": "Fatura cancelada",

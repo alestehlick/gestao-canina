@@ -174,7 +174,10 @@ test("mantém perfis e navegação móveis enxutos e completos", async () => {
   assert.doesNotMatch(app, /label="serviços no dia"/);
   assert.match(workspace, /lte\(appointments\.startDate, to\)/);
   assert.match(workspace, /gte\(appointments\.endDate, from\)/);
-  assert.match(workspace, /eq\(appointmentItems\.paymentPreference, "invoice"\)/);
+  assert.doesNotMatch(
+    workspace,
+    /eq\(appointmentItems\.paymentPreference, "invoice"\)/,
+  );
   assert.match(workspace, /eq\(appointmentItems\.settlementMethod, "unsettled"\)/);
   assert.match(workspace, /isNull\(appointmentItems\.activeInvoiceId\)/);
   assert.doesNotMatch(
@@ -276,7 +279,7 @@ test("mantém ações completas nos perfis e recorrências semanais seguras", as
 });
 
 test("mostra datas brasileiras e limita as diárias ao período escolhido", async () => {
-  const [app, portal, dateInput, appointments, lodgingInvoice] =
+  const [app, portal, dateInput, appointments, invoices] =
     await Promise.all([
       readFile(
         new URL("../app/components/management-app.tsx", import.meta.url),
@@ -297,10 +300,7 @@ test("mostra datas brasileiras e limita as diárias ao período escolhido", asyn
         new URL("../app/api/appointments/route.ts", import.meta.url),
         "utf8",
       ),
-      readFile(
-        new URL("../lib/server/lodging-invoice.ts", import.meta.url),
-        "utf8",
-      ),
+      readFile(new URL("../app/api/invoices/route.ts", import.meta.url), "utf8"),
     ]);
 
   assert.match(dateInput, /dd\/mm\/aaaa/);
@@ -317,7 +317,9 @@ test("mostra datas brasileiras e limita as diárias ao período escolhido", asyn
     appointments,
     /lodgingNights !== durationDays \+ 0\.5/,
   );
-  assert.match(lodgingInvoice, /displayDate\(lodging\.startDate\)/);
+  assert.match(invoices, /startDate: appointments\.startDate/);
+  assert.match(invoices, /endDate: appointments\.endDate/);
+  assert.match(dateInput, /Digite uma data válida no formato dd\/mm\/aaaa/);
 });
 
 test("mantém cadastros seguros, práticos e sem menus redundantes", async () => {
@@ -376,21 +378,14 @@ test("mantém o primeiro acesso e o login protegidos sem bloqueio global da cont
 });
 
 test("preserva as regras de faturas, sinais e créditos", async () => {
-  const [invoices, payments, deposit, balance, lodgingHelper, consume, purchases, prices, workspaceData, managementApp, invoiceNotes, invoiceNotesMigration] = await Promise.all([
+  const [invoices, payments, reversePayment, settlement, consume, purchases, prices, workspaceData, managementApp, invoiceNotes, invoiceNotesMigration, schema, serviceRules] = await Promise.all([
     readFile(new URL("../app/api/invoices/route.ts", import.meta.url), "utf8"),
     readFile(
       new URL("../app/api/invoices/[id]/payments/route.ts", import.meta.url),
       "utf8",
     ),
-    readFile(
-      new URL("../app/api/appointments/[id]/deposit-invoice/route.ts", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/api/appointments/[id]/balance-invoice/route.ts", import.meta.url),
-      "utf8",
-    ),
-    readFile(new URL("../lib/server/lodging-invoice.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/invoices/[id]/payments/reverse/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/invoices/[id]/settlement/route.ts", import.meta.url), "utf8"),
     readFile(
       new URL("../app/api/credits/consume/route.ts", import.meta.url),
       "utf8",
@@ -416,6 +411,8 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
       new URL("../drizzle/0012_invoice_internal_notes.sql", import.meta.url),
       "utf8",
     ),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/service-rules.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(invoices, /active_invoice_id = \?/);
@@ -430,15 +427,17 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
   assert.match(payments, /Créditos liberados após pagamento da fatura/);
   assert.match(payments, /settlement_method = 'invoice'/);
   assert.match(payments, /service_name_snapshot <> 'Sinal da hospedagem'/);
-  assert.match(deposit, /kind: "deposit"/);
-  assert.match(balance, /kind: "balance"/);
-  assert.match(lodgingHelper, /deposit_payment_pending/);
-  assert.match(lodgingHelper, /lodging\.totalCents - depositPaidCents/);
-  assert.match(consume, /payment_preference = 'credit'/);
-  assert.match(consume, /credit_not_selected/);
+  assert.match(reversePayment, /invoice\.payment_reversed/);
+  assert.match(reversePayment, /status = 'reversed'/);
+  assert.match(settlement, /invoice\.settlement_updated/);
+  assert.match(settlement, /invoice\.settlement_cancelled/);
+  assert.doesNotMatch(invoices, /payment_preference = 'invoice'/);
+  assert.doesNotMatch(consume, /payment_preference = 'credit'/);
+  assert.doesNotMatch(consume, /credit_not_selected/);
+  assert.match(consume, /Conclua o atendimento antes de decidir usar créditos/);
   assert.match(consume, /taxi_dog/);
-  assert.match(consume, /item\.description === "Ida e volta"/);
-  assert.match(consume, /\? 2\s*:\s*1/);
+  assert.match(consume, /creditUnitsForServiceCode/);
+  assert.match(serviceRules, /direction === "round_trip" \? 2 : 1/);
   assert.match(consume, /\) >= \?/);
   assert.match(purchases, /default_price_required/);
   assert.match(prices, /value < 1/);
@@ -447,7 +446,8 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
   assert.match(workspaceData, /id: `balance:\$\{item\.id\}`/);
   assert.match(workspaceData, /Fature e registre o sinal antes de cobrar o saldo/);
   assert.match(managementApp, /function creditUnitsForService/);
-  assert.match(managementApp, /serviceDraftCreditBalance\s*</);
+  assert.match(managementApp, /onUseCredits/);
+  assert.match(managementApp, /Cobrança decidida depois/);
   assert.match(managementApp, /booking\.serviceType !== "transport"/);
   assert.match(managementApp, /agenda-card[\s\S]*without-time/);
   assert.doesNotMatch(managementApp, /Usará 1 crédito ao concluir/);
@@ -458,6 +458,8 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
   assert.match(invoiceNotes, /requireIdentity\(request, \["owner", "finance"\]\)/);
   assert.match(invoiceNotes, /invoice\.note_updated/);
   assert.match(invoiceNotesMigration, /ADD COLUMN internal_note text/);
+  assert.match(schema, /invoice_payments_invoice_active_unique/);
+  assert.match(schema, /invoice_settlements_invoice_scheduled_unique/);
 });
 
 test("mantém o manual e os detalhes das faturas disponíveis", async () => {
@@ -616,9 +618,11 @@ test("unifica faturas abertas com reversão segura e auditável", async () => {
   assert.match(mergeRoute, /sourceType === "credit_package"/);
   assert.match(mergeRoute, /creditPurchaseByInvoice/);
   assert.match(mergeRoute, /invoice_payments/);
+  assert.match(mergeRoute, /status = 'active'/);
   assert.match(mergeRoute, /invoice_settlements/);
   assert.match(mergeRoute, /await d1\.batch\(statements\)/);
   assert.match(unmergeRoute, /status = 'reversed'/);
+  assert.match(unmergeRoute, /status = 'active'/);
   assert.match(unmergeRoute, /faturas originais restauradas/);
   assert.match(unmergeRoute, /invoice_merge_sources_changed/);
   assert.match(voidRoute, /merged_invoice_requires_unmerge/);

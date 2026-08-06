@@ -69,7 +69,12 @@ export async function POST(
       db
         .select({ id: invoicePayments.id })
         .from(invoicePayments)
-        .where(eq(invoicePayments.invoiceId, id)),
+        .where(
+          and(
+            eq(invoicePayments.invoiceId, id),
+            eq(invoicePayments.status, "active"),
+          ),
+        ),
       db
         .select({ id: invoiceSettlements.id })
         .from(invoiceSettlements)
@@ -128,7 +133,10 @@ export async function POST(
             void_reason = 'União desfeita; faturas originais restauradas',
             updated_at = ${nowExpression}
           WHERE id = ? AND establishment_id = ? AND status IN ('draft', 'issued')
-            AND NOT EXISTS (SELECT 1 FROM invoice_payments WHERE invoice_id = ?)
+            AND NOT EXISTS (
+              SELECT 1 FROM invoice_payments
+              WHERE invoice_id = ? AND status = 'active'
+            )
             AND NOT EXISTS (
               SELECT 1 FROM invoice_settlements
               WHERE invoice_id = ? AND status = 'scheduled'

@@ -11,9 +11,6 @@ export type CreditServiceType = "daycare" | "bath" | "grooming" | "transport";
 export type BookingStatus =
   | "scheduled"
   | "confirmed"
-  | "in_transit"
-  | "present"
-  | "in_service"
   | "completed"
   | "cancelled";
 
@@ -161,6 +158,7 @@ export type BillableService = {
   date: string;
   service: string;
   serviceType?: ServiceType;
+  creditUnits?: number;
   amountCents: number;
   selectable?: boolean;
   billingNote?: string;
@@ -224,9 +222,6 @@ export const serviceLabels: Record<ServiceType, string> = {
 export const statusLabels: Record<BookingStatus, string> = {
   scheduled: "Agendado",
   confirmed: "Confirmado",
-  in_transit: "Em rota",
-  present: "Presente",
-  in_service: "Em atendimento",
   completed: "Concluído",
   cancelled: "Cancelado",
 };
@@ -402,7 +397,7 @@ export const demoBookings: Booking[] = [
     customerName: "Marina Costa",
     service: "Taxi-dog · ida · Creche",
     serviceType: "transport",
-    status: "in_transit",
+    status: "confirmed",
     priceCents: 6500,
     paymentPreference: "invoice",
     note: "Buscar na portaria.",
@@ -418,9 +413,9 @@ export const demoBookings: Booking[] = [
     customerName: "Camila Moreira",
     service: "Creche",
     serviceType: "daycare",
-    status: "present",
+    status: "confirmed",
     priceCents: 7000,
-    paymentPreference: "credit",
+    paymentPreference: "invoice",
   },
   {
     id: "booking-theo",
@@ -451,7 +446,7 @@ export const demoBookings: Booking[] = [
     serviceType: "grooming",
     status: "scheduled",
     priceCents: 5500,
-    paymentPreference: "credit",
+    paymentPreference: "invoice",
   },
   {
     id: "booking-mel",
@@ -515,7 +510,7 @@ export const demoBookings: Booking[] = [
     serviceType: "daycare",
     status: "confirmed",
     priceCents: 7000,
-    paymentPreference: "credit",
+    paymentPreference: "invoice",
   },
   {
     id: "booking-theo-future",
@@ -562,7 +557,7 @@ export const demoBookings: Booking[] = [
     serviceType: "daycare",
     status: "scheduled",
     priceCents: 7000,
-    paymentPreference: "credit",
+    paymentPreference: "invoice",
   },
   {
     id: "booking-lola-future",
@@ -577,7 +572,7 @@ export const demoBookings: Booking[] = [
     serviceType: "grooming",
     status: "scheduled",
     priceCents: 5500,
-    paymentPreference: "credit",
+    paymentPreference: "invoice",
   },
 ];
 
@@ -673,6 +668,7 @@ export const demoBillableServices: BillableService[] = [
     date: "28/07/2026",
     service: "Banho",
     serviceType: "bath",
+    creditUnits: 1,
     amountCents: 9000,
   },
   {
@@ -683,6 +679,7 @@ export const demoBillableServices: BillableService[] = [
     date: "29/07/2026",
     service: "Creche",
     serviceType: "daycare",
+    creditUnits: 1,
     amountCents: 7000,
   },
   {
@@ -693,6 +690,7 @@ export const demoBillableServices: BillableService[] = [
     date: "29/07/2026",
     service: "Taxi-dog",
     serviceType: "transport",
+    creditUnits: 1,
     amountCents: 5500,
   },
   {
@@ -703,6 +701,7 @@ export const demoBillableServices: BillableService[] = [
     date: "25/07/2026",
     service: "Banho",
     serviceType: "bath",
+    creditUnits: 1,
     amountCents: 9500,
   },
 ];

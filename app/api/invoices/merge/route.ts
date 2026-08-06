@@ -122,7 +122,12 @@ export async function POST(request: Request) {
       db
         .select({ invoiceId: invoicePayments.invoiceId })
         .from(invoicePayments)
-        .where(inArray(invoicePayments.invoiceId, invoiceIds)),
+        .where(
+          and(
+            inArray(invoicePayments.invoiceId, invoiceIds),
+            eq(invoicePayments.status, "active"),
+          ),
+        ),
       db
         .select({ invoiceId: invoiceSettlements.invoiceId })
         .from(invoiceSettlements)
@@ -232,7 +237,8 @@ export async function POST(request: Request) {
             WHERE id IN (${placeholders}) AND establishment_id = ?
           ) = ?
           AND NOT EXISTS (
-            SELECT 1 FROM invoice_payments WHERE invoice_id IN (${placeholders})
+            SELECT 1 FROM invoice_payments
+            WHERE invoice_id IN (${placeholders}) AND status = 'active'
           )
           AND NOT EXISTS (
             SELECT 1 FROM invoice_settlements

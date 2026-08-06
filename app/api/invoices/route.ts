@@ -188,7 +188,7 @@ export async function POST(request: Request) {
         (row) =>
           row.billingKind === "lodging_deposit"
             ? row.serviceCode !== "hotel" ||
-              !["confirmed", "present", "in_service", "completed"].includes(
+              !["confirmed", "completed"].includes(
                 row.appointmentStatus,
               ) ||
               !row.depositPercent ||
@@ -204,17 +204,11 @@ export async function POST(request: Request) {
         "Somente serviços concluídos podem ser cobrados.",
       );
     }
-    if (
-      rows.some(
-        (row) =>
-          row.paymentPreference !== "invoice" ||
-          row.settlementMethod !== "unsettled",
-      )
-    ) {
+    if (rows.some((row) => row.settlementMethod !== "unsettled")) {
       throw new HttpError(
         409,
         "service_not_available_for_invoice",
-        "Um dos serviços já foi pago ou está configurado para usar crédito.",
+        "Um dos serviços selecionados já foi quitado.",
       );
     }
     if (
@@ -261,7 +255,11 @@ export async function POST(request: Request) {
       : [];
     const depositByAppointment = new Map<
       string,
-      { status: "draft" | "issued" | "paid" | "void"; totalCents: number }
+      {
+        status: "draft" | "issued" | "paid" | "void";
+        totalCents: number;
+        longStayDiscountCents?: number;
+      }
     >(
       depositInvoices
         .filter((invoice) => invoice.sourceId && invoice.status !== "void")
@@ -272,6 +270,7 @@ export async function POST(request: Request) {
         appointmentItemId: invoiceItems.appointmentItemId,
         status: invoices.status,
         totalCents: invoiceItems.amountCents,
+        longStayDiscountCents: invoiceItems.lodgingLongStayDiscountCents,
       })
       .from(invoiceItems)
       .innerJoin(invoices, eq(invoices.id, invoiceItems.invoiceId))
@@ -390,6 +389,10 @@ export async function POST(request: Request) {
       const depositInvoice = depositByAppointment.get(row.appointmentId);
       const paidDepositCents =
         depositInvoice?.status === "paid" ? depositInvoice.totalCents : 0;
+      const paidDepositDiscountCents =
+        depositInvoice?.status === "paid"
+          ? (depositInvoice.longStayDiscountCents ?? 0)
+          : 0;
       const invoiceAmountCents = Math.max(
         0,
         discountedLodgingCents - paidDepositCents,
@@ -401,7 +404,7 @@ export async function POST(request: Request) {
         lodgingLongStayDiscountPercent: longStayDiscount.percent,
         lodgingLongStayDiscountCents: Math.max(
           0,
-          row.amountCents - paidDepositCents - invoiceAmountCents,
+          longStayDiscount.cents - paidDepositDiscountCents,
         ),
         invoiceServiceName:
           paidDepositCents > 0 ? "Saldo da hospedagem" : row.serviceName,
@@ -462,7 +465,6 @@ export async function POST(request: Request) {
             updated_at = ${nowExpression}
           WHERE id IN (${lockedPlaceholders})
             AND status <> 'cancelled'
-            AND payment_preference = 'invoice'
             AND settlement_method = 'unsettled'
             AND active_invoice_id IS NULL
             AND EXISTS (

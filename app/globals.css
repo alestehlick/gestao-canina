@@ -1506,6 +1506,77 @@ h3 {
   color: var(--muted);
 }
 
+.invoice-reversal-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  border: 1px solid color-mix(in srgb, var(--danger) 22%, var(--line-soft));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--danger-soft) 40%, var(--surface));
+  padding: 14px;
+}
+
+.invoice-reversal-form label,
+.invoice-reversal-form label > span {
+  display: grid;
+  gap: 6px;
+}
+
+.invoice-reversal-form textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.invoice-reversal-form p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.invoice-reversal-form > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.settlement-editor {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(220px, 1.2fr);
+  gap: 12px;
+  margin-top: 10px;
+  border: 1px solid #dfd3b7;
+  border-radius: 12px;
+  background: #fbf7ed;
+  padding: 14px;
+}
+
+.settlement-editor label,
+.settlement-editor label > span {
+  display: grid;
+  gap: 6px;
+}
+
+.settlement-editor > div {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .settlement-editor {
+    grid-template-columns: 1fr;
+  }
+
+  .settlement-editor > div {
+    grid-column: 1;
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .daycare-hours-settings {
   align-items: center;
 }
@@ -1677,10 +1748,7 @@ h3 {
   color: #656a65;
 }
 
-.status-pill.confirmed,
-.status-pill.present,
-.status-pill.in_service,
-.status-pill.in_transit {
+.status-pill.confirmed {
   border-color: #c9dad0;
   background: var(--forest-soft);
   color: var(--forest);
@@ -3124,6 +3192,26 @@ h3 {
   gap: 10px;
 }
 
+.credit-balance-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.credit-balance-tools > input {
+  width: min(230px, 38vw);
+  min-height: 38px;
+}
+
+.credit-balance-tools > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
 .credit-balance-grid > article {
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-small);
@@ -3274,7 +3362,7 @@ h3 {
   --service-soft: var(--other-soft);
   display: grid;
   min-height: 58px;
-  grid-template-columns: 24px 92px minmax(170px, 1.1fr) 1fr auto;
+  grid-template-columns: 24px 92px minmax(170px, 1.1fr) 1fr auto auto;
   align-items: center;
   gap: 12px;
   border-top: 1px solid var(--line-soft);
@@ -3288,10 +3376,30 @@ h3 {
   opacity: 0.45;
 }
 
-.billable-row input {
+.billable-select input {
   width: 17px;
   height: 17px;
   accent-color: var(--forest);
+}
+
+.billable-select {
+  display: grid;
+  place-items: center;
+}
+
+.billable-credit-action {
+  min-width: 96px;
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.panel-heading-note {
+  display: block;
+  max-width: 620px;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.45;
 }
 
 .billable-row strong,
@@ -3752,6 +3860,20 @@ h3 {
 .brazilian-date-input:focus-within {
   outline: 2px solid color-mix(in srgb, var(--forest) 36%, transparent);
   outline-offset: 1px;
+}
+
+.brazilian-date-input.invalid {
+  margin-bottom: 21px;
+  border-color: var(--danger);
+}
+
+.date-input-error {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  color: var(--danger);
+  font-size: 0.65rem;
+  line-height: 1.25;
 }
 
 .field .brazilian-date-input > input,
@@ -5724,6 +5846,16 @@ h3 {
     grid-template-columns: 1fr;
   }
 
+  .credit-balance-tools {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .credit-balance-tools > input {
+    width: 100%;
+  }
+
   .billing-page .table-wrap {
     display: none;
   }
@@ -5790,7 +5922,7 @@ h3 {
     content: "";
   }
 
-  .billable-row > input {
+  .billable-row > .billable-select {
     grid-row: 1 / span 4;
     align-self: start;
     margin-top: 2px;
@@ -5825,6 +5957,14 @@ h3 {
     grid-row: 2;
     align-self: start;
     font-size: 0.87rem;
+  }
+
+  .billable-credit-action {
+    grid-column: 2 / -1;
+    grid-row: 4;
+    justify-self: start;
+    min-width: 0;
+    margin-top: 2px;
   }
 
   .selection-bar {

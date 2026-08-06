@@ -78,6 +78,14 @@ Registra o recebimento manual de uma fatura:
 Quando a fatura pertence a um pacote, esta operação marca a compra como paga e
 concede os créditos de forma idempotente.
 
+Para valores ainda em processamento, envie `settlementMode: "schedule"` e
+`availableOn`. A compensação pode ser alterada ou cancelada com
+`PATCH /api/invoices/:id/settlement`.
+
+`POST /api/invoices/:id/payments/reverse` estorna um pagamento com motivo
+obrigatório. A fatura volta a `issued`, o Caixa preserva um lançamento excluído
+e créditos liberados são revertidos somente se ainda não tiverem sido usados.
+
 ### `POST /api/invoices/:id/void`
 
 Cancela uma fatura ainda não paga. Exige um motivo e libera os itens para uma
@@ -104,33 +112,29 @@ Retorna o saldo por serviço, inclusive zero:
 }
 ```
 
-## Agendamento e preferência de pagamento
+## Agendamento e forma de quitação
 
-`POST /api/appointments` aceita `paymentPreference: "invoice" | "credit"`.
-Crédito é aceito somente para creche, banho, banho e tosa e Taxi-dog.
+O agendamento não recebe forma de pagamento. Depois que o atendimento estiver
+concluído, o operador decide entre incluí-lo em uma fatura ou usar créditos.
 
 ## Conclusão usando crédito
 
 ### `POST /api/credits/consume`
 
-Recebe `appointmentItemId`. A operação confirma o saldo, consome uma unidade,
-conclui o item e cria um recibo, tudo no mesmo lote atômico. Nenhuma nova fatura
-é criada.
+Recebe `appointmentItemId` de um serviço já concluído. A operação confirma o
+saldo, consome os créditos necessários e cria um recibo, tudo no mesmo lote
+atômico. Nenhuma nova fatura é criada. Taxi-dog de ida consome 1 crédito; ida e
+volta consome 2.
 
 Se não houver saldo, retorna `409` com
 `error.code: "insufficient_credits"` e nada é alterado.
 
 ## Hospedagem com sinal
 
-### `POST /api/appointments/:id/deposit-invoice`
-
-Depois da confirmação ou chegada, cria uma única fatura de sinal conforme a
-porcentagem salva no agendamento.
-
-### `POST /api/appointments/:id/balance-invoice`
-
-Depois do checkout, cria a fatura do saldo. Se houver sinal, ele precisa estar
-registrado como pago e seu valor é abatido automaticamente.
+Sinal e saldo usam o mesmo endpoint `POST /api/invoices`, com entradas
+`lodging_deposit` e `lodging_balance`. Depois da confirmação, o sinal pode ser
+faturado. O saldo só fica disponível após o checkout e exige que o sinal tenha
+sido pago ou cancelado. O valor pago é abatido automaticamente.
 
 ## Recibos
 

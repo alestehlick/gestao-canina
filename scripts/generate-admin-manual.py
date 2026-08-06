@@ -188,7 +188,7 @@ sections = [
             (
                 "3. Conduzir um atendimento",
                 [
-                    "Avance o cartão na ordem apresentada: <b>Confirmar</b>, <b>Registrar chegada</b> e <b>Concluir atendimento</b>.",
+                    "O fluxo tem somente duas etapas: <b>Confirmar</b> e <b>Concluir atendimento</b>.",
                     "Use <b>Opções</b> para editar ou cancelar. O cancelamento exige um motivo e permanece no histórico.",
                     "As mesmas ações aparecem em <b>Cães &gt; Agenda e histórico</b> e em <b>Clientes &gt; Serviços</b>.",
                 ],
@@ -224,8 +224,8 @@ sections = [
                     "Use <b>Novo serviço</b>, escolha o cão e selecione Creche, Hospedagem, Banho, Banho e tosa ou Taxi-dog.",
                     "A Creche usa os horários padrão das configurações. O Taxi-dog pede ida ou ida e volta e não exige horário.",
                     "O administrador pode alterar o preço de um atendimento sem mudar o padrão. Funcionários sempre usam o valor definido pela administração.",
-                    "Escolha <b>Gerar fatura</b> ou <b>Usar 1 crédito</b>. Crédito está disponível para creche, banho, banho e tosa e Taxi-dog quando há saldo.",
-                    "Para repetir semanalmente, escolha <b>Toda semana</b> e informe de 2 a 52 semanas. Ao cancelar, escolha somente o dia ou toda a recorrência. A opção global preserva atendimentos concluídos e é bloqueada se houver cobrança ou pagamento.",
+                    "O agendamento não define a forma de quitação. Conclua o serviço e, em <b>Cobranças &gt; Faturas</b>, escolha entre criar uma fatura ou usar créditos disponíveis.",
+                    "Para repetir semanalmente, escolha <b>Toda semana</b> e informe de 2 a 52 semanas. Ao cancelar, escolha somente o dia, deste dia em diante ou toda a recorrência. Atendimentos concluídos são preservados.",
                 ],
             ),
             (
@@ -256,12 +256,15 @@ for section_title, topics in sections:
 story.extend(
     [
         Paragraph("Fluxo do sinal, passo a passo", h2),
-        Paragraph("<b>1.</b> Confirme a hospedagem.", step),
-        Paragraph("<b>2.</b> Escolha <b>Gerar fatura do sinal</b>.", step),
-        Paragraph("<b>3.</b> Compartilhe o PDF com o cliente.", step),
-        Paragraph("<b>4.</b> Depois de receber, use <b>Registrar pagamento</b>.", step),
-        Paragraph("<b>5.</b> No checkout, conclua a hospedagem.", step),
-        Paragraph("<b>6.</b> Escolha <b>Gerar fatura do saldo</b>.", step),
+        Paragraph(
+            "<b>1.</b> Confirme a hospedagem.<br/>"
+            "<b>2.</b> Escolha <b>Gerar fatura do sinal</b>.<br/>"
+            "<b>3.</b> Compartilhe o PDF com o cliente.<br/>"
+            "<b>4.</b> Depois de receber, use <b>Registrar pagamento</b>.<br/>"
+            "<b>5.</b> No checkout, conclua a hospedagem.<br/>"
+            "<b>6.</b> Escolha <b>Gerar fatura do saldo</b>.",
+            step,
+        ),
         Paragraph(
             "<b>Importante:</b> o sistema desconta automaticamente o sinal pago. Se a fatura do sinal ainda estiver pendente, o saldo não será criado.",
             callout,
@@ -290,6 +293,14 @@ story.extend(
         Paragraph(
             "<b>Registre somente depois de confirmar o recebimento.</b> A fatura passará para Pago e os serviços serão quitados.",
             callout,
+        ),
+        Paragraph(
+            "Se o valor ainda estiver sendo processado, escolha <b>Em compensação</b> e informe a previsão. O Caixa só recebe o valor quando você confirmar que ele ficou disponível.",
+            body,
+        ),
+        Paragraph(
+            "Um administrador pode usar <b>Estornar pagamento</b> quando houver erro. A fatura volta a ficar aberta e o Caixa preserva o histórico. Créditos liberados só são revertidos se ainda não tiverem sido usados.",
+            body,
         ),
         Paragraph("Caixa", h1),
         Paragraph("11. Acompanhar entradas e saídas", h2),
@@ -324,9 +335,9 @@ story.extend(
             "A criação do pacote gera uma fatura, mas ainda não altera o saldo. Os créditos são liberados automaticamente quando você registra o pagamento da fatura.",
             body,
         ),
-        Paragraph("14. Usar um crédito", h2),
+        Paragraph("14. Usar créditos", h2),
         Paragraph(
-            "Ao criar ou editar o serviço, escolha <b>Usar 1 crédito</b>. Na conclusão, um crédito sai do saldo, nenhuma fatura é criada e um recibo fica disponível.",
+            "Conclua o serviço e abra <b>Cobranças &gt; Faturas</b>. Na linha do item, escolha <b>Usar crédito</b>. Nenhuma fatura é criada e um recibo fica disponível. Taxi-dog de ida usa 1 crédito; ida e volta usa 2.",
             body,
         ),
         Paragraph("Pessoas e acessos", h1),
@@ -336,7 +347,7 @@ story.extend(
             body,
         ),
         Paragraph(
-            "Funcionários usam Hoje, Agenda, Pedidos, Cães e Clientes. Eles não abrem cobranças, configurações, histórico global ou gestão de acessos.",
+            "Funcionários usam Hoje, Pedidos, Cães e Clientes. Eles não abrem cobranças, configurações, histórico global ou gestão de acessos.",
             callout,
         ),
         Paragraph("16. Convidar um cliente", h2),
@@ -369,15 +380,21 @@ story.extend(
             body,
         ),
         Paragraph("20. Revisão diária recomendada", h2),
-        Paragraph("No início: confira alertas, agenda, chegadas e vacinas.", bullet, bulletText="•"),
-        Paragraph("Durante o dia: registre chegadas, conclusões e sinais de hospedagem.", bullet, bulletText="•"),
-        Paragraph("No fim: gere faturas, registre recebimentos e confira créditos e recibos.", bullet, bulletText="•"),
+        Paragraph(
+            "- No início: confira alertas, agenda e vacinas.<br/>"
+            "- Durante o dia: confirme e conclua atendimentos; acompanhe sinais de hospedagem.<br/>"
+            "- No fim: gere faturas, registre recebimentos e confira créditos e recibos.",
+            body,
+        ),
         KeepTogether([
             Paragraph("21. Se algo não funcionar", h2),
-            Paragraph("Atualize a página e tente novamente uma vez.", bullet, bulletText="•"),
-            Paragraph("Confira a internet e se a sessão continua aberta.", bullet, bulletText="•"),
-            Paragraph("Leia a mensagem exibida e revise o campo indicado.", bullet, bulletText="•"),
-            Paragraph("Não recrie uma fatura repetidamente; confira antes a lista do cliente.", bullet, bulletText="•"),
+            Paragraph(
+                "- Atualize a página e tente novamente uma vez.<br/>"
+                "- Confira a internet e se a sessão continua aberta.<br/>"
+                "- Leia a mensagem exibida e revise o campo indicado.<br/>"
+                "- Não recrie uma fatura repetidamente; confira antes a lista do cliente.",
+                body,
+            ),
             Paragraph(
                 "Ao pedir suporte, informe o que estava fazendo, o cliente ou cão e o horário aproximado. Nunca envie senhas.",
                 callout,

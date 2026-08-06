@@ -192,9 +192,6 @@ function statusLabel(status: string) {
     {
       scheduled: "Agendado",
       confirmed: "Confirmado",
-      in_transit: "Em transporte",
-      present: "No local",
-      in_service: "Em atendimento",
       completed: "Concluído",
       cancelled: "Cancelado",
       pending: "Aguardando análise",

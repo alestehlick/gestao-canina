@@ -158,7 +158,10 @@ export async function POST(
             SELECT ?, ?, id, total_cents, ?, ?, 'scheduled', ?, ${nowExpression}, ${nowExpression}
             FROM invoices
             WHERE id = ? AND establishment_id = ? AND status = 'issued'
-              AND NOT EXISTS (SELECT 1 FROM invoice_payments WHERE invoice_id = ?)
+              AND NOT EXISTS (
+                SELECT 1 FROM invoice_payments
+                WHERE invoice_id = ? AND status = 'active'
+              )
               AND NOT EXISTS (
                 SELECT 1 FROM invoice_settlements WHERE invoice_id = ? AND status = 'scheduled'
               )`,
@@ -338,16 +341,18 @@ export async function POST(
     const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
     const d1 = getD1Database();
     const statements = [] as ReturnType<typeof d1.prepare>[];
-    let settlementDeleteIndex: number | null = null;
+    let settlementConfirmationIndex: number | null = null;
     if (scheduledSettlement) {
-      settlementDeleteIndex = statements.length;
+      settlementConfirmationIndex = statements.length;
       statements.push(
         d1
           .prepare(
-            `DELETE FROM invoice_settlements
+            `UPDATE invoice_settlements
+            SET status = 'confirmed', confirmed_at = ${nowExpression},
+              confirmed_by_user_id = ?, updated_at = ${nowExpression}
             WHERE id = ? AND establishment_id = ? AND status = 'scheduled'`,
           )
-          .bind(scheduledSettlement.id, establishmentId),
+          .bind(identity.userId, scheduledSettlement.id, establishmentId),
       );
     }
     const paymentStatementIndex = statements.length;
@@ -355,14 +360,15 @@ export async function POST(
       d1
         .prepare(
           `INSERT INTO invoice_payments (
-            id, establishment_id, invoice_id, amount_cents, method, note,
+            id, establishment_id, invoice_id, amount_cents, method, status, note,
             paid_at, recorded_by_user_id, created_at
           )
-          SELECT ?, ?, id, ?, 'manual', ?, ?, ?, ${nowExpression}
+          SELECT ?, ?, id, ?, 'manual', 'active', ?, ?, ?, ${nowExpression}
           FROM invoices
           WHERE id = ? AND establishment_id = ? AND status = 'issued'
             AND NOT EXISTS (
-              SELECT 1 FROM invoice_payments WHERE invoice_id = ?
+              SELECT 1 FROM invoice_payments
+              WHERE invoice_id = ? AND status = 'active'
             )
             ${creditPurchaseGuard}`,
         )
@@ -545,8 +551,8 @@ export async function POST(
 
     const results = await d1.batch(statements);
     if (
-      (settlementDeleteIndex !== null &&
-        (results[settlementDeleteIndex].meta.changes ?? 0) !== 1) ||
+      (settlementConfirmationIndex !== null &&
+        (results[settlementConfirmationIndex].meta.changes ?? 0) !== 1) ||
       (results[paymentStatementIndex].meta.changes ?? 0) !== 1 ||
       (results[paidStatementIndex].meta.changes ?? 0) !== 1 ||
       (results[cashEntryStatementIndex].meta.changes ?? 0) !== 1

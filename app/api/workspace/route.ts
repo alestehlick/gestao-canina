@@ -272,7 +272,6 @@ export async function GET(request: Request) {
               ),
               and(
                 eq(appointments.status, "completed"),
-                eq(appointmentItems.paymentPreference, "invoice"),
                 eq(appointmentItems.settlementMethod, "unsettled"),
                 isNull(appointmentItems.activeInvoiceId),
               ),
@@ -298,8 +297,8 @@ export async function GET(request: Request) {
         .select()
         .from(invoices)
         .where(eq(invoices.establishmentId, establishmentId))
-        .orderBy(desc(invoices.createdAt))
-        .limit(300),
+        .orderBy(asc(invoices.status), desc(invoices.createdAt))
+        .limit(1_000),
       db
         .select({
           id: invoiceItems.id,
@@ -341,7 +340,8 @@ export async function GET(request: Request) {
           eq(serviceCatalog.id, appointmentItems.serviceCatalogId),
         )
         .where(eq(invoices.establishmentId, establishmentId))
-        .orderBy(asc(invoiceItems.serviceDateSnapshot)),
+        .orderBy(desc(invoices.createdAt), asc(invoiceItems.serviceDateSnapshot))
+        .limit(5_000),
       db
         .select({
           mergedInvoiceId: invoiceMerges.mergedInvoiceId,
@@ -357,7 +357,8 @@ export async function GET(request: Request) {
             eq(invoiceMerges.establishmentId, establishmentId),
             eq(invoiceMerges.status, "active"),
           ),
-        ),
+        )
+        .limit(1_000),
       db
         .select({
           invoiceId: invoicePayments.invoiceId,
@@ -370,7 +371,13 @@ export async function GET(request: Request) {
           cashEntries,
           eq(cashEntries.sourcePaymentId, invoicePayments.id),
         )
-        .where(eq(invoicePayments.establishmentId, establishmentId)),
+        .where(
+          and(
+            eq(invoicePayments.establishmentId, establishmentId),
+            eq(invoicePayments.status, "active"),
+          ),
+        )
+        .limit(1_000),
       db
         .select({
           invoiceId: invoiceSettlements.invoiceId,
@@ -378,7 +385,13 @@ export async function GET(request: Request) {
           availableOn: invoiceSettlements.availableOn,
         })
         .from(invoiceSettlements)
-        .where(eq(invoiceSettlements.establishmentId, establishmentId)),
+        .where(
+          and(
+            eq(invoiceSettlements.establishmentId, establishmentId),
+            eq(invoiceSettlements.status, "scheduled"),
+          ),
+        )
+        .limit(1_000),
       db
         .select({
           amountCents: sql<number>`coalesce(sum(${invoicePayments.amountCents}), 0)`,
@@ -388,6 +401,7 @@ export async function GET(request: Request) {
         .where(
           and(
             eq(invoicePayments.establishmentId, establishmentId),
+            eq(invoicePayments.status, "active"),
             gte(invoicePayments.paidAt, `${addDays(defaultFrom, -29)}T00:00:00.000Z`),
             lte(invoicePayments.paidAt, `${defaultFrom}T23:59:59.999Z`),
           ),

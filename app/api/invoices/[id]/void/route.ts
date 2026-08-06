@@ -88,13 +88,16 @@ export async function POST(
         .bind(id, id),
       d1
         .prepare(
-          `DELETE FROM invoice_settlements
+          `UPDATE invoice_settlements
+          SET status = 'cancelled', cancelled_at = ${nowExpression},
+            cancelled_by_user_id = ?, cancellation_reason = ?,
+            updated_at = ${nowExpression}
           WHERE invoice_id = ? AND establishment_id = ? AND status = 'scheduled'
             AND EXISTS (
               SELECT 1 FROM invoices WHERE id = ? AND status = 'void'
             )`,
         )
-        .bind(id, establishmentId, id),
+        .bind(identity.userId, reason, id, establishmentId, id),
       d1
         .prepare(
           `UPDATE credit_purchases

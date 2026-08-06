@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 const MONTHS = [
   "Janeiro",
@@ -40,6 +40,13 @@ function parseBrazilianDate(value: string) {
   return isoFromDate(date) === `${match[3]}-${match[2]}-${match[1]}`
     ? isoFromDate(date)
     : null;
+}
+
+function maskBrazilianDate(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
 }
 
 export function formatBrazilianDate(value: string | null | undefined) {
@@ -96,6 +103,9 @@ export function BrazilianDateInput({
     text: formatBrazilianDate(value ?? defaultValue),
   }));
   const [open, setOpen] = useState(false);
+  const [error, setError] = useState("");
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const errorId = useId();
   const currentValue = value ?? internalValue;
   const selectedDate = parseIso(currentValue);
   const [visibleMonth, setVisibleMonth] = useState(
@@ -123,7 +133,16 @@ export function BrazilianDateInput({
     ];
   }, [visibleMonth]);
 
+  useEffect(() => {
+    function closeOutside(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, []);
+
   function commit(nextValue: string) {
+    setError("");
     if (value === undefined) setInternalValue(nextValue);
     onChange?.(nextValue);
   }
@@ -139,10 +158,11 @@ export function BrazilianDateInput({
       commit(iso);
       return;
     }
-    setDraft({
-      forValue: currentValue,
-      text: formatBrazilianDate(currentValue),
-    });
+    setError(
+      iso
+        ? "A data está fora do período permitido."
+        : "Digite uma data válida no formato dd/mm/aaaa.",
+    );
   }
 
   function chooseDate(date: Date) {
@@ -153,7 +173,13 @@ export function BrazilianDateInput({
   }
 
   return (
-    <span className="brazilian-date-input">
+    <span
+      className={`brazilian-date-input${error ? " invalid" : ""}`}
+      ref={rootRef}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") setOpen(false);
+      }}
+    >
       {name && <input name={name} type="hidden" value={currentValue} />}
       <input
         type="text"
@@ -164,8 +190,13 @@ export function BrazilianDateInput({
         required={required}
         autoFocus={autoFocus}
         aria-label={ariaLabel}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? errorId : undefined}
         onChange={(event) =>
-          setDraft({ forValue: currentValue, text: event.target.value })
+          setDraft({
+            forValue: currentValue,
+            text: maskBrazilianDate(event.target.value),
+          })
         }
         onBlur={acceptTypedValue}
       />
@@ -228,6 +259,11 @@ export function BrazilianDateInput({
             })}
           </span>
         </span>
+      )}
+      {error && (
+        <small className="date-input-error" id={errorId} role="alert">
+          {error}
+        </small>
       )}
     </span>
   );

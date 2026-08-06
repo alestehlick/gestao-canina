@@ -618,7 +618,9 @@ async function createInvoicePdf(state: InvoiceState) {
     0,
   );
   const hasLodging = rows.some((row) => row.tableAmountCents !== undefined);
-  const issuedAt = formatBrazilianDate(operationalToday);
+  const issuedAt = formatBrazilianDate(
+    state.invoice?.issuedAt ?? operationalToday,
+  );
 
   document.setProperties({
     title: `Fatura ${invoiceNumber} · Hospet Quintal`,
@@ -892,9 +894,6 @@ function nextStatus(booking: Booking): BookingStatus {
   const progression: Partial<Record<BookingStatus, BookingStatus>> = {
     scheduled: "confirmed",
     confirmed: "completed",
-    in_transit: "completed",
-    present: "completed",
-    in_service: "completed",
     completed: "scheduled",
   };
   return progression[status] ?? status;
@@ -905,9 +904,6 @@ function primaryAction(booking: Booking) {
   const actions: Partial<Record<BookingStatus, string>> = {
     scheduled: "Confirmar",
     confirmed: "Concluir atendimento",
-    in_transit: "Concluir rota",
-    present: "Concluir atendimento",
-    in_service: "Concluir atendimento",
     completed: "Reabrir",
   };
   return actions[status] ?? null;
@@ -922,6 +918,12 @@ export function ManagementApp() {
   const [loadError, setLoadError] = useState("");
   const [onboardingName, setOnboardingName] = useState("Hospet Quintal");
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [cashExclusionInvoice, setCashExclusionInvoice] =
+    useState<Invoice | null>(null);
+  const [invoiceCorrection, setInvoiceCorrection] = useState<{
+    kind: "void" | "unmerge";
+    invoice: Invoice;
+  } | null>(null);
   const [view, setView] = useState<View>("today");
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -950,7 +952,7 @@ export function ManagementApp() {
     "choice" | "customer" | "dog"
   >("choice");
   const [agendaFilter, setAgendaFilter] = useState<
-    "all" | "upcoming" | "active" | "completed"
+    "all" | "upcoming" | "completed"
   >("all");
   const [agendaServiceFilter, setAgendaServiceFilter] =
     useState<AgendaServiceFilter>("all");
@@ -988,8 +990,6 @@ export function ManagementApp() {
   const [serviceDogPickerOpen, setServiceDogPickerOpen] = useState(false);
   const [serviceDraftType, setServiceDraftType] =
     useState<ServiceType>("daycare");
-  const [serviceDraftPayment, setServiceDraftPayment] =
-    useState<Booking["paymentPreference"]>("invoice");
   const [serviceDraftTransportDirection, setServiceDraftTransportDirection] =
     useState<"one_way" | "round_trip">("one_way");
   const [serviceDraftHasDeposit, setServiceDraftHasDeposit] = useState(false);
@@ -1412,7 +1412,10 @@ export function ManagementApp() {
     }
   }
 
-  async function toggleInvoiceCash(invoice: Invoice) {
+  async function toggleInvoiceCash(
+    invoice: Invoice,
+    exclusionReason?: string,
+  ) {
     if (invoice.status !== "paid") return;
     if (!invoice.cashEntryId) {
       setToast({
@@ -1422,15 +1425,10 @@ export function ManagementApp() {
       return;
     }
     const nextIncluded = invoice.cashIncluded === false;
-    let reason: string | undefined;
+    const reason = exclusionReason?.trim();
     if (!nextIncluded) {
-      const answer = window.prompt(
-        "Por que este recebimento deve ser desconsiderado do Caixa?",
-      );
-      if (answer === null) return;
-      reason = answer.trim();
       if (!reason) {
-        setToast({ message: "Informe um motivo para preservar o histórico." });
+        setCashExclusionInvoice(invoice);
         return;
       }
     }
@@ -1465,6 +1463,7 @@ export function ManagementApp() {
         );
       }
     }
+    setCashExclusionInvoice(null);
   }
 
   function navigate(nextView: View) {
@@ -1486,7 +1485,6 @@ export function ManagementApp() {
     );
     setServiceDogPickerOpen(false);
     setServiceDraftType("daycare");
-    setServiceDraftPayment("invoice");
     setServiceDraftHasDeposit(false);
     setServiceDraftDaycareCustomer(false);
     setServiceDraftAdditionalDog(false);
@@ -1532,52 +1530,25 @@ export function ManagementApp() {
   async function updateBookingStatus(
     booking: Booking,
     status: BookingStatus,
-    recurrenceScope: "occurrence" | "series" = "occurrence",
+    recurrenceScope: "occurrence" | "future" | "series" = "occurrence",
   ) {
     const previous = booking.status;
 
     if (runtimeMode === "ready") {
-      if (
-        status === "completed" &&
-        booking.paymentPreference === "credit"
-      ) {
-        if (!booking.itemId) {
-          setToast({
-            message:
-              "Este serviço não possui um item válido para usar o crédito.",
-          });
-          return;
-        }
-        const result = await runLiveAction(
-          `credit:${booking.itemId}`,
-          () =>
-            requestJson<{
-              receipt: { receiptNumber: string } | null;
-              remainingUnits?: number;
-            }>("/api/credits/consume", {
-              method: "POST",
-              body: JSON.stringify({
-                appointmentItemId: booking.itemId,
-              }),
-            }),
-          { refresh: true },
-        );
-        if (result) {
-          const receiptNumber =
-            result.receipt?.receiptNumber ?? "novo recibo";
-          setOpenMenuId(null);
-          setToast({
-            message: `Crédito utilizado. O ${receiptNumber} está pronto para envio, sem nova fatura.`,
-            actionLabel: "Ver recibos",
-            action: () => {
-              setBillingTab("receipts");
-              navigate("billing");
-            },
-          });
-        }
-        return;
-      }
-
+      const previousBookings = bookings;
+      setBookings((current) =>
+        current.map((item) =>
+          ((recurrenceScope === "series" ||
+            (recurrenceScope === "future" && item.date >= booking.date)) &&
+            booking.recurringScheduleId &&
+            item.recurringScheduleId === booking.recurringScheduleId &&
+            item.status !== "completed" &&
+            item.status !== "cancelled") ||
+          item.id === booking.id
+            ? { ...item, status }
+            : item
+        ),
+      );
       const result = await runLiveAction(
         `appointment:${booking.id}`,
         () =>
@@ -1603,100 +1574,20 @@ export function ManagementApp() {
         setToast({
           message:
             status === "completed"
-              ? booking.paymentPreference === "invoice"
-                ? `Atendimento de ${booking.dogName} concluído e pronto para faturamento.`
-                : `Atendimento de ${booking.dogName} concluído.`
+              ? `Atendimento de ${booking.dogName} concluído. Escolha em Cobranças entre usar créditos ou gerar fatura.`
               : status === "cancelled"
                 ? recurrenceScope === "series"
                   ? `Recorrência de ${booking.dogName} cancelada.`
+                  : recurrenceScope === "future"
+                    ? `Agendamentos de ${booking.dogName} cancelados deste dia em diante.`
                   : `Atendimento de ${booking.dogName} cancelado.`
                 : previous === "completed"
                   ? `Atendimento de ${booking.dogName} reaberto.`
                 : `Situação de ${booking.dogName} atualizada.`,
         });
+      } else {
+        setBookings(previousBookings);
       }
-      return;
-    }
-
-    if (status === "completed" && booking.paymentPreference === "credit") {
-      if (!creditServiceTypes.includes(booking.serviceType as CreditServiceType)) {
-        setToast({
-          message:
-            "Créditos são válidos para creche, banho, banho e tosa e taxi-dog.",
-        });
-        return;
-      }
-      const serviceType = booking.serviceType as CreditServiceType;
-      const available = creditBalances[booking.customerId]?.[serviceType] ?? 0;
-      const creditUnits = creditUnitsForBooking(booking);
-      if (available < creditUnits) {
-        setToast({
-          message: `São necessários ${creditUnits} ${creditUnits === 1 ? "crédito" : "créditos"} de ${serviceLabels[serviceType].toLowerCase()} para este atendimento.`,
-        });
-        return;
-      }
-
-      const receipt: ServiceReceipt = {
-        id: `receipt-${crypto.randomUUID()}`,
-        number: `REC-${String(32 + receipts.length).padStart(5, "0")}`,
-        customerId: booking.customerId,
-        customerName: booking.customerName,
-        dogName: booking.dogName,
-        serviceType,
-        service: booking.service,
-        date: formatShortDate(booking.date),
-        creditUnits,
-        remainingBalance: available - creditUnits,
-        deliveryStatus: "ready",
-      };
-      const nextBalances: CreditBalances = {
-        ...creditBalances,
-        [booking.customerId]: {
-          ...(creditBalances[booking.customerId] ?? {
-            daycare: 0,
-            bath: 0,
-            grooming: 0,
-            transport: 0,
-          }),
-          [serviceType]: available - creditUnits,
-        },
-      };
-      setCreditBalances(nextBalances);
-      setCustomers((current) =>
-        current.map((customer) =>
-          customer.id === booking.customerId
-            ? {
-                ...customer,
-                creditsLabel:
-                  totalCredits(nextBalances, customer.id) > 0
-                    ? `${totalCredits(nextBalances, customer.id)} créditos disponíveis`
-                    : "Sem créditos",
-              }
-            : customer,
-        ),
-      );
-      setReceipts((current) => [receipt, ...current]);
-      setBookings((current) =>
-        current.map((item) =>
-          item.id === booking.id
-            ? {
-                ...item,
-                status,
-                settlementStatus: "credit_used",
-                receiptNumber: receipt.number,
-              }
-            : item,
-        ),
-      );
-      setOpenMenuId(null);
-      setToast({
-        message: `Crédito utilizado. O recibo ${receipt.number} está pronto para envio.`,
-        actionLabel: "Ver recibo",
-        action: () => {
-          setSelectedReceipt(receipt);
-          setDialog("receipt");
-        },
-      });
       return;
     }
 
@@ -1716,7 +1607,8 @@ export function ManagementApp() {
               transport: 0,
             }),
             [serviceType]:
-              (creditBalances[booking.customerId]?.[serviceType] ?? 0) + 1,
+              (creditBalances[booking.customerId]?.[serviceType] ?? 0) +
+              creditUnitsForBooking(booking),
           },
         };
         setCreditBalances(nextBalances);
@@ -1743,7 +1635,6 @@ export function ManagementApp() {
 
     if (
       status === "completed" &&
-      booking.paymentPreference === "invoice" &&
       !billableServices.some((service) => service.id === `bill-${booking.id}`)
     ) {
       setBillableServices((current) => [
@@ -1754,6 +1645,13 @@ export function ManagementApp() {
           dogName: booking.dogName,
           date: formatShortDate(booking.date),
           service: booking.service,
+          serviceType: booking.serviceType,
+          appointmentItemId: booking.itemId,
+          creditUnits: creditServiceTypes.includes(
+            booking.serviceType as CreditServiceType,
+          )
+            ? creditUnitsForBooking(booking)
+            : undefined,
           amountCents: booking.priceCents,
         },
         ...current,
@@ -1762,7 +1660,8 @@ export function ManagementApp() {
 
     setBookings((current) =>
       current.map((item) =>
-        (recurrenceScope === "series" &&
+        ((recurrenceScope === "series" ||
+          (recurrenceScope === "future" && item.date >= booking.date)) &&
           booking.recurringScheduleId &&
           item.recurringScheduleId === booking.recurringScheduleId &&
           item.status !== "completed" &&
@@ -1920,11 +1819,6 @@ export function ManagementApp() {
         return;
       }
     }
-    const paymentPreference: Booking["paymentPreference"] =
-      creditServiceTypes.includes(serviceType as CreditServiceType) &&
-      String(form.get("paymentPreference") ?? "invoice") === "credit"
-        ? "credit"
-        : "invoice";
     const note = String(form.get("note") ?? "").trim() || undefined;
 
     if (runtimeMode === "ready") {
@@ -1951,7 +1845,7 @@ export function ManagementApp() {
                   serviceType === "transport" ? null : endTime || null,
                 serviceCatalogId: service.id,
                 priceCents,
-                paymentPreference,
+                paymentPreference: "invoice" as const,
                 internalNotes: note ?? null,
                 transportDirection,
                 lodgingNights:
@@ -2011,7 +1905,7 @@ export function ManagementApp() {
                     ? transportDirection
                     : undefined,
                 priceCents,
-                paymentPreference,
+                paymentPreference: "invoice" as const,
                 note,
               }
             : booking,
@@ -2419,9 +2313,11 @@ export function ManagementApp() {
       return;
     }
     const recurrenceScope =
-      bookingToCancel.recurringScheduleId &&
-      String(form.get("recurrenceScope") ?? "occurrence") === "series"
-        ? "series"
+      bookingToCancel.recurringScheduleId
+        ? (String(form.get("recurrenceScope") ?? "occurrence") as
+            | "occurrence"
+            | "future"
+            | "series")
         : "occurrence";
     await updateBookingStatus(
       { ...bookingToCancel, note: reason },
@@ -2506,11 +2402,6 @@ export function ManagementApp() {
       serviceDraftDaycareCustomer,
       serviceDraftAdditionalDog,
     );
-    const paymentPreference: Booking["paymentPreference"] =
-      creditServiceTypes.includes(serviceType as CreditServiceType) &&
-      String(form.get("paymentPreference") ?? "invoice") === "credit"
-        ? "credit"
-        : "invoice";
     const note = String(form.get("note") ?? "").trim() || undefined;
 
     if (runtimeMode === "ready") {
@@ -2541,7 +2432,6 @@ export function ManagementApp() {
                   ? undefined
                   : endTime || undefined,
               internalNotes: note,
-              paymentPreference,
               priceCents,
               transportDirection,
               lodgingNights:
@@ -2609,7 +2499,7 @@ export function ManagementApp() {
           serviceType === "hotel"
             ? Math.round(priceCents * lodgingNights)
             : priceCents,
-        paymentPreference,
+        paymentPreference: "invoice",
         settlementStatus: "pending",
         note,
       }));
@@ -2908,6 +2798,97 @@ export function ManagementApp() {
       return;
     }
     setSelectedBillables((current) => [...current, service.id]);
+  }
+
+  async function useCreditsForBillable(service: BillableService) {
+    const serviceType = service.serviceType;
+    const creditUnits = service.creditUnits ?? 0;
+    if (
+      !service.appointmentItemId ||
+      !serviceType ||
+      !creditServiceTypes.includes(serviceType as CreditServiceType) ||
+      creditUnits < 1
+    ) {
+      setToast({ message: "Este serviço não pode ser quitado com créditos." });
+      return;
+    }
+    const available = creditBalances[service.customerId]?.[
+      serviceType as CreditServiceType
+    ] ?? 0;
+    if (available < creditUnits) {
+      setToast({
+        message: `Saldo insuficiente: são necessários ${creditUnits} ${
+          creditUnits === 1 ? "crédito" : "créditos"
+        } para este serviço.`,
+      });
+      return;
+    }
+
+    if (runtimeMode === "ready") {
+      const result = await runLiveAction(
+        `use-credit:${service.appointmentItemId}`,
+        () =>
+          requestJson<{ receipt?: { id: string } }>("/api/credits/consume", {
+            method: "POST",
+            body: JSON.stringify({
+              appointmentItemId: service.appointmentItemId,
+            }),
+          }),
+        {
+          refresh: true,
+          successMessage: `${creditUnits} ${
+            creditUnits === 1 ? "crédito utilizado" : "créditos utilizados"
+          }. O recibo está pronto.`,
+        },
+      );
+      if (result) {
+        setSelectedBillables((current) =>
+          current.filter((id) => id !== service.id),
+        );
+      }
+      return;
+    }
+
+    const nextBalance = available - creditUnits;
+    setCreditBalances((current) => ({
+      ...current,
+      [service.customerId]: {
+        ...(current[service.customerId] ?? {
+          daycare: 0,
+          bath: 0,
+          grooming: 0,
+          transport: 0,
+        }),
+        [serviceType]: nextBalance,
+      },
+    }));
+    setBillableServices((current) =>
+      current.filter((item) => item.id !== service.id),
+    );
+    setSelectedBillables((current) =>
+      current.filter((id) => id !== service.id),
+    );
+    setReceipts((current) => [
+      {
+        id: `receipt-${Date.now()}`,
+        number: `REC-DEMO-${String(current.length + 1).padStart(3, "0")}`,
+        customerId: service.customerId,
+        customerName: service.customerName,
+        dogName: service.dogName,
+        serviceType: serviceType as CreditServiceType,
+        service: service.service,
+        date: service.date,
+        creditUnits,
+        remainingBalance: nextBalance,
+        deliveryStatus: "ready",
+      },
+      ...current,
+    ]);
+    setToast({
+      message: `${creditUnits} ${
+        creditUnits === 1 ? "crédito utilizado" : "créditos utilizados"
+      }. O recibo está pronto.`,
+    });
   }
 
   function openCreditPackage(customerId?: string) {
@@ -3909,7 +3890,7 @@ export function ManagementApp() {
     });
   }
 
-  async function voidInvoice() {
+  async function voidInvoice(reasonInput?: string) {
     if (!invoiceState?.invoice || invoiceState.invoice.status === "paid") return;
     if (invoiceState.invoice.mergeId) {
       const reversed = await reverseInvoiceMerge(invoiceState.invoice);
@@ -3919,10 +3900,11 @@ export function ManagementApp() {
       }
       return;
     }
-    const reason = window.prompt(
-      "Por que esta fatura deve ser cancelada? O motivo ficará no histórico.",
-    )?.trim();
-    if (!reason) return;
+    const reason = reasonInput?.trim();
+    if (!reason) {
+      setInvoiceCorrection({ kind: "void", invoice: invoiceState.invoice });
+      return;
+    }
     if (runtimeMode === "ready") {
       const result = await runLiveAction(
         "void-invoice",
@@ -3947,6 +3929,104 @@ export function ManagementApp() {
     }
     setDialog(null);
     setInvoiceState(null);
+    setInvoiceCorrection(null);
+  }
+
+  async function reverseInvoicePayment(reason: string) {
+    if (!invoiceState?.invoice || invoiceState.invoice.status !== "paid") {
+      return false;
+    }
+    const invoiceId = invoiceState.invoice.id;
+    if (runtimeMode === "ready") {
+      const result = await runLiveAction(
+        "reverse-invoice-payment",
+        () =>
+          requestJson<{ reversed: boolean }>(
+            `/api/invoices/${invoiceId}/payments/reverse`,
+            {
+              method: "POST",
+              body: JSON.stringify({ reason }),
+            },
+          ),
+        {
+          refresh: true,
+          successMessage:
+            "Pagamento estornado. A fatura voltou a ficar em aberto e o Caixa preservou o histórico.",
+        },
+      );
+      if (!result) return false;
+    } else {
+      setInvoices((current) =>
+        current.map((invoice) =>
+          invoice.id === invoiceId
+            ? {
+                ...invoice,
+                status: "pending",
+                paidAt: undefined,
+                due: "Pagamento estornado",
+                cashIncluded: false,
+              }
+            : invoice,
+        ),
+      );
+    }
+    setDialog(null);
+    setInvoiceState(null);
+    return true;
+  }
+
+  async function manageInvoiceSettlement(
+    action: "update" | "cancel",
+    availableOn?: string,
+    reason?: string,
+  ) {
+    if (!invoiceState?.invoice?.compensationAvailableOn) return false;
+    if (runtimeMode !== "ready") {
+      setToast({
+        message: "A compensação pode ser alterada somente com dados reais.",
+      });
+      return false;
+    }
+    const invoiceId = invoiceState.invoice.id;
+    const result = await runLiveAction(
+      `settlement:${action}:${invoiceId}`,
+      () =>
+        requestJson<{ settlement: { status: string; availableOn: string } }>(
+          `/api/invoices/${invoiceId}/settlement`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ action, availableOn, reason }),
+          },
+        ),
+      {
+        refresh: true,
+        successMessage:
+          action === "update"
+            ? "Previsão de compensação atualizada."
+            : "Compensação cancelada; a fatura continua em aberto.",
+      },
+    );
+    if (!result) return false;
+    if (action === "update") {
+      setInvoiceState((current) =>
+        current?.invoice
+          ? {
+              ...current,
+              invoice: {
+                ...current.invoice,
+                compensationAvailableOn: result.settlement.availableOn,
+                due: `Em compensação · disponível em ${formatShortDate(
+                  result.settlement.availableOn,
+                )}`,
+              },
+            }
+          : current,
+      );
+    } else {
+      setDialog(null);
+      setInvoiceState(null);
+    }
+    return true;
   }
 
   async function mergeInvoices(invoiceIds: string[], dueDate: string) {
@@ -3972,13 +4052,10 @@ export function ManagementApp() {
     return Boolean(result);
   }
 
-  async function reverseInvoiceMerge(invoice: Invoice) {
+  async function reverseInvoiceMerge(invoice: Invoice, confirmed = false) {
     if (!invoice.mergeId || runtimeMode !== "ready") return false;
-    if (
-      !window.confirm(
-        `Desfazer a união da fatura #${invoice.number}? As faturas originais serão restauradas.`,
-      )
-    ) {
+    if (!confirmed) {
+      setInvoiceCorrection({ kind: "unmerge", invoice });
       return false;
     }
     const result = await runLiveAction(
@@ -3993,6 +4070,7 @@ export function ManagementApp() {
         successMessage: "União desfeita. As faturas originais foram restauradas.",
       },
     );
+    if (result) setInvoiceCorrection(null);
     return Boolean(result);
   }
 
@@ -4246,15 +4324,6 @@ export function ManagementApp() {
       .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"))
       .slice(0, 8);
   })();
-  const serviceDraftCreditEligible = creditServiceTypes.includes(
-    serviceDraftType as CreditServiceType,
-  );
-  const serviceDraftCreditBalance =
-    serviceDraftDog && serviceDraftCreditEligible
-      ? (creditBalances[serviceDraftDog.customerId]?.[
-          serviceDraftType as CreditServiceType
-        ] ?? 0)
-      : 0;
   const pendingBillingCount =
     billableServices.length +
     invoices.filter((invoice) => invoice.status !== "paid").length;
@@ -4591,6 +4660,7 @@ export function ManagementApp() {
               creditPurchases={creditPurchases}
               receipts={receipts}
               onToggleBillable={toggleBillable}
+              onUseCredits={useCreditsForBillable}
               onCreateInvoice={openInvoiceForSelection}
               onOpenInvoice={openExistingInvoice}
               onAddCredits={() => openCreditPackage()}
@@ -4717,7 +4787,6 @@ export function ManagementApp() {
                     setServiceDraftDogSearch(event.target.value);
                     setServiceDraftDogId("");
                     setServiceDogPickerOpen(true);
-                    setServiceDraftPayment("invoice");
                   }}
                   onFocus={() => setServiceDogPickerOpen(true)}
                   onBlur={() =>
@@ -4751,7 +4820,6 @@ export function ManagementApp() {
                           onClick={() => {
                             setServiceDraftDogId(dog.id);
                             setServiceDraftDogSearch(dog.name);
-                            setServiceDraftPayment("invoice");
                             setServiceDogPickerOpen(false);
                           }}
                         >
@@ -4851,11 +4919,6 @@ export function ManagementApp() {
                 onChange={(event) => {
                   const next = event.target.value as ServiceType;
                   setServiceDraftType(next);
-                  if (
-                    !creditServiceTypes.includes(next as CreditServiceType)
-                  ) {
-                    setServiceDraftPayment("invoice");
-                  }
                   if (next !== "hotel") setServiceDraftHasDeposit(false);
                   if (next === "hotel") {
                     const nextEndDate =
@@ -4883,9 +4946,13 @@ export function ManagementApp() {
                     );
                   } else if (next === "transport") {
                     setServiceDraftPrice(
-                      serviceDraftTransportDirection === "round_trip"
-                        ? "10.00"
-                        : "5.00",
+                      (
+                        (servicePrices.transport *
+                          (serviceDraftTransportDirection === "round_trip"
+                            ? 2
+                            : 1)) /
+                        100
+                      ).toFixed(2),
                     );
                   } else {
                     setServiceDraftPrice((servicePrices[next] / 100).toFixed(2));
@@ -4949,10 +5016,20 @@ export function ManagementApp() {
                 <select name="transportDirection" value={serviceDraftTransportDirection} onChange={(event) => {
                   const nextDirection = event.target.value as "one_way" | "round_trip";
                   setServiceDraftTransportDirection(nextDirection);
-                  setServiceDraftPrice(nextDirection === "round_trip" ? "10.00" : "5.00");
+                  setServiceDraftPrice(
+                    (
+                      (servicePrices.transport *
+                        (nextDirection === "round_trip" ? 2 : 1)) /
+                      100
+                    ).toFixed(2),
+                  );
                 }}>
-                  <option value="one_way">Ida · R$ 5,00</option>
-                  <option value="round_trip">Ida e volta · R$ 10,00</option>
+                  <option value="one_way">
+                    Ida · {formatCurrency(servicePrices.transport)}
+                  </option>
+                  <option value="round_trip">
+                    Ida e volta · {formatCurrency(servicePrices.transport * 2)}
+                  </option>
                 </select>
               </label>
             )}
@@ -5135,50 +5212,13 @@ export function ManagementApp() {
                 </small>
               </label>
             )}
-            <label className="field full">
-              <span>Forma de quitação ao concluir</span>
-              <select
-                name="paymentPreference"
-                value={serviceDraftPayment}
-                onChange={(event) =>
-                  setServiceDraftPayment(
-                    event.target.value as Booking["paymentPreference"],
-                  )
-                }
-              >
-                <option value="invoice">Gerar fatura</option>
-                <option
-                  value="credit"
-                  disabled={
-                    !serviceDraftCreditEligible ||
-                    serviceDraftCreditBalance <
-                      creditUnitsForService(
-                        serviceDraftType,
-                        serviceDraftTransportDirection,
-                      ) ||
-                    !serviceDraftDog
-                  }
-                >
-                  {serviceDraftCreditEligible && serviceDraftDog
-                    ? `Usar ${creditUnitsForService(
-                        serviceDraftType,
-                        serviceDraftTransportDirection,
-                      )} ${
-                        creditUnitsForService(
-                          serviceDraftType,
-                          serviceDraftTransportDirection,
-                        ) === 1
-                          ? "crédito"
-                          : "créditos"
-                      } (${serviceDraftCreditBalance} disponíveis)`
-                    : "Usar crédito"}
-                </option>
-              </select>
-              <small>
-                Crédito é aceito para creche, banho, banho e tosa e taxi-dog.
-                Sem saldo, a conclusão será interrompida para você revisar.
-              </small>
-            </label>
+            <div className="form-guidance full">
+              <strong>Cobrança decidida depois</strong>
+              <span>
+                Após concluir o atendimento, escolha em Cobranças entre usar
+                créditos disponíveis ou incluir o serviço em uma fatura.
+              </span>
+            </div>
             <label className="field full">
               <span>Observação interna</span>
               <textarea
@@ -5320,9 +5360,13 @@ export function ManagementApp() {
                     );
                   } else if (next === "transport") {
                     setEditDraftPrice(
-                      editDraftTransportDirection === "round_trip"
-                        ? "10.00"
-                        : "5.00",
+                      (
+                        (servicePrices.transport *
+                          (editDraftTransportDirection === "round_trip"
+                            ? 2
+                            : 1)) /
+                        100
+                      ).toFixed(2),
                     );
                   } else {
                     setEditDraftPrice((servicePrices[next] / 100).toFixed(2));
@@ -5397,13 +5441,19 @@ export function ManagementApp() {
                       | "round_trip";
                     setEditDraftTransportDirection(nextDirection);
                     setEditDraftPrice(
-                      nextDirection === "round_trip" ? "10.00" : "5.00",
+                      (
+                        (servicePrices.transport *
+                          (nextDirection === "round_trip" ? 2 : 1)) /
+                        100
+                      ).toFixed(2),
                     );
                   }}
                 >
-                  <option value="one_way">Ida · R$ 5,00</option>
+                  <option value="one_way">
+                    Ida · {formatCurrency(servicePrices.transport)}
+                  </option>
                   <option value="round_trip">
-                    Ida e volta · R$ 10,00
+                    Ida e volta · {formatCurrency(servicePrices.transport * 2)}
                   </option>
                 </select>
               </label>
@@ -5555,21 +5605,10 @@ export function ManagementApp() {
                 required
               />
             </label>
-            <label className="field">
-              <span>Quitação ao concluir</span>
-              <select
-                name="paymentPreference"
-                defaultValue={bookingToEdit.paymentPreference}
-              >
-                <option value="invoice">Gerar fatura</option>
-                <option value="credit">
-                  Usar {creditUnitsForService(editDraftType, editDraftTransportDirection)}{" "}
-                  {creditUnitsForService(editDraftType, editDraftTransportDirection) === 1
-                    ? "crédito"
-                    : "créditos"}
-                </option>
-              </select>
-            </label>
+            <div className="form-guidance">
+              <strong>Cobrança após a conclusão</strong>
+              <span>Créditos ou fatura serão escolhidos em Cobranças.</span>
+            </div>
             <label className="field full">
               <span>Observação interna</span>
               <textarea
@@ -6075,6 +6114,20 @@ export function ManagementApp() {
                   <input
                     name="recurrenceScope"
                     type="radio"
+                    value="future"
+                  />
+                  <span>
+                    <strong>Deste dia em diante</strong>
+                    <small>
+                      Mantém as ocorrências anteriores e cancela esta e as
+                      próximas semanas.
+                    </small>
+                  </span>
+                </label>
+                <label className="radio-option">
+                  <input
+                    name="recurrenceScope"
+                    type="radio"
                     value="series"
                   />
                   <span>
@@ -6154,17 +6207,149 @@ export function ManagementApp() {
           }}
           onIssue={issueInvoice}
           onRegisterPayment={registerInvoicePayment}
+          onReversePayment={reverseInvoicePayment}
+          onManageSettlement={manageInvoiceSettlement}
           onVoid={voidInvoice}
           onDeliveryConfirmed={markInvoiceDelivered}
           onFeedback={(message) => setToast({ message })}
           longStayDiscountPercent={lodgingPricing.longStayDiscountPercent}
           liveMode={runtimeMode === "ready"}
+          canReversePayment={signedInRole === "owner"}
           busy={
             busyAction === "issue-invoice" ||
             busyAction === "register-invoice-payment" ||
+            busyAction === "reverse-invoice-payment" ||
             busyAction === "void-invoice"
           }
         />
+      )}
+
+      {invoiceCorrection && (
+        <Dialog
+          title={
+            invoiceCorrection.kind === "void"
+              ? "Cancelar esta fatura?"
+              : "Desfazer a união?"
+          }
+          description={
+            invoiceCorrection.kind === "void"
+              ? `A fatura #${invoiceCorrection.invoice.number} será cancelada e os itens voltarão para correção.`
+              : `A fatura #${invoiceCorrection.invoice.number} será cancelada e as faturas originais serão restauradas.`
+          }
+          onClose={() => setInvoiceCorrection(null)}
+          size="small"
+        >
+          {invoiceCorrection.kind === "void" ? (
+            <form
+              className="form-grid"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const reason = String(
+                  new FormData(event.currentTarget).get("reason") ?? "",
+                ).trim();
+                if (!reason) return;
+                void voidInvoice(reason);
+              }}
+            >
+              <label className="field full">
+                <span>Motivo *</span>
+                <textarea
+                  name="reason"
+                  rows={3}
+                  maxLength={500}
+                  autoFocus
+                  required
+                />
+              </label>
+              <div className="dialog-actions full">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => setInvoiceCorrection(null)}
+                >
+                  Voltar
+                </button>
+                <button className="danger-button" type="submit">
+                  Cancelar fatura
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="billing-review">
+              <p className="modal-confirmation-copy">
+                Nenhum pagamento será apagado. Esta operação só é permitida
+                enquanto a fatura unificada ainda estiver em aberto e sem
+                compensação.
+              </p>
+              <div className="dialog-actions">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => setInvoiceCorrection(null)}
+                >
+                  Manter união
+                </button>
+                <button
+                  className="danger-button"
+                  type="button"
+                  onClick={() =>
+                    void reverseInvoiceMerge(
+                      invoiceCorrection.invoice,
+                      true,
+                    )
+                  }
+                >
+                  Restaurar faturas originais
+                </button>
+              </div>
+            </div>
+          )}
+        </Dialog>
+      )}
+
+      {cashExclusionInvoice && (
+        <Dialog
+          title="Desconsiderar recebimento do Caixa?"
+          description={`A fatura #${cashExclusionInvoice.number} continuará paga; somente o cálculo do Caixa será ajustado.`}
+          onClose={() => setCashExclusionInvoice(null)}
+          size="small"
+        >
+          <form
+            className="form-grid"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const reason = String(
+                new FormData(event.currentTarget).get("reason") ?? "",
+              ).trim();
+              if (!reason) return;
+              void toggleInvoiceCash(cashExclusionInvoice, reason);
+            }}
+          >
+            <label className="field full">
+              <span>Motivo *</span>
+              <textarea
+                name="reason"
+                rows={3}
+                maxLength={500}
+                placeholder="Ex.: valor pessoal, não pertence ao movimento do negócio"
+                autoFocus
+                required
+              />
+            </label>
+            <div className="dialog-actions full">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setCashExclusionInvoice(null)}
+              >
+                Voltar
+              </button>
+              <button className="danger-button" type="submit">
+                Desconsiderar do Caixa
+              </button>
+            </div>
+          </form>
+        </Dialog>
       )}
 
       {toast && (
@@ -6510,9 +6695,9 @@ function TodayView({
   receipts: ServiceReceipt[];
   selectedDate: string;
   onDateChange: (value: string) => void;
-  agendaFilter: "all" | "upcoming" | "active" | "completed";
+  agendaFilter: "all" | "upcoming" | "completed";
   setAgendaFilter: (
-    value: "all" | "upcoming" | "active" | "completed",
+    value: "all" | "upcoming" | "completed",
   ) => void;
   agendaServiceFilter: AgendaServiceFilter;
   setAgendaServiceFilter: (value: AgendaServiceFilter) => void;
@@ -6928,13 +7113,12 @@ function AgendaFilters({
   value,
   onChange,
 }: {
-  value: "all" | "upcoming" | "active" | "completed";
-  onChange: (value: "all" | "upcoming" | "active" | "completed") => void;
+  value: "all" | "upcoming" | "completed";
+  onChange: (value: "all" | "upcoming" | "completed") => void;
 }) {
   const filters = [
     ["all", "Todos"],
     ["upcoming", "A iniciar"],
-    ["active", "Em andamento"],
     ["completed", "Concluídos"],
   ] as const;
   return (
@@ -6985,16 +7169,11 @@ function AgendaServiceFilters({
 
 function filterBookings(
   bookings: Booking[],
-  filter: "all" | "upcoming" | "active" | "completed",
+  filter: "all" | "upcoming" | "completed",
 ) {
   if (filter === "upcoming") {
     return bookings.filter((booking) =>
       ["scheduled", "confirmed"].includes(booking.status),
-    );
-  }
-  if (filter === "active") {
-    return bookings.filter((booking) =>
-      ["present", "in_service", "in_transit"].includes(booking.status),
     );
   }
   if (filter === "completed") {
@@ -7182,13 +7361,6 @@ function AgendaCard({
             Recorrência semanal
           </span>
         )}
-        {booking.paymentPreference === "credit" &&
-          booking.settlementStatus !== "credit_used" && (
-            <span className="settlement-note credit">
-              Usará {creditUnits} {creditUnits === 1 ? "crédito" : "créditos"} ao
-              concluir
-            </span>
-          )}
         {booking.settlementStatus === "credit_used" && (
           <span className="settlement-note settled">
             Quitado com {creditUnits} {creditUnits === 1 ? "crédito" : "créditos"}
@@ -7210,9 +7382,7 @@ function AgendaCard({
                   ? "pago"
                   : "aguardando pagamento"}
               </span>
-            ) : ["confirmed", "present", "in_service"].includes(
-                booking.status,
-              ) && onLodgingInvoice ? (
+            ) : booking.status === "confirmed" && onLodgingInvoice ? (
               <button
                 type="button"
                 className="text-button"
@@ -8166,7 +8336,7 @@ function CustomerProfile({
                     </span>
                     <span className="status-pill success">
                       {receipt.deliveryStatus === "sent"
-                        ? "Enviado"
+                        ? "Compartilhado"
                         : "Pronto"}
                     </span>
                   </button>
@@ -8207,6 +8377,7 @@ function BillingView({
   creditPurchases,
   receipts,
   onToggleBillable,
+  onUseCredits,
   onCreateInvoice,
   onOpenInvoice,
   onAddCredits,
@@ -8229,6 +8400,7 @@ function BillingView({
   creditPurchases: CreditPurchase[];
   receipts: ServiceReceipt[];
   onToggleBillable: (service: BillableService) => void;
+  onUseCredits: (service: BillableService) => void | Promise<void>;
   onCreateInvoice: () => void;
   onOpenInvoice: (invoice: Invoice) => void;
   onAddCredits: () => void;
@@ -8251,8 +8423,11 @@ function BillingView({
   const [appliedInvoiceFrom, setAppliedInvoiceFrom] = useState(defaultInvoiceFrom);
   const [appliedInvoiceTo, setAppliedInvoiceTo] = useState(operationalToday);
   const [selectedMergeInvoiceIds, setSelectedMergeInvoiceIds] = useState<string[]>([]);
+  const [mergeSelectionMode, setMergeSelectionMode] = useState(false);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const [mergeDueDate, setMergeDueDate] = useState(operationalToday);
+  const [creditSearch, setCreditSearch] = useState("");
+  const [showZeroCreditAccounts, setShowZeroCreditAccounts] = useState(false);
   const selectedTotal = billableServices
     .filter((item) => selectedBillables.includes(item.id))
     .reduce((total, item) => total + item.amountCents, 0);
@@ -8286,15 +8461,25 @@ function BillingView({
   );
   const receivedTotal = receivedLast30DaysCents ?? recordedPaidTotal;
   const receivedCount = receivedLast30DaysCount ?? paidInvoices.length;
-  const availableCredits = customers.reduce(
-    (total, customer) => total + totalCredits(creditBalances, customer.id),
-    0,
-  );
+  const customersWithCredits = customers.filter(
+    (customer) => totalCredits(creditBalances, customer.id) > 0,
+  ).length;
+  const filteredCreditCustomers = customers.filter((customer) => {
+    const matchesSearch = normalize(customer.name).includes(
+      normalize(creditSearch),
+    );
+    return (
+      matchesSearch &&
+      (showZeroCreditAccounts ||
+        totalCredits(creditBalances, customer.id) > 0)
+    );
+  });
   const awaitingPackages = creditPurchases.filter(
     (purchase) => purchase.status === "awaiting_payment",
   ).length;
   const displayedInvoices = invoices
     .filter((invoice) => {
+      if (invoice.status !== "paid") return true;
       const entryDate =
         invoice.issuedAt ??
         invoice.paidAt ??
@@ -8369,6 +8554,7 @@ function BillingView({
     const merged = await onMergeInvoices(selectedMergeInvoiceIds, mergeDueDate);
     if (!merged) return;
     setSelectedMergeInvoiceIds([]);
+    setMergeSelectionMode(false);
     setMergeDialogOpen(false);
   }
 
@@ -8393,6 +8579,7 @@ function BillingView({
     setAppliedInvoiceFrom(defaultInvoiceFrom);
     setAppliedInvoiceTo(operationalToday);
     setSelectedMergeInvoiceIds([]);
+    setMergeSelectionMode(false);
     setInvoicePeriodOpen(false);
   }
 
@@ -8444,8 +8631,8 @@ function BillingView({
           </small>
         </div>
         <div>
-          <span>Créditos disponíveis</span>
-          <strong>{availableCredits}</strong>
+          <span>Clientes com créditos</span>
+          <strong>{customersWithCredits}</strong>
           <small>{awaitingPackages} pacotes com fatura pendente</small>
         </div>
       </section>
@@ -8475,6 +8662,10 @@ function BillingView({
               <div>
                 <p className="section-kicker">Aguardando faturamento</p>
                 <h2>Serviços concluídos</h2>
+                <small className="panel-heading-note">
+                  Selecione serviços para criar uma fatura ou quite um item com
+                  créditos disponíveis.
+                </small>
               </div>
               <span className="invoice-only-badge">
                 Faturas para compartilhamento
@@ -8490,19 +8681,35 @@ function BillingView({
                   const disabled =
                     service.selectable === false ||
                     (Boolean(first) && first?.customerId !== service.customerId);
+                  const creditType = service.serviceType as
+                    | CreditServiceType
+                    | undefined;
+                  const creditUnits = service.creditUnits ?? 0;
+                  const availableCredits = creditType
+                    ? (creditBalances[service.customerId]?.[creditType] ?? 0)
+                    : 0;
+                  const canUseCredits =
+                    Boolean(service.appointmentItemId) &&
+                    Boolean(creditType) &&
+                    creditServiceTypes.includes(creditType!) &&
+                    creditUnits > 0;
                   return (
-                    <label
+                    <div
                       className={`billable-row service-${billableVisualType(service)}${
                         disabled ? " disabled" : ""
                       }`}
                       key={service.id}
                     >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={disabled}
-                        onChange={() => onToggleBillable(service)}
-                      />
+                      <label className="billable-select">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={disabled}
+                          onChange={() => onToggleBillable(service)}
+                          aria-label={`Selecionar ${service.service} de ${service.dogName} para faturar`}
+                        />
+                        <span className="sr-only">Selecionar para faturar</span>
+                      </label>
                       <span className="billable-date">{service.date}</span>
                       <span className="billable-identity">
                         <strong>{service.dogName}</strong>
@@ -8519,7 +8726,26 @@ function BillingView({
                       <strong className="billable-amount">
                         {formatCurrency(service.amountCents)}
                       </strong>
-                    </label>
+                      {canUseCredits && (
+                        <button
+                          type="button"
+                          className="text-button billable-credit-action"
+                          disabled={availableCredits < creditUnits}
+                          onClick={() => void onUseCredits(service)}
+                          title={
+                            availableCredits < creditUnits
+                              ? `Saldo atual: ${availableCredits}`
+                              : `Saldo após o uso: ${availableCredits - creditUnits}`
+                          }
+                        >
+                          {availableCredits < creditUnits
+                            ? "Sem saldo"
+                            : `Usar ${creditUnits} ${
+                                creditUnits === 1 ? "crédito" : "créditos"
+                              }`}
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -8535,7 +8761,9 @@ function BillingView({
             <div className="panel-heading">
               <div>
                 <p className="section-kicker">
-                  {isDefaultInvoicePeriod ? "Últimos 7 dias" : "Período consultado"}
+                  {isDefaultInvoicePeriod
+                    ? "Pendentes + pagos nos últimos 7 dias"
+                    : "Pendentes + pagos no período"}
                 </p>
                 <h2>Cobranças recentes</h2>
                 <small className="audit-period-label">
@@ -8592,27 +8820,53 @@ function BillingView({
               </form>
             )}
             <div className="invoice-merge-toolbar">
-              <span>
-                {selectedMergeInvoiceIds.length
-                  ? `${selectedMergeInvoiceIds.length} faturas selecionadas`
-                  : "Selecione faturas abertas do mesmo cliente para unificar"}
-              </span>
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={selectedMergeInvoiceIds.length < 2}
-                onClick={openMergeDialog}
-              >
-                Unificar selecionadas
-              </button>
+              {mergeSelectionMode ? (
+                <>
+                  <span>
+                    {selectedMergeInvoiceIds.length
+                      ? `${selectedMergeInvoiceIds.length} faturas selecionadas`
+                      : "Selecione faturas abertas do mesmo cliente"}
+                  </span>
+                  <div>
+                    <button
+                      type="button"
+                      className="text-button muted"
+                      onClick={() => {
+                        setSelectedMergeInvoiceIds([]);
+                        setMergeSelectionMode(false);
+                      }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={selectedMergeInvoiceIds.length < 2}
+                      onClick={openMergeDialog}
+                    >
+                      Unificar selecionadas
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => setMergeSelectionMode(true)}
+                >
+                  Unificar faturas
+                </button>
+              )}
             </div>
             <div className="table-wrap">
               <table className="data-table invoices-table">
                 <thead>
                   <tr>
-                    <th>
-                      <span className="sr-only">Selecionar para unificar</span>
-                    </th>
+                    {mergeSelectionMode && (
+                      <th>
+                        <span className="sr-only">Selecionar para unificar</span>
+                      </th>
+                    )}
                     <th>Número</th>
                     <th>Cliente</th>
                     <th>Itens</th>
@@ -8633,7 +8887,7 @@ function BillingView({
                     return (
                     <Fragment key={invoice.id}>
                     <tr>
-                      <td className="invoice-merge-select-cell">
+                      {mergeSelectionMode && <td className="invoice-merge-select-cell">
                         <input
                           type="checkbox"
                           checked={selectedMergeInvoiceIds.includes(invoice.id)}
@@ -8648,7 +8902,7 @@ function BillingView({
                                   : undefined
                           }
                         />
-                      </td>
+                      </td>}
                       <td>#{invoice.number}</td>
                       <td>
                         <strong>{invoice.customerName}</strong>
@@ -8716,7 +8970,7 @@ function BillingView({
                     </tr>
                     {noteEditorInvoiceId === invoice.id && (
                       <tr className="invoice-note-editor-row">
-                        <td colSpan={10}>
+                        <td colSpan={mergeSelectionMode ? 10 : 9}>
                           <form
                             className="invoice-entry-note-editor"
                             onSubmit={(event) => {
@@ -8759,7 +9013,7 @@ function BillingView({
                   className={`mobile-data-card invoice-${invoice.status}`}
                   key={`mobile-${invoice.id}`}
                 >
-                  <label className="invoice-merge-select-mobile">
+                  {mergeSelectionMode && <label className="invoice-merge-select-mobile">
                     <input
                       type="checkbox"
                       checked={selectedMergeInvoiceIds.includes(invoice.id)}
@@ -8767,7 +9021,7 @@ function BillingView({
                       onChange={() => toggleMergeInvoice(invoice)}
                     />
                     Selecionar para unificar
-                  </label>
+                  </label>}
                   <button
                     className="mobile-card-main"
                     onClick={() => onOpenInvoice(invoice)}
@@ -8879,9 +9133,28 @@ function BillingView({
                 <p className="section-kicker">Saldos atuais</p>
                 <h2>Créditos por cliente</h2>
               </div>
+              <div className="credit-balance-tools">
+                <input
+                  type="search"
+                  value={creditSearch}
+                  onChange={(event) => setCreditSearch(event.target.value)}
+                  placeholder="Buscar cliente"
+                  aria-label="Buscar cliente nos saldos de créditos"
+                />
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={showZeroCreditAccounts}
+                    onChange={(event) =>
+                      setShowZeroCreditAccounts(event.target.checked)
+                    }
+                  />
+                  Mostrar saldos zerados
+                </label>
+              </div>
             </div>
             <div className="credit-balance-grid">
-              {customers.map((customer) => {
+              {filteredCreditCustomers.map((customer) => {
                 const balance = creditBalances[customer.id] ?? {
                   daycare: 0,
                   bath: 0,
@@ -8918,6 +9191,12 @@ function BillingView({
                 );
               })}
             </div>
+            {!filteredCreditCustomers.length && (
+              <EmptyState
+                title="Nenhum saldo encontrado"
+                description="Ajuste a busca ou mostre também os saldos zerados."
+              />
+            )}
           </section>
 
           <section className="panel full-panel">
@@ -9001,7 +9280,9 @@ function BillingView({
                     </small>
                   </span>
                   <span className="status-pill success">
-                    {receipt.deliveryStatus === "sent" ? "Enviado" : "Pronto"}
+                    {receipt.deliveryStatus === "sent"
+                      ? "Compartilhado"
+                      : "Pronto"}
                   </span>
                 </button>
               ))}
@@ -9132,7 +9413,7 @@ function SettingsView({
     {
       serviceType: "transport",
       title: "Taxi-dog · ida",
-      description: "Valor padrão para uma ida (ida e volta: R$ 10,00).",
+      description: "Valor padrão para uma ida; ida e volta usa o dobro.",
       unit: "por ida",
     },
   ];
@@ -9291,7 +9572,7 @@ function InvoiceDeliveryStatus({
   const channels = invoice.sentBy ?? [];
   if (!channels.length) {
     return compact ? (
-      <span className="invoice-delivery-state not-sent">Ainda não enviada</span>
+      <span className="invoice-delivery-state not-sent">Não compartilhada</span>
     ) : (
       <span className="invoice-delivery-empty">—</span>
     );
@@ -9300,7 +9581,9 @@ function InvoiceDeliveryStatus({
     <span className={`invoice-delivery-state${compact ? " compact" : ""}`}>
       {channels.map((channel) => (
         <span className={`delivery-channel ${channel}`} key={channel}>
-          {channel === "whatsapp" ? "Enviada por WhatsApp" : "Enviada por e-mail"}
+          {channel === "whatsapp"
+            ? "Compartilhamento por WhatsApp preparado"
+            : "Compartilhamento por e-mail preparado"}
         </span>
       ))}
     </span>
@@ -10300,11 +10583,14 @@ function InvoiceDialog({
   onClose,
   onIssue,
   onRegisterPayment,
+  onReversePayment,
+  onManageSettlement,
   onVoid,
   onDeliveryConfirmed,
   onFeedback,
   longStayDiscountPercent,
   liveMode,
+  canReversePayment,
   busy,
 }: {
   state: InvoiceState;
@@ -10315,6 +10601,12 @@ function InvoiceDialog({
     settlementMode?: "immediate" | "schedule" | "confirm_scheduled",
     availableOn?: string,
   ) => void | Promise<void>;
+  onReversePayment: (reason: string) => boolean | Promise<boolean>;
+  onManageSettlement: (
+    action: "update" | "cancel",
+    availableOn?: string,
+    reason?: string,
+  ) => boolean | Promise<boolean>;
   onVoid: () => void | Promise<void>;
   onDeliveryConfirmed: (
     invoiceId: string,
@@ -10323,6 +10615,7 @@ function InvoiceDialog({
   onFeedback: (message: string) => void;
   longStayDiscountPercent: number;
   liveMode: boolean;
+  canReversePayment: boolean;
   busy: boolean;
 }) {
   const [deliveryBusy, setDeliveryBusy] =
@@ -10333,6 +10626,13 @@ function InvoiceDialog({
   );
   const [availableOn, setAvailableOn] = useState(shiftDate(operationalToday, 1));
   const [skipLongStayDiscount, setSkipLongStayDiscount] = useState(false);
+  const [reversePaymentOpen, setReversePaymentOpen] = useState(false);
+  const [reversePaymentReason, setReversePaymentReason] = useState("");
+  const [settlementEditorOpen, setSettlementEditorOpen] = useState(false);
+  const [settlementDate, setSettlementDate] = useState(
+    state.invoice?.compensationAvailableOn ?? shiftDate(operationalToday, 1),
+  );
+  const [settlementCancelReason, setSettlementCancelReason] = useState("");
 
   async function handleDelivery(channel: InvoiceDeliveryChannel) {
     if (deliveryBusy) return;
@@ -10346,7 +10646,7 @@ function InvoiceDialog({
           const recorded = await onDeliveryConfirmed(state.invoice.id, channel);
           onFeedback(
             recorded
-              ? `Envio por ${channel === "whatsapp" ? "WhatsApp" : "e-mail"} registrado.`
+              ? `Compartilhamento por ${channel === "whatsapp" ? "WhatsApp" : "e-mail"} preparado e registrado.`
               : "O compartilhamento foi concluído, mas não foi possível registrar o canal.",
           );
         } else {
@@ -10644,6 +10944,78 @@ function InvoiceDialog({
               <span>
                 Previsto para ficar disponível em {formatShortDate(compensationAvailableOn)}.
               </span>
+              {!settlementEditorOpen && (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => setSettlementEditorOpen(true)}
+                >
+                  Alterar previsão
+                </button>
+              )}
+            </div>
+          )}
+
+          {!isPaid && compensationAvailableOn && settlementEditorOpen && (
+            <div className="settlement-editor">
+              <label>
+                <span>Nova data prevista</span>
+                <BrazilianDateInput
+                  value={settlementDate}
+                  min={operationalToday}
+                  onChange={setSettlementDate}
+                  ariaLabel="Nova data prevista para compensação"
+                />
+              </label>
+              <label>
+                <span>Motivo para cancelar a compensação</span>
+                <input
+                  value={settlementCancelReason}
+                  onChange={(event) =>
+                    setSettlementCancelReason(event.target.value)
+                  }
+                  maxLength={500}
+                  placeholder="Preencha somente se desejar cancelar"
+                />
+              </label>
+              <div>
+                <button
+                  type="button"
+                  className="text-button muted"
+                  onClick={() => setSettlementEditorOpen(false)}
+                  disabled={busy}
+                >
+                  Fechar
+                </button>
+                <button
+                  type="button"
+                  className="danger-button"
+                  disabled={busy || settlementCancelReason.trim().length < 3}
+                  onClick={() =>
+                    void onManageSettlement(
+                      "cancel",
+                      undefined,
+                      settlementCancelReason.trim(),
+                    )
+                  }
+                >
+                  Cancelar compensação
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy || !settlementDate}
+                  onClick={async () => {
+                    const updated = await onManageSettlement(
+                      "update",
+                      settlementDate,
+                    );
+                    if (updated) setSettlementEditorOpen(false);
+                  }}
+                >
+                  Salvar data
+                </button>
+              </div>
             </div>
           )}
 
@@ -10687,6 +11059,59 @@ function InvoiceDialog({
             </div>
           )}
 
+          {isPaid && canReversePayment && reversePaymentOpen && (
+            <form
+              className="invoice-reversal-form"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                const reason = reversePaymentReason.trim();
+                if (reason.length < 3) return;
+                await onReversePayment(reason);
+              }}
+            >
+              <label>
+                <span>Motivo do estorno *</span>
+                <textarea
+                  value={reversePaymentReason}
+                  onChange={(event) =>
+                    setReversePaymentReason(event.target.value)
+                  }
+                  rows={2}
+                  minLength={3}
+                  maxLength={500}
+                  placeholder="Ex.: pagamento registrado por engano"
+                  autoFocus
+                  required
+                />
+              </label>
+              <p>
+                A fatura voltará a ficar em aberto. O lançamento do Caixa e
+                eventuais créditos liberados serão revertidos, preservando o
+                histórico.
+              </p>
+              <div>
+                <button
+                  className="text-button muted"
+                  type="button"
+                  onClick={() => {
+                    setReversePaymentOpen(false);
+                    setReversePaymentReason("");
+                  }}
+                  disabled={busy}
+                >
+                  Cancelar
+                </button>
+                <button
+                  className="danger-button"
+                  type="submit"
+                  disabled={busy || reversePaymentReason.trim().length < 3}
+                >
+                  {busy ? "Estornando…" : "Confirmar estorno"}
+                </button>
+              </div>
+            </form>
+          )}
+
           <div className="dialog-actions">
             {!isPaid && (
               <button className="danger-button" type="button" onClick={onVoid}>
@@ -10696,6 +11121,15 @@ function InvoiceDialog({
             <button className="secondary-button" type="button" onClick={onClose}>
               Fechar
             </button>
+            {isPaid && canReversePayment && !reversePaymentOpen && (
+              <button
+                className="danger-button"
+                type="button"
+                onClick={() => setReversePaymentOpen(true)}
+              >
+                Estornar pagamento
+              </button>
+            )}
             {!isPaid && (
               <button
                 className="primary-button"

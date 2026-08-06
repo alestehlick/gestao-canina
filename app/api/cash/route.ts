@@ -155,6 +155,7 @@ export async function GET(request: Request) {
             INNER JOIN invoice_payments ip ON ip.invoice_id = i.id
             INNER JOIN cash_entries ce ON ce.source_payment_id = ip.id
             WHERE i.establishment_id = ?
+              AND ip.status = 'active'
               AND ce.status = 'included'
               AND ce.occurred_on BETWEEN ? AND ?`,
           )
@@ -183,10 +184,16 @@ export async function GET(request: Request) {
               COALESCE(SUM(cp.amount_cents), 0) AS credit_sold_cents
             FROM credit_purchases cp
             INNER JOIN service_catalog sc ON sc.id = cp.service_catalog_id
-            INNER JOIN invoice_payments ip ON ip.invoice_id = cp.invoice_id
+            LEFT JOIN invoice_merge_members imm
+              ON imm.source_invoice_id = cp.invoice_id
+            LEFT JOIN invoice_merges im
+              ON im.id = imm.merge_id AND im.status = 'active'
+            INNER JOIN invoice_payments ip
+              ON ip.invoice_id = COALESCE(im.merged_invoice_id, cp.invoice_id)
             INNER JOIN cash_entries ce ON ce.source_payment_id = ip.id
             WHERE cp.establishment_id = ?
               AND cp.status = 'paid'
+              AND ip.status = 'active'
               AND ce.status = 'included'
               AND ce.occurred_on BETWEEN ? AND ?
             GROUP BY sc.code`,

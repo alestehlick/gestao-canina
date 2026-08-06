@@ -493,9 +493,6 @@ export const appointments = sqliteTable(
       enum: [
         "scheduled",
         "confirmed",
-        "in_transit",
-        "present",
-        "in_service",
         "completed",
         "cancelled",
       ],
@@ -995,20 +992,40 @@ export const invoicePayments = sqliteTable(
       .references(() => invoices.id, { onDelete: "restrict" }),
     amountCents: integer("amount_cents").notNull(),
     method: text("method", { enum: ["manual"] }).notNull().default("manual"),
+    status: text("status", { enum: ["active", "reversed"] })
+      .notNull()
+      .default("active"),
     note: text("note"),
     paidAt: text("paid_at").notNull(),
     recordedByUserId: text("recorded_by_user_id").references(() => appUsers.id, {
       onDelete: "set null",
     }),
+    reversedAt: text("reversed_at"),
+    reversalReason: text("reversal_reason"),
+    reversedByUserId: text("reversed_by_user_id").references(
+      () => appUsers.id,
+      { onDelete: "set null" },
+    ),
     createdAt: text("created_at").notNull().default(now),
   },
   (table) => [
-    uniqueIndex("invoice_payments_invoice_unique").on(table.invoiceId),
+    uniqueIndex("invoice_payments_invoice_active_unique")
+      .on(table.invoiceId)
+      .where(sql`${table.status} = 'active'`),
     index("invoice_payments_invoice_paid_idx").on(
       table.invoiceId,
       table.paidAt,
     ),
+    index("invoice_payments_establishment_status_idx").on(
+      table.establishmentId,
+      table.status,
+      table.paidAt,
+    ),
     check("invoice_payments_amount_positive", sql`${table.amountCents} > 0`),
+    check(
+      "invoice_payments_reversal_valid",
+      sql`(${table.status} = 'active' and ${table.reversedAt} is null and ${table.reversalReason} is null) or (${table.status} = 'reversed' and ${table.reversedAt} is not null and ${table.reversalReason} is not null)`,
+    ),
   ],
 );
 
@@ -1025,7 +1042,7 @@ export const invoiceSettlements = sqliteTable(
     amountCents: integer("amount_cents").notNull(),
     availableOn: text("available_on").notNull(),
     note: text("note"),
-    status: text("status", { enum: ["scheduled", "cancelled"] })
+    status: text("status", { enum: ["scheduled", "confirmed", "cancelled"] })
       .notNull()
       .default("scheduled"),
     createdByUserId: text("created_by_user_id").references(
@@ -1033,11 +1050,23 @@ export const invoiceSettlements = sqliteTable(
       { onDelete: "set null" },
     ),
     cancelledAt: text("cancelled_at"),
+    cancelledByUserId: text("cancelled_by_user_id").references(
+      () => appUsers.id,
+      { onDelete: "set null" },
+    ),
+    cancellationReason: text("cancellation_reason"),
+    confirmedAt: text("confirmed_at"),
+    confirmedByUserId: text("confirmed_by_user_id").references(
+      () => appUsers.id,
+      { onDelete: "set null" },
+    ),
     createdAt: text("created_at").notNull().default(now),
     updatedAt: text("updated_at").notNull().default(now),
   },
   (table) => [
-    uniqueIndex("invoice_settlements_invoice_unique").on(table.invoiceId),
+    uniqueIndex("invoice_settlements_invoice_scheduled_unique")
+      .on(table.invoiceId)
+      .where(sql`${table.status} = 'scheduled'`),
     index("invoice_settlements_establishment_available_idx").on(
       table.establishmentId,
       table.status,
@@ -1046,7 +1075,7 @@ export const invoiceSettlements = sqliteTable(
     check("invoice_settlements_amount_positive", sql`${table.amountCents} > 0`),
     check(
       "invoice_settlements_cancelled_valid",
-      sql`(${table.status} = 'cancelled' and ${table.cancelledAt} is not null) or (${table.status} = 'scheduled' and ${table.cancelledAt} is null)`,
+      sql`(${table.status} = 'cancelled' and ${table.cancelledAt} is not null and ${table.cancellationReason} is not null and ${table.confirmedAt} is null) or (${table.status} = 'confirmed' and ${table.confirmedAt} is not null and ${table.cancelledAt} is null) or (${table.status} = 'scheduled' and ${table.cancelledAt} is null and ${table.confirmedAt} is null)`,
     ),
   ],
 );

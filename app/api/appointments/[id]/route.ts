@@ -17,22 +17,13 @@ import {
   readJsonObject,
   requiredString,
 } from "@/lib/server/http";
-
-const appointmentStatuses = [
-  "scheduled",
-  "confirmed",
-  "in_transit",
-  "present",
-  "in_service",
-  "completed",
-  "cancelled",
-] as const;
-
-type AppointmentStatus = (typeof appointmentStatuses)[number];
-
-function isAppointmentStatus(value: string): value is AppointmentStatus {
-  return appointmentStatuses.includes(value as AppointmentStatus);
-}
+import {
+  canTransitionAppointment,
+  isCanonicalAppointmentStatus,
+  taxiDogPriceCents,
+  todayInSaoPaulo,
+  type CanonicalAppointmentStatus,
+} from "@/lib/service-rules";
 
 const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
 const operationalTimePattern = /^(?:\d{2}:\d{2}|manha|tarde|noite)$/;
@@ -108,12 +99,14 @@ async function hasActiveInvoiceBilling(
 async function cancelRecurringSeries({
   appointment,
   cancellationReason,
+  recurrenceScope,
   establishmentId,
   identity,
   requestId,
 }: {
   appointment: typeof appointments.$inferSelect;
   cancellationReason: string;
+  recurrenceScope: "future" | "series";
   establishmentId: string;
   identity: Awaited<ReturnType<typeof requireIdentity>>;
   requestId: string;
@@ -127,16 +120,23 @@ async function cancelRecurringSeries({
   }
 
   const d1 = getD1Database();
+  const cancellationFrom =
+    recurrenceScope === "future" ? appointment.startDate : "0000-00-00";
   const seriesRows = await d1
     .prepare(
       `SELECT a.id
       FROM appointments a
       WHERE a.establishment_id = ?
         AND a.recurring_schedule_id = ?
+        AND a.start_date >= ?
         AND a.status NOT IN ('completed', 'cancelled')
       ORDER BY a.start_date, a.start_time`,
     )
-    .bind(establishmentId, appointment.recurringScheduleId)
+    .bind(
+      establishmentId,
+      appointment.recurringScheduleId,
+      cancellationFrom,
+    )
     .all<{ id: string }>();
   const appointmentIds = seriesRows.results.map((row) => row.id);
   if (appointmentIds.length === 0) {
@@ -167,6 +167,7 @@ async function cancelRecurringSeries({
           FROM appointments open_a
           WHERE open_a.recurring_schedule_id = rs.id
             AND open_a.establishment_id = rs.establishment_id
+            AND open_a.start_date >= ?
             AND open_a.status NOT IN ('completed', 'cancelled')
         )
         AND NOT EXISTS (
@@ -180,6 +181,7 @@ async function cancelRecurringSeries({
             ON locked_i.id = locked_ii.invoice_id
           WHERE locked_a.recurring_schedule_id = rs.id
             AND locked_a.establishment_id = rs.establishment_id
+            AND locked_a.start_date >= ?
             AND locked_a.status NOT IN ('completed', 'cancelled')
             AND (
               locked_ai.active_invoice_id IS NOT NULL
@@ -197,9 +199,12 @@ async function cancelRecurringSeries({
       JSON.stringify({
         appointmentIds,
         occurrenceCount: appointmentIds.length,
+        recurrenceScope,
       }),
       appointment.recurringScheduleId,
       establishmentId,
+      cancellationFrom,
+      cancellationFrom,
     );
   const results = await d1.batch([
     guardInsert,
@@ -214,11 +219,17 @@ async function cancelRecurringSeries({
             FROM appointments a
             WHERE a.establishment_id = ?
               AND a.recurring_schedule_id = ?
+              AND a.start_date >= ?
               AND a.status NOT IN ('completed', 'cancelled')
           )
           AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)`,
       )
-      .bind(establishmentId, appointment.recurringScheduleId, auditId),
+      .bind(
+        establishmentId,
+        appointment.recurringScheduleId,
+        cancellationFrom,
+        auditId,
+      ),
     d1
       .prepare(
         `UPDATE appointments
@@ -227,6 +238,7 @@ async function cancelRecurringSeries({
           updated_at = ${nowExpression}
         WHERE establishment_id = ?
           AND recurring_schedule_id = ?
+          AND start_date >= ?
           AND status NOT IN ('completed', 'cancelled')
           AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)`,
       )
@@ -234,6 +246,7 @@ async function cancelRecurringSeries({
         cancellationReason,
         establishmentId,
         appointment.recurringScheduleId,
+        cancellationFrom,
         auditId,
       ),
     d1
@@ -683,7 +696,7 @@ export async function PATCH(
       body.status === undefined
         ? null
         : requiredString(body, "status", 30);
-    if (requestedStatus !== null && !isAppointmentStatus(requestedStatus)) {
+    if (requestedStatus !== null && !isCanonicalAppointmentStatus(requestedStatus)) {
       throw new HttpError(
         400,
         "invalid_status",
@@ -701,12 +714,13 @@ export async function PATCH(
         : requiredString(body, "recurrenceScope", 20);
     if (
       recurrenceScope !== "occurrence" &&
+      recurrenceScope !== "future" &&
       recurrenceScope !== "series"
     ) {
       throw new HttpError(
         400,
         "invalid_recurrence_scope",
-        "Escolha cancelar somente este dia ou toda a recorrência.",
+        "Escolha cancelar este dia, deste dia em diante ou toda a recorrência.",
       );
     }
     if (requestedStatus === "cancelled" && !cancellationReason) {
@@ -793,10 +807,6 @@ export async function PATCH(
         body.serviceCatalogId === undefined
           ? item.serviceCatalogId
           : optionalString(body, "serviceCatalogId", 80);
-      const paymentPreference =
-        body.paymentPreference === undefined
-          ? item.paymentPreference
-          : body.paymentPreference;
       const requestedPriceCents =
         body.priceCents === undefined ? item.totalCents : body.priceCents;
 
@@ -817,16 +827,6 @@ export async function PATCH(
           400,
           "invalid_schedule",
           "Revise a data e os horários do serviço.",
-        );
-      }
-      if (
-        paymentPreference !== "invoice" &&
-        paymentPreference !== "credit"
-      ) {
-        throw new HttpError(
-          400,
-          "invalid_payment_preference",
-          "Escolha fatura ou crédito para o pagamento.",
         );
       }
       if (
@@ -948,21 +948,56 @@ export async function PATCH(
                 (lodgingNights ?? 1),
             )
           : service.code === "taxi_dog"
-            ? direction === "round_trip"
-              ? 1_000
-              : 500
+            ? taxiDogPriceCents(service.basePriceCents, direction)
             : service.basePriceCents;
       const priceCents =
         identity.role === "owner" ? requestedPriceCents : catalogPriceCents;
-      if (
-        paymentPreference === "credit" &&
-        !["daycare", "bath", "bath_grooming", "taxi_dog"].includes(service.code)
-      ) {
+      const duplicate = await getD1Database()
+        .prepare(
+          `SELECT 1 AS found
+          FROM appointments a
+          INNER JOIN appointment_items ai ON ai.appointment_id = a.id
+          WHERE a.establishment_id = ? AND a.dog_id = ?
+            AND a.id <> ? AND a.status <> 'cancelled'
+            AND a.start_date = ? AND ai.service_catalog_id = ?
+          LIMIT 1`,
+        )
+        .bind(establishmentId, appointment.dogId, id, startDate, service.id)
+        .first<{ found: number }>();
+      if (duplicate) {
         throw new HttpError(
-          400,
-          "service_not_credit_eligible",
-          "Este serviço não pode ser pago com créditos.",
+          409,
+          "duplicate_appointment",
+          `Já existe um agendamento de ${service.name} para este cão nessa data.`,
         );
+      }
+      if (service.code === "hotel") {
+        const lodgingOverlap = await getD1Database()
+          .prepare(
+            `SELECT a.id
+            FROM appointments a
+            INNER JOIN appointment_items ai ON ai.appointment_id = a.id
+            INNER JOIN service_catalog sc ON sc.id = ai.service_catalog_id
+            WHERE a.establishment_id = ? AND a.dog_id = ?
+              AND a.id <> ? AND a.status <> 'cancelled' AND sc.code = 'hotel'
+              AND a.start_date <= ? AND a.end_date >= ?
+            LIMIT 1`,
+          )
+          .bind(
+            establishmentId,
+            appointment.dogId,
+            id,
+            endDate,
+            startDate,
+          )
+          .first<{ id: string }>();
+        if (lodgingOverlap) {
+          throw new HttpError(
+            409,
+            "lodging_overlap",
+            "Este cão já possui uma hospedagem que se sobrepõe ao período escolhido.",
+          );
+        }
       }
 
       const now = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
@@ -1000,7 +1035,6 @@ export async function PATCH(
                 : service.code === "hotel" && depositPercent
                   ? `Sinal de ${depositPercent}% no check-in; saldo no check-out.`
                   : null,
-            paymentPreference,
             updatedAt: now,
           })
           .where(eq(appointmentItems.id, item.id)),
@@ -1030,7 +1064,7 @@ export async function PATCH(
           serviceCatalogId: service.id,
           serviceName: service.name,
           priceCents,
-          paymentPreference,
+          paymentPreference: item.paymentPreference,
           transportDirection:
             service.code === "taxi_dog" ? direction : null,
         },
@@ -1045,6 +1079,19 @@ export async function PATCH(
         },
         idempotent: true,
       });
+    }
+
+    if (
+      !canTransitionAppointment(
+        appointment.status as CanonicalAppointmentStatus,
+        requestedStatus as CanonicalAppointmentStatus,
+      )
+    ) {
+      throw new HttpError(
+        409,
+        "invalid_status_transition",
+        "A situação deste atendimento mudou. Atualize a Agenda antes de continuar.",
+      );
     }
     if (
       appointment.status === "completed" &&
@@ -1073,11 +1120,12 @@ export async function PATCH(
 
     if (
       requestedStatus === "cancelled" &&
-      recurrenceScope === "series"
+      (recurrenceScope === "series" || recurrenceScope === "future")
     ) {
       const result = await cancelRecurringSeries({
         appointment,
         cancellationReason: cancellationReason!,
+        recurrenceScope,
         establishmentId,
         identity,
         requestId,
@@ -1094,17 +1142,21 @@ export async function PATCH(
     }
 
     if (requestedStatus === "completed") {
-      const pendingCreditItems = items.filter(
-        (item) =>
-          item.status === "scheduled" &&
-          item.paymentPreference === "credit" &&
-          item.settlementMethod !== "credit",
-      );
-      if (pendingCreditItems.length > 0) {
+      const lodging = await getD1Database()
+        .prepare(
+          `SELECT 1 AS found
+          FROM appointment_items ai
+          INNER JOIN service_catalog sc ON sc.id = ai.service_catalog_id
+          WHERE ai.appointment_id = ? AND sc.code = 'hotel'
+          LIMIT 1`,
+        )
+        .bind(id)
+        .first<{ found: number }>();
+      if (lodging && appointment.endDate > todayInSaoPaulo()) {
         throw new HttpError(
           409,
-          "credit_settlement_required",
-          "Use o crédito disponível antes de concluir este serviço.",
+          "lodging_checkout_not_reached",
+          "A hospedagem só pode ser concluída no dia do checkout. Para uma saída antecipada, edite primeiro a data de saída e as diárias.",
         );
       }
     }

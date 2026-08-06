@@ -15,6 +15,7 @@ import {
   readJsonObject,
   requiredString,
 } from "@/lib/server/http";
+import { taxiDogPriceCents } from "@/lib/service-rules";
 
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
 const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
@@ -126,18 +127,6 @@ export async function POST(request: Request) {
         "Informe uma duração entre 1 e 52 semanas.",
       );
     }
-    const paymentPreference =
-      body.paymentPreference === undefined ? "invoice" : body.paymentPreference;
-    if (
-      paymentPreference !== "invoice" &&
-      paymentPreference !== "credit"
-    ) {
-      throw new HttpError(
-        400,
-        "invalid_payment_preference",
-        "Escolha fatura ou crédito para o pagamento.",
-      );
-    }
     const customPriceCents =
       body.priceCents === undefined ? null : body.priceCents;
     if (
@@ -222,14 +211,11 @@ export async function POST(request: Request) {
         "Cão ou serviço não encontrado.",
       );
     }
-    if (
-      paymentPreference === "credit" &&
-      !["daycare", "bath", "bath_grooming", "taxi_dog"].includes(service.code)
-    ) {
+    if (recurrence === "weekly" && service.code === "hotel") {
       throw new HttpError(
         400,
-        "service_not_credit_eligible",
-        "Este serviço não pode ser pago com créditos.",
+        "lodging_recurrence_not_supported",
+        "Hospedagens devem ser agendadas individualmente para preservar datas, diárias e valores.",
       );
     }
 
@@ -273,9 +259,7 @@ export async function POST(request: Request) {
     const direction = body.transportDirection === "round_trip" ? "round_trip" : "one_way";
     const catalogPriceCents =
       service.code === "taxi_dog"
-        ? direction === "round_trip"
-          ? 1_000
-          : 500
+        ? taxiDogPriceCents(service.basePriceCents, direction)
         : service.code === "hotel"
           ? Math.round(
               lodgingDailyRateCents(establishment, lodgingRateProfile!) *
@@ -299,6 +283,50 @@ export async function POST(request: Request) {
       startDate: occurrenceStartDate,
       endDate: shiftIsoDate(occurrenceStartDate, durationDays),
     }));
+
+    const existingDuplicate = await getD1Database()
+      .prepare(
+        `SELECT a.start_date AS startDate
+        FROM appointments a
+        INNER JOIN appointment_items ai ON ai.appointment_id = a.id
+        WHERE a.establishment_id = ?
+          AND a.dog_id = ?
+          AND ai.service_catalog_id = ?
+          AND a.status <> 'cancelled'
+          AND a.start_date IN (${occurrenceDates.map(() => "?").join(", ")})
+        LIMIT 1`,
+      )
+      .bind(establishmentId, dog.id, service.id, ...occurrenceDates)
+      .first<{ startDate: string }>();
+    if (existingDuplicate) {
+      throw new HttpError(
+        409,
+        "duplicate_appointment",
+        `Já existe um agendamento de ${service.name} para este cão nessa data. Revise a Agenda antes de continuar.`,
+      );
+    }
+    if (service.code === "hotel") {
+      const lodgingOverlap = await getD1Database()
+        .prepare(
+          `SELECT a.id
+          FROM appointments a
+          INNER JOIN appointment_items ai ON ai.appointment_id = a.id
+          INNER JOIN service_catalog sc ON sc.id = ai.service_catalog_id
+          WHERE a.establishment_id = ? AND a.dog_id = ?
+            AND a.status <> 'cancelled' AND sc.code = 'hotel'
+            AND a.start_date <= ? AND a.end_date >= ?
+          LIMIT 1`,
+        )
+        .bind(establishmentId, dog.id, endDate, startDate)
+        .first<{ id: string }>();
+      if (lodgingOverlap) {
+        throw new HttpError(
+          409,
+          "lodging_overlap",
+          "Este cão já possui uma hospedagem que se sobrepõe ao período escolhido.",
+        );
+      }
+    }
     const description =
       service.code === "taxi_dog"
         ? direction === "round_trip"
@@ -409,7 +437,7 @@ export async function POST(request: Request) {
               description,
               priceCents,
               priceCents,
-              paymentPreference,
+              "invoice",
             ]),
           ),
       );
@@ -441,7 +469,6 @@ export async function POST(request: Request) {
             occurrenceCount: createdAppointments.length,
             dogId: dog.id,
             serviceCatalogId: service.id,
-            paymentPreference,
             transportDirection:
               service.code === "taxi_dog" ? direction : null,
             lodgingNights:
@@ -469,7 +496,7 @@ export async function POST(request: Request) {
           startTime,
           endTime,
           status: "scheduled",
-          paymentPreference,
+          paymentPreference: "invoice",
           settlementMethod: "unsettled",
           recurringScheduleId,
         },

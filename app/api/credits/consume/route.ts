@@ -19,6 +19,7 @@ import {
   readJsonObject,
   requiredString,
 } from "@/lib/server/http";
+import { creditUnitsForServiceCode } from "@/lib/service-rules";
 
 const creditServiceCodes = new Set([
   "daycare",
@@ -111,13 +112,13 @@ export async function POST(request: Request) {
       });
     }
     if (
-      item.itemStatus === "cancelled" ||
-      item.appointmentStatus === "cancelled"
+      item.itemStatus !== "completed" ||
+      item.appointmentStatus !== "completed"
     ) {
       throw new HttpError(
         409,
-        "service_cancelled",
-        "Não é possível usar crédito em um serviço cancelado.",
+        "service_not_completed",
+        "Conclua o atendimento antes de decidir usar créditos.",
       );
     }
     if (item.activeInvoiceId || item.settlementMethod === "invoice") {
@@ -125,13 +126,6 @@ export async function POST(request: Request) {
         409,
         "service_already_invoiced",
         "Este serviço já está vinculado a uma fatura.",
-      );
-    }
-    if (item.paymentPreference !== "credit") {
-      throw new HttpError(
-        409,
-        "credit_not_selected",
-        "Este serviço não está configurado para usar crédito. Edite o serviço e selecione crédito antes de concluí-lo.",
       );
     }
     if (!creditServiceCodes.has(item.serviceCode)) {
@@ -142,10 +136,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const creditUnits =
-      item.serviceCode === "taxi_dog" && item.description === "Ida e volta"
-        ? 2
-        : 1;
+    const creditUnits = creditUnitsForServiceCode(
+      item.serviceCode,
+      item.description,
+    );
 
     const contacts = await db
       .select({
@@ -191,10 +185,9 @@ export async function POST(request: Request) {
           INNER JOIN appointments a ON a.id = ai.appointment_id
           WHERE ai.id = ?
             AND a.establishment_id = ?
-            AND ai.status <> 'cancelled'
-            AND a.status <> 'cancelled'
+            AND ai.status = 'completed'
+            AND a.status = 'completed'
             AND ai.settlement_method = 'unsettled'
-            AND ai.payment_preference = 'credit'
             AND ai.active_invoice_id IS NULL
             AND (
               SELECT COALESCE(SUM(cm.delta_units), 0)
@@ -216,8 +209,7 @@ export async function POST(request: Request) {
       d1
         .prepare(
           `UPDATE appointment_items
-          SET status = 'completed',
-            settlement_method = 'credit',
+          SET settlement_method = 'credit',
             credit_movement_id = ?,
             settled_at = ${nowExpression},
             updated_at = ${nowExpression}
@@ -227,22 +219,6 @@ export async function POST(request: Request) {
             )`,
         )
         .bind(movementId, appointmentItemId, movementId),
-      d1
-        .prepare(
-          `UPDATE appointments
-          SET status = 'completed', updated_at = ${nowExpression}
-          WHERE id = ?
-            AND EXISTS (
-              SELECT 1 FROM credit_movements WHERE id = ?
-            )
-            AND NOT EXISTS (
-              SELECT 1
-              FROM appointment_items
-              WHERE appointment_id = appointments.id
-                AND status = 'scheduled'
-            )`,
-        )
-        .bind(item.appointmentId, movementId),
       d1
         .prepare(
           `INSERT INTO credit_receipts (

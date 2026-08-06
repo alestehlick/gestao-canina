@@ -1051,6 +1051,68 @@ export const invoiceSettlements = sqliteTable(
   ],
 );
 
+export const invoiceMerges = sqliteTable(
+  "invoice_merges",
+  {
+    id: text("id").primaryKey(),
+    establishmentId: text("establishment_id")
+      .notNull()
+      .references(() => establishments.id, { onDelete: "restrict" }),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => customerAccounts.id, { onDelete: "restrict" }),
+    mergedInvoiceId: text("merged_invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "restrict" }),
+    status: text("status", { enum: ["active", "reversed"] })
+      .notNull()
+      .default("active"),
+    createdByUserId: text("created_by_user_id").references(() => appUsers.id, {
+      onDelete: "set null",
+    }),
+    reversedByUserId: text("reversed_by_user_id").references(() => appUsers.id, {
+      onDelete: "set null",
+    }),
+    createdAt: text("created_at").notNull().default(now),
+    reversedAt: text("reversed_at"),
+  },
+  (table) => [
+    uniqueIndex("invoice_merges_merged_invoice_unique").on(
+      table.mergedInvoiceId,
+    ),
+    index("invoice_merges_establishment_status_idx").on(
+      table.establishmentId,
+      table.status,
+      table.createdAt,
+    ),
+    check(
+      "invoice_merges_reversal_valid",
+      sql`(${table.status} = 'active' and ${table.reversedAt} is null) or (${table.status} = 'reversed' and ${table.reversedAt} is not null)`,
+    ),
+  ],
+);
+
+export const invoiceMergeMembers = sqliteTable(
+  "invoice_merge_members",
+  {
+    mergeId: text("merge_id")
+      .notNull()
+      .references(() => invoiceMerges.id, { onDelete: "restrict" }),
+    sourceInvoiceId: text("source_invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "restrict" }),
+    originalStatus: text("original_status", {
+      enum: ["draft", "issued"],
+    }).notNull(),
+    originalSourceId: text("original_source_id"),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (table) => [
+    primaryKey({ columns: [table.mergeId, table.sourceInvoiceId] }),
+    index("invoice_merge_members_source_idx").on(table.sourceInvoiceId),
+  ],
+);
+
 export const cashEntries = sqliteTable(
   "cash_entries",
   {

@@ -3421,6 +3421,75 @@ h3 {
   max-width: 820px;
 }
 
+.invoice-merge-toolbar {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 2px 0 10px;
+  border-block: 1px solid var(--line-soft);
+  padding: 8px 0;
+}
+
+.invoice-merge-toolbar > span {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.invoice-merge-select-cell {
+  width: 36px;
+}
+
+.invoice-merge-select-cell input,
+.invoice-merge-select-mobile input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--forest);
+}
+
+.invoice-merge-select-mobile {
+  display: none;
+}
+
+.invoice-merge-review {
+  display: grid;
+  border-block: 1px solid var(--line-soft);
+}
+
+.invoice-merge-review > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 10px 0;
+}
+
+.invoice-merge-review > div:last-child {
+  border-bottom: 0;
+}
+
+.invoice-merge-review span,
+.invoice-merge-review small {
+  display: block;
+}
+
+.invoice-merge-review small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.invoice-merge-review .invoice-merge-total {
+  padding-top: 13px;
+}
+
+.invoice-merge-total > strong {
+  font-family: var(--font-serif);
+  font-size: 1.25rem;
+}
+
 .audit-limit-note {
   max-width: 760px;
   margin: 10px 0;
@@ -5444,6 +5513,23 @@ h3 {
     text-align: left;
   }
 
+  .invoice-merge-select-mobile {
+    display: flex;
+    min-height: 42px;
+    align-items: center;
+    gap: 9px;
+    margin-left: 4px;
+    border-bottom: 1px solid var(--line-soft);
+    padding: 8px 14px 8px 13px;
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-weight: 680;
+  }
+
+  .invoice-unmerge-mobile {
+    margin: 5px 14px 12px 17px;
+  }
+
   .invoice-mobile-heading,
   .invoice-mobile-heading strong,
   .invoice-mobile-heading small {
@@ -5783,6 +5869,15 @@ h3 {
     width: 100%;
     flex-wrap: wrap;
     justify-content: flex-start;
+  }
+
+  .invoice-merge-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .invoice-merge-toolbar .secondary-button {
+    width: 100%;
   }
 
   .audit-period-form .primary-button {

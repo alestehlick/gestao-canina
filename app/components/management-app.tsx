@@ -3911,6 +3911,14 @@ export function ManagementApp() {
 
   async function voidInvoice() {
     if (!invoiceState?.invoice || invoiceState.invoice.status === "paid") return;
+    if (invoiceState.invoice.mergeId) {
+      const reversed = await reverseInvoiceMerge(invoiceState.invoice);
+      if (reversed) {
+        setDialog(null);
+        setInvoiceState(null);
+      }
+      return;
+    }
     const reason = window.prompt(
       "Por que esta fatura deve ser cancelada? O motivo ficará no histórico.",
     )?.trim();
@@ -3939,6 +3947,53 @@ export function ManagementApp() {
     }
     setDialog(null);
     setInvoiceState(null);
+  }
+
+  async function mergeInvoices(invoiceIds: string[], dueDate: string) {
+    if (runtimeMode !== "ready") {
+      setToast({ message: "A união de faturas está disponível somente com dados reais." });
+      return false;
+    }
+    const result = await runLiveAction(
+      "merge-invoices",
+      () =>
+        requestJson<{ invoice: { id: string; invoiceNumber: string } }>(
+          "/api/invoices/merge",
+          {
+            method: "POST",
+            body: JSON.stringify({ invoiceIds, dueDate }),
+          },
+        ),
+      {
+        refresh: true,
+        successMessage: "Faturas unificadas. A nova fatura está pronta para revisão.",
+      },
+    );
+    return Boolean(result);
+  }
+
+  async function reverseInvoiceMerge(invoice: Invoice) {
+    if (!invoice.mergeId || runtimeMode !== "ready") return false;
+    if (
+      !window.confirm(
+        `Desfazer a união da fatura #${invoice.number}? As faturas originais serão restauradas.`,
+      )
+    ) {
+      return false;
+    }
+    const result = await runLiveAction(
+      `unmerge-invoice:${invoice.id}`,
+      () =>
+        requestJson<{ reversed: boolean }>(
+          `/api/invoices/${invoice.id}/unmerge`,
+          { method: "POST" },
+        ),
+      {
+        refresh: true,
+        successMessage: "União desfeita. As faturas originais foram restauradas.",
+      },
+    );
+    return Boolean(result);
   }
 
   async function submitInitialSetup(event: FormEvent<HTMLFormElement>) {
@@ -4542,6 +4597,9 @@ export function ManagementApp() {
               onOpenReceipt={openReceipt}
               onToggleCash={toggleInvoiceCash}
               onSaveNote={saveInvoiceNote}
+              onMergeInvoices={mergeInvoices}
+              onReverseInvoiceMerge={reverseInvoiceMerge}
+              mergeBusy={busyAction === "merge-invoices"}
               receivedLast30DaysCents={
                 workspacePayload?.billing.receivedLast30DaysCents
               }
@@ -8155,6 +8213,9 @@ function BillingView({
   onOpenReceipt,
   onToggleCash,
   onSaveNote,
+  onMergeInvoices,
+  onReverseInvoiceMerge,
+  mergeBusy,
   receivedLast30DaysCents,
   receivedLast30DaysCount,
 }: {
@@ -8174,6 +8235,9 @@ function BillingView({
   onOpenReceipt: (receipt: ServiceReceipt) => void;
   onToggleCash: (invoice: Invoice) => void;
   onSaveNote: (invoiceId: string, note: string) => Promise<boolean>;
+  onMergeInvoices: (invoiceIds: string[], dueDate: string) => Promise<boolean>;
+  onReverseInvoiceMerge: (invoice: Invoice) => boolean | Promise<boolean>;
+  mergeBusy: boolean;
   receivedLast30DaysCents?: number;
   receivedLast30DaysCount?: number;
 }) {
@@ -8186,6 +8250,9 @@ function BillingView({
   const [invoicePeriodTo, setInvoicePeriodTo] = useState(operationalToday);
   const [appliedInvoiceFrom, setAppliedInvoiceFrom] = useState(defaultInvoiceFrom);
   const [appliedInvoiceTo, setAppliedInvoiceTo] = useState(operationalToday);
+  const [selectedMergeInvoiceIds, setSelectedMergeInvoiceIds] = useState<string[]>([]);
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+  const [mergeDueDate, setMergeDueDate] = useState(operationalToday);
   const selectedTotal = billableServices
     .filter((item) => selectedBillables.includes(item.id))
     .reduce((total, item) => total + item.amountCents, 0);
@@ -8252,6 +8319,52 @@ function BillingView({
   const isDefaultInvoicePeriod =
     appliedInvoiceFrom === defaultInvoiceFrom &&
     appliedInvoiceTo === operationalToday;
+  const selectedMergeInvoices = invoices.filter((invoice) =>
+    selectedMergeInvoiceIds.includes(invoice.id),
+  );
+  const mergeCustomerId = selectedMergeInvoices[0]?.customerId;
+  const mergeTotalCents = selectedMergeInvoices.reduce(
+    (total, invoice) => total + invoice.amountCents,
+    0,
+  );
+
+  function invoiceCanBeMerged(invoice: Invoice) {
+    return (
+      invoice.status !== "paid" &&
+      !invoice.compensationAvailableOn &&
+      invoice.sourceType !== "credit_package" &&
+      !invoice.mergeId &&
+      invoice.lines.length > 0
+    );
+  }
+
+  function toggleMergeInvoice(invoice: Invoice) {
+    if (!invoiceCanBeMerged(invoice)) return;
+    setSelectedMergeInvoiceIds((current) =>
+      current.includes(invoice.id)
+        ? current.filter((id) => id !== invoice.id)
+        : [...current, invoice.id],
+    );
+  }
+
+  function openMergeDialog() {
+    if (selectedMergeInvoices.length < 2) return;
+    setMergeDueDate(
+      selectedMergeInvoices
+        .map((invoice) => invoice.dueDate ?? operationalToday)
+        .sort()
+        .at(-1) ?? operationalToday,
+    );
+    setMergeDialogOpen(true);
+  }
+
+  async function submitInvoiceMerge(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const merged = await onMergeInvoices(selectedMergeInvoiceIds, mergeDueDate);
+    if (!merged) return;
+    setSelectedMergeInvoiceIds([]);
+    setMergeDialogOpen(false);
+  }
 
   function applyInvoicePeriod(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -8264,6 +8377,7 @@ function BillingView({
     }
     setAppliedInvoiceFrom(invoicePeriodFrom);
     setAppliedInvoiceTo(invoicePeriodTo);
+    setSelectedMergeInvoiceIds([]);
     setInvoicePeriodOpen(false);
   }
 
@@ -8272,6 +8386,7 @@ function BillingView({
     setInvoicePeriodTo(operationalToday);
     setAppliedInvoiceFrom(defaultInvoiceFrom);
     setAppliedInvoiceTo(operationalToday);
+    setSelectedMergeInvoiceIds([]);
     setInvoicePeriodOpen(false);
   }
 
@@ -8470,10 +8585,28 @@ function BillingView({
                 </button>
               </form>
             )}
+            <div className="invoice-merge-toolbar">
+              <span>
+                {selectedMergeInvoiceIds.length
+                  ? `${selectedMergeInvoiceIds.length} faturas selecionadas`
+                  : "Selecione faturas abertas do mesmo cliente para unificar"}
+              </span>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={selectedMergeInvoiceIds.length < 2}
+                onClick={openMergeDialog}
+              >
+                Unificar selecionadas
+              </button>
+            </div>
             <div className="table-wrap">
               <table className="data-table invoices-table">
                 <thead>
                   <tr>
+                    <th>
+                      <span className="sr-only">Selecionar para unificar</span>
+                    </th>
                     <th>Número</th>
                     <th>Cliente</th>
                     <th>Itens</th>
@@ -8488,9 +8621,32 @@ function BillingView({
                   </tr>
                 </thead>
                 <tbody>
-                  {displayedInvoices.map((invoice) => (
+                  {displayedInvoices.map((invoice) => {
+                    const mergeEligible = invoiceCanBeMerged(invoice);
+                    const mergeSelectionDisabled =
+                      !mergeEligible ||
+                      (Boolean(mergeCustomerId) && invoice.customerId !== mergeCustomerId);
+                    return (
                     <Fragment key={invoice.id}>
                     <tr>
+                      <td className="invoice-merge-select-cell">
+                        <input
+                          type="checkbox"
+                          checked={selectedMergeInvoiceIds.includes(invoice.id)}
+                          disabled={mergeSelectionDisabled}
+                          onChange={() => toggleMergeInvoice(invoice)}
+                          aria-label={`Selecionar fatura ${invoice.number} para unificar`}
+                          title={
+                            invoice.sourceType === "credit_package"
+                              ? "Pacotes de créditos permanecem separados para proteger o saldo."
+                              : invoice.mergeId
+                                ? "Desfaça a união atual antes de criar outra."
+                                : invoice.compensationAvailableOn
+                                  ? "Faturas em compensação não podem ser unificadas."
+                                  : undefined
+                          }
+                        />
+                      </td>
                       <td>#{invoice.number}</td>
                       <td>
                         <strong>{invoice.customerName}</strong>
@@ -8544,12 +8700,21 @@ function BillingView({
                           >
                             {invoice.internalNote ?? "Adicionar nota"}
                           </button>
+                          {invoice.mergeId && invoice.status !== "paid" && !invoice.compensationAvailableOn && (
+                            <button
+                              className="row-link subtle"
+                              type="button"
+                              onClick={() => void onReverseInvoiceMerge(invoice)}
+                            >
+                              Desfazer união
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
                     {noteEditorInvoiceId === invoice.id && (
                       <tr className="invoice-note-editor-row">
-                        <td colSpan={9}>
+                        <td colSpan={10}>
                           <form
                             className="invoice-entry-note-editor"
                             onSubmit={(event) => {
@@ -8578,16 +8743,31 @@ function BillingView({
                       </tr>
                     )}
                     </Fragment>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
             <div className="mobile-card-list invoice-mobile-list">
-              {displayedInvoices.map((invoice) => (
+              {displayedInvoices.map((invoice) => {
+                const mergeEligible = invoiceCanBeMerged(invoice);
+                const mergeSelectionDisabled =
+                  !mergeEligible ||
+                  (Boolean(mergeCustomerId) && invoice.customerId !== mergeCustomerId);
+                return (
                 <article
                   className={`mobile-data-card invoice-${invoice.status}`}
                   key={`mobile-${invoice.id}`}
                 >
+                  <label className="invoice-merge-select-mobile">
+                    <input
+                      type="checkbox"
+                      checked={selectedMergeInvoiceIds.includes(invoice.id)}
+                      disabled={mergeSelectionDisabled}
+                      onChange={() => toggleMergeInvoice(invoice)}
+                    />
+                    Selecionar para unificar
+                  </label>
                   <button
                     className="mobile-card-main"
                     onClick={() => onOpenInvoice(invoice)}
@@ -8653,8 +8833,18 @@ function BillingView({
                       </button>
                     </form>
                   )}
+                  {invoice.mergeId && invoice.status !== "paid" && !invoice.compensationAvailableOn && (
+                    <button
+                      className="row-link subtle invoice-unmerge-mobile"
+                      type="button"
+                      onClick={() => void onReverseInvoiceMerge(invoice)}
+                    >
+                      Desfazer união
+                    </button>
+                  )}
                 </article>
-              ))}
+                );
+              })}
             </div>
             {!displayedInvoices.length && (
               <EmptyState
@@ -8840,6 +9030,63 @@ function BillingView({
             Criar fatura
           </button>
         </div>
+      )}
+
+      {mergeDialogOpen && (
+        <Dialog
+          title="Unificar faturas"
+          description="Confira as faturas e o vencimento. A operação poderá ser desfeita enquanto a nova fatura não tiver pagamento ou compensação."
+          onClose={() => setMergeDialogOpen(false)}
+          size="small"
+        >
+          <form className="form-grid" onSubmit={submitInvoiceMerge}>
+            <div className="invoice-merge-review full">
+              {selectedMergeInvoices.map((invoice) => (
+                <div key={invoice.id}>
+                  <span>
+                    <strong>#{invoice.number}</strong>
+                    <small>{invoice.items}</small>
+                  </span>
+                  <strong>{formatCurrency(invoice.amountCents)}</strong>
+                </div>
+              ))}
+              <div className="invoice-merge-total">
+                <span>Total da nova fatura</span>
+                <strong>{formatCurrency(mergeTotalCents)}</strong>
+              </div>
+            </div>
+            <label className="field full">
+              <span>Vencimento da nova fatura *</span>
+              <BrazilianDateInput
+                value={mergeDueDate}
+                ariaLabel="Vencimento da fatura unificada"
+                onChange={setMergeDueDate}
+              />
+              <small>Por padrão, preservamos o vencimento mais distante.</small>
+            </label>
+            <div className="credit-safety-note full">
+              <strong>Proteção financeira</strong>
+              <span>
+                As faturas originais serão guardadas e poderão ser restauradas
+                por “Desfazer união”. Pacotes de créditos e valores em
+                compensação não entram nesta operação.
+              </span>
+            </div>
+            <div className="dialog-actions full">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setMergeDialogOpen(false)}
+                disabled={mergeBusy}
+              >
+                Cancelar
+              </button>
+              <button className="primary-button" type="submit" disabled={mergeBusy}>
+                {mergeBusy ? "Unificando…" : "Confirmar união"}
+              </button>
+            </div>
+          </form>
+        </Dialog>
       )}
     </div>
   );
@@ -10443,7 +10690,7 @@ function InvoiceDialog({
           <div className="dialog-actions">
             {!isPaid && (
               <button className="danger-button" type="button" onClick={onVoid}>
-                Cancelar fatura
+                {state.invoice?.mergeId ? "Desfazer união" : "Cancelar fatura"}
               </button>
             )}
             <button className="secondary-button" type="button" onClick={onClose}>

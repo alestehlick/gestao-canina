@@ -124,6 +124,9 @@ export type Invoice = {
   internalNote?: string;
   items: string;
   sourceType?: "services" | "credit_package" | "lodging_deposit" | "lodging_balance";
+  sourceId?: string;
+  dueDate?: string;
+  mergeId?: string;
   cashEntryId?: string;
   cashIncluded?: boolean;
   compensationAvailableOn?: string;

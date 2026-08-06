@@ -49,6 +49,13 @@ export async function POST(
     if (invoice.status === "void") {
       return json({ invoice, idempotent: true });
     }
+    if (invoice.sourceId?.startsWith("invoice-merge:")) {
+      throw new HttpError(
+        409,
+        "merged_invoice_requires_unmerge",
+        "Use “Desfazer união” para cancelar esta fatura e restaurar as faturas originais.",
+      );
+    }
 
     const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
     const d1 = getD1Database();

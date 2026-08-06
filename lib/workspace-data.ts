@@ -902,6 +902,11 @@ export function mapWorkspaceInvoices(
         internalNote: invoice.internalNote ?? undefined,
         items: invoiceItemsLabel(invoice, purchase, service),
         sourceType: invoice.sourceType,
+        sourceId: invoice.sourceId ?? undefined,
+        dueDate: invoice.dueDate,
+        mergeId: invoice.sourceId?.startsWith("invoice-merge:")
+          ? invoice.sourceId.slice("invoice-merge:".length)
+          : undefined,
         cashEntryId: invoice.cashEntryId ?? undefined,
         cashIncluded: invoice.cashEntryId
           ? invoice.cashIncluded !== false
@@ -1198,6 +1203,20 @@ function activityDetail(event: WorkspaceAuditEvent) {
     parts.push(nextStatus);
   }
 
+  if (event.action === "invoice.merged" && Array.isArray(metadata.sourceInvoiceNumbers)) {
+    const numbers = metadata.sourceInvoiceNumbers.filter(
+      (value): value is string => typeof value === "string" && Boolean(value.trim()),
+    );
+    if (numbers.length) parts.push(`Origem: ${numbers.map((number) => `#${number}`).join(", ")}`);
+  }
+  if (
+    event.action === "invoice.merge_reversed" &&
+    typeof metadata.mergedInvoiceNumber === "string" &&
+    metadata.mergedInvoiceNumber.trim()
+  ) {
+    parts.push(`Fatura #${metadata.mergedInvoiceNumber.trim()}`);
+  }
+
   if (event.reason?.trim()) parts.push(`Motivo: ${event.reason.trim()}`);
   if (!parts.length) {
     const metadataName = firstActivityMetadataText(metadata, [
@@ -1304,6 +1323,8 @@ function activityActionLabel(action: string) {
     "credit_receipt.sent": "Recibo marcado como enviado",
     "credit_receipt.failed": "Falha no envio do recibo registrada",
     "invoice.created": "Cobrança preparada",
+    "invoice.merged": "Faturas unificadas",
+    "invoice.merge_reversed": "União de faturas desfeita",
     "invoice.payment_recorded": "Pagamento registrado",
     "invoice.sent": "Fatura enviada",
     "invoice.note_updated": "Observação da fatura atualizada",

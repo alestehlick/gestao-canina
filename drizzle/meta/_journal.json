@@ -92,6 +92,13 @@
       "when": 1786023600000,
       "tag": "0012_invoice_internal_notes",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1786111200000,
+      "tag": "0013_invoice_merges",
+      "breakpoints": true
     }
   ]
 }

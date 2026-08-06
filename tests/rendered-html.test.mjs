@@ -593,3 +593,34 @@ test("mantém a política de hospedagem clara e auditável", async () => {
   assert.match(schema, /hotel_long_stay_discount_percent/);
   assert.match(migration, /lodging_long_stay_discount_cents/);
 });
+
+test("unifica faturas abertas com reversão segura e auditável", async () => {
+  const [app, mergeRoute, unmergeRoute, voidRoute, schema, migration, data] =
+    await Promise.all([
+      readFile(new URL("../app/components/management-app.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/invoices/merge/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/invoices/[id]/unmerge/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/invoices/[id]/void/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+      readFile(new URL("../drizzle/0013_invoice_merges.sql", import.meta.url), "utf8"),
+      readFile(new URL("../lib/workspace-data.ts", import.meta.url), "utf8"),
+    ]);
+
+  assert.match(app, /Unificar selecionadas/);
+  assert.match(app, /Desfazer união/);
+  assert.match(app, /Pacotes de créditos permanecem separados/);
+  assert.match(mergeRoute, /requireIdentity\(request, \["owner", "finance"\]\)/);
+  assert.match(mergeRoute, /sourceType === "credit_package"/);
+  assert.match(mergeRoute, /invoice_payments/);
+  assert.match(mergeRoute, /invoice_settlements/);
+  assert.match(mergeRoute, /await d1\.batch\(statements\)/);
+  assert.match(unmergeRoute, /status = 'reversed'/);
+  assert.match(unmergeRoute, /faturas originais restauradas/);
+  assert.match(unmergeRoute, /invoice_merge_sources_changed/);
+  assert.match(voidRoute, /merged_invoice_requires_unmerge/);
+  assert.match(schema, /sqliteTable\(\s*"invoice_merges"/);
+  assert.match(schema, /sqliteTable\(\s*"invoice_merge_members"/);
+  assert.match(migration, /CREATE TABLE `invoice_merges`/);
+  assert.match(data, /"invoice\.merged": "Faturas unificadas"/);
+  assert.match(data, /"invoice\.merge_reversed": "União de faturas desfeita"/);
+});

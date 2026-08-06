@@ -595,12 +595,14 @@ test("mantém a política de hospedagem clara e auditável", async () => {
 });
 
 test("unifica faturas abertas com reversão segura e auditável", async () => {
-  const [app, mergeRoute, unmergeRoute, voidRoute, schema, migration, data] =
+  const [app, mergeRoute, unmergeRoute, voidRoute, paymentRoute, workspace, schema, migration, data] =
     await Promise.all([
       readFile(new URL("../app/components/management-app.tsx", import.meta.url), "utf8"),
       readFile(new URL("../app/api/invoices/merge/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/invoices/[id]/unmerge/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/invoices/[id]/void/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/invoices/[id]/payments/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/workspace/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
       readFile(new URL("../drizzle/0013_invoice_merges.sql", import.meta.url), "utf8"),
       readFile(new URL("../lib/workspace-data.ts", import.meta.url), "utf8"),
@@ -608,9 +610,11 @@ test("unifica faturas abertas com reversão segura e auditável", async () => {
 
   assert.match(app, /Unificar selecionadas/);
   assert.match(app, /Desfazer união/);
-  assert.match(app, /Pacotes de créditos permanecem separados/);
+  assert.match(app, /Créditos serão liberados somente quando/);
+  assert.doesNotMatch(app, /invoice\.sourceType !== "credit_package"/);
   assert.match(mergeRoute, /requireIdentity\(request, \["owner", "finance"\]\)/);
   assert.match(mergeRoute, /sourceType === "credit_package"/);
+  assert.match(mergeRoute, /creditPurchaseByInvoice/);
   assert.match(mergeRoute, /invoice_payments/);
   assert.match(mergeRoute, /invoice_settlements/);
   assert.match(mergeRoute, /await d1\.batch\(statements\)/);
@@ -618,6 +622,10 @@ test("unifica faturas abertas com reversão segura e auditável", async () => {
   assert.match(unmergeRoute, /faturas originais restauradas/);
   assert.match(unmergeRoute, /invoice_merge_sources_changed/);
   assert.match(voidRoute, /merged_invoice_requires_unmerge/);
+  assert.match(paymentRoute, /mergedCreditPurchases/);
+  assert.match(paymentRoute, /releasedCreditPurchaseIds/);
+  assert.match(paymentRoute, /creditPurchaseGuard/);
+  assert.match(workspace, /mergedSourceInvoiceIds/);
   assert.match(schema, /sqliteTable\(\s*"invoice_merges"/);
   assert.match(schema, /sqliteTable\(\s*"invoice_merge_members"/);
   assert.match(migration, /CREATE TABLE `invoice_merges`/);

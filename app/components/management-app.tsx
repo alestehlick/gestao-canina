@@ -8322,7 +8322,6 @@ function BillingView({
   const selectedMergeInvoices = invoices.filter((invoice) =>
     selectedMergeInvoiceIds.includes(invoice.id),
   );
-  const mergeCustomerId = selectedMergeInvoices[0]?.customerId;
   const mergeTotalCents = selectedMergeInvoices.reduce(
     (total, invoice) => total + invoice.amountCents,
     0,
@@ -8332,7 +8331,6 @@ function BillingView({
     return (
       invoice.status !== "paid" &&
       !invoice.compensationAvailableOn &&
-      invoice.sourceType !== "credit_package" &&
       !invoice.mergeId &&
       invoice.lines.length > 0
     );
@@ -8340,11 +8338,19 @@ function BillingView({
 
   function toggleMergeInvoice(invoice: Invoice) {
     if (!invoiceCanBeMerged(invoice)) return;
-    setSelectedMergeInvoiceIds((current) =>
-      current.includes(invoice.id)
-        ? current.filter((id) => id !== invoice.id)
-        : [...current, invoice.id],
-    );
+    setSelectedMergeInvoiceIds((current) => {
+      if (current.includes(invoice.id)) {
+        return current.filter((id) => id !== invoice.id);
+      }
+      const currentInvoices = invoices.filter((item) => current.includes(item.id));
+      if (
+        currentInvoices.length &&
+        currentInvoices[0].customerId !== invoice.customerId
+      ) {
+        return [invoice.id];
+      }
+      return [...current, invoice.id];
+    });
   }
 
   function openMergeDialog() {
@@ -8623,9 +8629,7 @@ function BillingView({
                 <tbody>
                   {displayedInvoices.map((invoice) => {
                     const mergeEligible = invoiceCanBeMerged(invoice);
-                    const mergeSelectionDisabled =
-                      !mergeEligible ||
-                      (Boolean(mergeCustomerId) && invoice.customerId !== mergeCustomerId);
+                    const mergeSelectionDisabled = !mergeEligible;
                     return (
                     <Fragment key={invoice.id}>
                     <tr>
@@ -8637,9 +8641,7 @@ function BillingView({
                           onChange={() => toggleMergeInvoice(invoice)}
                           aria-label={`Selecionar fatura ${invoice.number} para unificar`}
                           title={
-                            invoice.sourceType === "credit_package"
-                              ? "Pacotes de créditos permanecem separados para proteger o saldo."
-                              : invoice.mergeId
+                            invoice.mergeId
                                 ? "Desfaça a união atual antes de criar outra."
                                 : invoice.compensationAvailableOn
                                   ? "Faturas em compensação não podem ser unificadas."
@@ -8751,9 +8753,7 @@ function BillingView({
             <div className="mobile-card-list invoice-mobile-list">
               {displayedInvoices.map((invoice) => {
                 const mergeEligible = invoiceCanBeMerged(invoice);
-                const mergeSelectionDisabled =
-                  !mergeEligible ||
-                  (Boolean(mergeCustomerId) && invoice.customerId !== mergeCustomerId);
+                const mergeSelectionDisabled = !mergeEligible;
                 return (
                 <article
                   className={`mobile-data-card invoice-${invoice.status}`}
@@ -9068,8 +9068,8 @@ function BillingView({
               <strong>Proteção financeira</strong>
               <span>
                 As faturas originais serão guardadas e poderão ser restauradas
-                por “Desfazer união”. Pacotes de créditos e valores em
-                compensação não entram nesta operação.
+                por “Desfazer união”. Créditos serão liberados somente quando
+                a nova fatura for paga; valores em compensação não entram nesta operação.
               </span>
             </div>
             <div className="dialog-actions full">

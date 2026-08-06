@@ -23,6 +23,8 @@ import {
   dogTutors,
   establishments,
   invoiceItems,
+  invoiceMergeMembers,
+  invoiceMerges,
   invoicePayments,
   invoiceSettlements,
   invoices,
@@ -152,6 +154,7 @@ export async function GET(request: Request) {
       taskRows,
       invoiceRows,
       invoiceItemRows,
+      invoiceMergeMemberRows,
       invoicePaymentRows,
       invoiceSettlementRows,
       invoicePaymentSummaryRows,
@@ -341,6 +344,22 @@ export async function GET(request: Request) {
         .orderBy(asc(invoiceItems.serviceDateSnapshot)),
       db
         .select({
+          mergedInvoiceId: invoiceMerges.mergedInvoiceId,
+          sourceInvoiceId: invoiceMergeMembers.sourceInvoiceId,
+        })
+        .from(invoiceMergeMembers)
+        .innerJoin(
+          invoiceMerges,
+          eq(invoiceMerges.id, invoiceMergeMembers.mergeId),
+        )
+        .where(
+          and(
+            eq(invoiceMerges.establishmentId, establishmentId),
+            eq(invoiceMerges.status, "active"),
+          ),
+        ),
+      db
+        .select({
           invoiceId: invoicePayments.invoiceId,
           paidAt: invoicePayments.paidAt,
           cashEntryId: cashEntries.id,
@@ -460,6 +479,12 @@ export async function GET(request: Request) {
       const items = itemsByInvoice.get(item.invoiceId) ?? [];
       items.push(item);
       itemsByInvoice.set(item.invoiceId, items);
+    }
+    const mergedSourcesByInvoice = new Map<string, string[]>();
+    for (const member of invoiceMergeMemberRows) {
+      const sourceIds = mergedSourcesByInvoice.get(member.mergedInvoiceId) ?? [];
+      sourceIds.push(member.sourceInvoiceId);
+      mergedSourcesByInvoice.set(member.mergedInvoiceId, sourceIds);
     }
 
     type ScheduleRow = (typeof scheduleRows)[number];
@@ -593,6 +618,8 @@ export async function GET(request: Request) {
                 compensationAvailableOn:
                   settlementByInvoice.get(invoice.id)?.availableOn ?? null,
                 items: itemsByInvoice.get(invoice.id) ?? [],
+                mergedSourceInvoiceIds:
+                  mergedSourcesByInvoice.get(invoice.id) ?? [],
               })),
         creditPackages: identity.role === "staff" ? [] : packageRows,
         creditPurchases: identity.role === "staff" ? [] : purchaseRows,

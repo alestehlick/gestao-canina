@@ -240,6 +240,7 @@ export type WorkspaceInvoice = {
   cashEntryId?: string | null;
   cashIncluded?: boolean;
   compensationAvailableOn?: string | null;
+  mergedSourceInvoiceIds?: string[];
   /**
    * The current workspace endpoint does not need this field to render a useful
    * fallback label, but the mapper accepts it when the endpoint includes invoice
@@ -882,6 +883,65 @@ export function mapWorkspaceInvoices(
       const service = purchase
         ? servicesById.get(purchase.serviceCatalogId)
         : undefined;
+      const mergedCreditPurchases = (invoice.mergedSourceInvoiceIds ?? [])
+        .map((sourceInvoiceId) => purchasesByInvoiceId.get(sourceInvoiceId))
+        .filter(
+          (candidate): candidate is WorkspaceCreditPurchase => Boolean(candidate),
+        );
+      const creditPurchasesForInvoice = purchase
+        ? [purchase]
+        : mergedCreditPurchases;
+      const serviceLines = (invoice.items ?? []).map((item) => ({
+        dogName: item.dogNameSnapshot || "Sem cão informado",
+        service: item.serviceNameSnapshot,
+        date: item.serviceDateSnapshot,
+        amountCents: Math.max(0, item.amountCents),
+        lodging:
+          item.serviceCode === "hotel" &&
+          item.lodgingStartDate &&
+          item.lodgingEndDate &&
+          item.lodgingNights !== null
+            ? {
+                checkInDate: item.lodgingStartDate,
+                checkOutDate: item.lodgingEndDate,
+                nights: item.lodgingNights,
+                dailyRateCents: item.lodgingDailyRateCents ?? undefined,
+                tableDailyRateCents:
+                  item.lodgingTableDailyRateCents ?? undefined,
+                rateProfile: item.lodgingRateProfile ?? undefined,
+                longStayDiscountPercent:
+                  item.lodgingLongStayDiscountPercent ?? undefined,
+                longStayDiscountCents:
+                  item.lodgingLongStayDiscountCents ?? undefined,
+                depositPercent: item.depositPercent ?? undefined,
+              }
+            : undefined,
+      }));
+      const creditLines = creditPurchasesForInvoice.map((creditPurchase) => {
+        const creditService = servicesById.get(creditPurchase.serviceCatalogId);
+        const type = toCreditServiceType(creditService?.code);
+        const serviceName = type ? serviceLabels[type] : creditService?.name;
+        return {
+          dogName: "Pacote",
+          service: `${creditPurchase.creditUnits} ${
+            creditPurchase.creditUnits === 1 ? "crédito" : "créditos"
+          }${serviceName ? ` de ${serviceName}` : ""}`,
+          date:
+            invoice.issuedAt?.slice(0, 10) ?? invoice.createdAt.slice(0, 10),
+          amountCents: Math.max(0, creditPurchase.amountCents),
+        };
+      });
+      const lines = [...serviceLines, ...creditLines];
+      const mergedItemsLabel = mergedCreditPurchases.length
+        ? [
+            invoice.items?.length
+              ? invoiceItemsLabel(invoice, undefined, undefined)
+              : "",
+            ...creditLines.map((line) => line.service),
+          ]
+            .filter(Boolean)
+            .join(" · ")
+        : invoiceItemsLabel(invoice, purchase, service);
 
       return {
         id: invoice.id,
@@ -900,7 +960,7 @@ export function mapWorkspaceInvoices(
         ),
         lastSentAt: invoice.lastSentAt ?? undefined,
         internalNote: invoice.internalNote ?? undefined,
-        items: invoiceItemsLabel(invoice, purchase, service),
+        items: mergedItemsLabel,
         sourceType: invoice.sourceType,
         sourceId: invoice.sourceId ?? undefined,
         dueDate: invoice.dueDate,
@@ -924,36 +984,12 @@ export function mapWorkspaceInvoices(
               .sort()
               .at(-1)
           : undefined,
-        lines:
-          invoice.items?.map((item) => ({
-            dogName: item.dogNameSnapshot || "Sem cão informado",
-            service: item.serviceNameSnapshot,
-            date: item.serviceDateSnapshot,
-            amountCents: Math.max(0, item.amountCents),
-            lodging:
-              item.serviceCode === "hotel" &&
-              item.lodgingStartDate &&
-              item.lodgingEndDate &&
-              item.lodgingNights !== null
-                ? {
-                    checkInDate: item.lodgingStartDate,
-                    checkOutDate: item.lodgingEndDate,
-                    nights: item.lodgingNights,
-                    dailyRateCents: item.lodgingDailyRateCents ?? undefined,
-                    tableDailyRateCents:
-                      item.lodgingTableDailyRateCents ?? undefined,
-                    rateProfile: item.lodgingRateProfile ?? undefined,
-                    longStayDiscountPercent:
-                      item.lodgingLongStayDiscountPercent ?? undefined,
-                    longStayDiscountCents:
-                      item.lodgingLongStayDiscountCents ?? undefined,
-                    depositPercent: item.depositPercent ?? undefined,
-                  }
-                : undefined,
-          })) ?? [
+        lines: lines.length
+          ? lines
+          : [
             {
               dogName: "Não se aplica",
-              service: invoiceItemsLabel(invoice, purchase, service),
+              service: mergedItemsLabel,
               date: invoice.issuedAt?.slice(0, 10) ?? invoice.createdAt.slice(0, 10),
               amountCents: Math.max(0, invoice.totalCents),
             },

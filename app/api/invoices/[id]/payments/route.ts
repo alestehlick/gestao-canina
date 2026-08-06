@@ -2,6 +2,8 @@ import { and, eq } from "drizzle-orm";
 import { getD1Database, getDb } from "@/db";
 import {
   creditPurchases,
+  invoiceMergeMembers,
+  invoiceMerges,
   invoices,
   invoiceSettlements,
 } from "@/db/schema";
@@ -221,7 +223,7 @@ export async function POST(
 
     const paymentAmountCents = invoice.totalCents;
 
-    const [purchase] =
+    const [directPurchase] =
       invoice.sourceType === "credit_package"
         ? await db
             .select()
@@ -234,16 +236,105 @@ export async function POST(
             )
             .limit(1)
         : [undefined];
-    if (invoice.sourceType === "credit_package" && !purchase) {
+    if (invoice.sourceType === "credit_package" && !directPurchase) {
       throw new HttpError(
         409,
         "credit_purchase_missing",
         "O pacote ligado a esta fatura não foi encontrado.",
       );
     }
+    let mergedCreditPurchases: Array<{
+      id: string;
+      invoiceId: string;
+      creditUnits: number;
+      status: "awaiting_payment" | "paid" | "cancelled" | "refunded";
+    }> = [];
+    if (invoice.sourceId?.startsWith("invoice-merge:")) {
+      const [creditSourceInvoices, creditPurchaseRows] = await Promise.all([
+        db
+          .select({ id: invoices.id })
+          .from(invoiceMergeMembers)
+          .innerJoin(
+            invoiceMerges,
+            eq(invoiceMerges.id, invoiceMergeMembers.mergeId),
+          )
+          .innerJoin(
+            invoices,
+            eq(invoices.id, invoiceMergeMembers.sourceInvoiceId),
+          )
+          .where(
+            and(
+              eq(invoiceMerges.mergedInvoiceId, invoiceId),
+              eq(invoiceMerges.establishmentId, establishmentId),
+              eq(invoiceMerges.status, "active"),
+              eq(invoices.sourceType, "credit_package"),
+            ),
+          ),
+        db
+          .select({
+            id: creditPurchases.id,
+            invoiceId: creditPurchases.invoiceId,
+            creditUnits: creditPurchases.creditUnits,
+            status: creditPurchases.status,
+          })
+          .from(creditPurchases)
+          .innerJoin(
+            invoiceMergeMembers,
+            eq(invoiceMergeMembers.sourceInvoiceId, creditPurchases.invoiceId),
+          )
+          .innerJoin(
+            invoiceMerges,
+            eq(invoiceMerges.id, invoiceMergeMembers.mergeId),
+          )
+          .where(
+            and(
+              eq(invoiceMerges.mergedInvoiceId, invoiceId),
+              eq(invoiceMerges.establishmentId, establishmentId),
+              eq(invoiceMerges.status, "active"),
+            ),
+          ),
+      ]);
+      if (
+        creditPurchaseRows.length !== creditSourceInvoices.length ||
+        creditPurchaseRows.some(
+          (creditPurchase) => creditPurchase.status !== "awaiting_payment",
+        )
+      ) {
+        throw new HttpError(
+          409,
+          "merged_credit_purchase_changed",
+          "Um pacote de créditos desta fatura foi alterado. Desfaça a união e revise as faturas originais.",
+        );
+      }
+      mergedCreditPurchases = creditPurchaseRows;
+    }
+    const purchasesToGrant = directPurchase
+      ? [{
+          id: directPurchase.id,
+          invoiceId: directPurchase.invoiceId,
+          creditUnits: directPurchase.creditUnits,
+        }]
+      : mergedCreditPurchases.map(({ id, invoiceId: sourceInvoiceId, creditUnits }) => ({
+          id,
+          invoiceId: sourceInvoiceId,
+          creditUnits,
+        }));
 
     const paymentId = crypto.randomUUID();
-    const movementId = purchase ? crypto.randomUUID() : null;
+    const creditGrants = purchasesToGrant.map((purchase) => ({
+      purchase,
+      movementId: crypto.randomUUID(),
+    }));
+    const creditPurchasePlaceholders = purchasesToGrant
+      .map(() => "?")
+      .join(", ");
+    const creditPurchaseGuard = purchasesToGrant.length
+      ? `AND (
+          SELECT COUNT(*) FROM credit_purchases
+          WHERE id IN (${creditPurchasePlaceholders})
+            AND status = 'awaiting_payment'
+        ) = ?`
+      : "";
     const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
     const d1 = getD1Database();
     const statements = [] as ReturnType<typeof d1.prepare>[];
@@ -272,7 +363,8 @@ export async function POST(
           WHERE id = ? AND establishment_id = ? AND status = 'issued'
             AND NOT EXISTS (
               SELECT 1 FROM invoice_payments WHERE invoice_id = ?
-            )`,
+            )
+            ${creditPurchaseGuard}`,
         )
         .bind(
           paymentId,
@@ -284,6 +376,8 @@ export async function POST(
           invoiceId,
           establishmentId,
           invoiceId,
+          ...purchasesToGrant.map((purchase) => purchase.id),
+          ...(purchasesToGrant.length ? [purchasesToGrant.length] : []),
         ),
     );
     const paidStatementIndex = statements.length;
@@ -366,7 +460,7 @@ export async function POST(
       );
     }
 
-    if (purchase && movementId) {
+    for (const { purchase, movementId } of creditGrants) {
       statements.push(
         d1
           .prepare(
@@ -392,7 +486,7 @@ export async function POST(
             identity.userId,
             paidAt,
             purchase.id,
-            invoiceId,
+            purchase.invoiceId,
             invoiceId,
           ),
         d1
@@ -405,7 +499,13 @@ export async function POST(
                 SELECT 1 FROM credit_movements WHERE id = ?
               )`,
           )
-          .bind(movementId, paidAt, purchase.id, invoiceId, movementId),
+          .bind(
+            movementId,
+            paidAt,
+            purchase.id,
+            purchase.invoiceId,
+            movementId,
+          ),
       );
     }
 
@@ -435,6 +535,9 @@ export async function POST(
             paidAt,
             note,
             settledFromCompensation: Boolean(scheduledSettlement),
+            releasedCreditPurchaseIds: purchasesToGrant.map(
+              (purchase) => purchase.id,
+            ),
           }),
           paymentId,
         ),
@@ -464,7 +567,10 @@ export async function POST(
         paidAt,
       },
       payment: { id: paymentId, amountCents: paymentAmountCents, paidAt, note },
-      creditsGranted: purchase?.creditUnits ?? 0,
+      creditsGranted: purchasesToGrant.reduce(
+        (total, purchase) => total + purchase.creditUnits,
+        0,
+      ),
     });
   } catch (error) {
     return errorResponse(error, requestId);

@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { getD1Database, getDb } from "@/db";
 import {
+  creditPurchases,
   invoiceItems,
   invoicePayments,
   invoiceSettlements,
@@ -109,13 +110,6 @@ export async function POST(request: Request) {
         "Somente faturas abertas e sem pagamento podem ser unificadas.",
       );
     }
-    if (sourceInvoices.some((invoice) => invoice.sourceType === "credit_package")) {
-      throw new HttpError(
-        409,
-        "credit_package_merge_not_allowed",
-        "Faturas de pacotes de créditos devem permanecer separadas para proteger a liberação dos saldos.",
-      );
-    }
     if (sourceInvoices.some((invoice) => invoice.sourceId?.startsWith("invoice-merge:"))) {
       throw new HttpError(
         409,
@@ -124,7 +118,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const [payments, settlements, sourceItems] = await Promise.all([
+    const [payments, settlements, sourceItems, sourceCreditPurchases] = await Promise.all([
       db
         .select({ invoiceId: invoicePayments.invoiceId })
         .from(invoicePayments)
@@ -142,6 +136,10 @@ export async function POST(request: Request) {
         .select()
         .from(invoiceItems)
         .where(inArray(invoiceItems.invoiceId, invoiceIds)),
+      db
+        .select()
+        .from(creditPurchases)
+        .where(inArray(creditPurchases.invoiceId, invoiceIds)),
     ]);
     if (payments.length || settlements.length) {
       throw new HttpError(
@@ -151,11 +149,21 @@ export async function POST(request: Request) {
       );
     }
     const invoicesWithItems = new Set(sourceItems.map((item) => item.invoiceId));
-    if (sourceInvoices.some((invoice) => !invoicesWithItems.has(invoice.id))) {
+    const creditPurchaseByInvoice = new Map(
+      sourceCreditPurchases.map((purchase) => [purchase.invoiceId, purchase]),
+    );
+    if (
+      sourceInvoices.some((invoice) => {
+        if (invoice.sourceType === "credit_package") {
+          return creditPurchaseByInvoice.get(invoice.id)?.status !== "awaiting_payment";
+        }
+        return !invoicesWithItems.has(invoice.id);
+      })
+    ) {
       throw new HttpError(
         409,
         "invoice_without_mergeable_items",
-        "Uma das faturas não possui serviços que possam ser transferidos com segurança.",
+        "Uma das faturas não possui serviços ou créditos abertos que possam ser transferidos com segurança.",
       );
     }
     const appointmentItemIds = sourceItems.map((item) => item.appointmentItemId);
@@ -172,6 +180,9 @@ export async function POST(request: Request) {
     );
     const itemTotalCents = sourceItems.reduce(
       (total, item) => total + item.amountCents,
+      0,
+    ) + sourceCreditPurchases.reduce(
+      (total, purchase) => total + purchase.amountCents,
       0,
     );
     if (totalCents <= 0 || totalCents !== itemTotalCents) {
@@ -215,7 +226,6 @@ export async function POST(request: Request) {
             SELECT COUNT(*) FROM invoices
             WHERE id IN (${placeholders}) AND establishment_id = ?
               AND account_id = ? AND status IN ('draft', 'issued')
-              AND source_type <> 'credit_package'
           ) = ?
           AND (
             SELECT COALESCE(SUM(total_cents), 0) FROM invoices
@@ -227,6 +237,16 @@ export async function POST(request: Request) {
           AND NOT EXISTS (
             SELECT 1 FROM invoice_settlements
             WHERE invoice_id IN (${placeholders}) AND status = 'scheduled'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM invoices source_invoice
+            WHERE source_invoice.id IN (${placeholders})
+              AND source_invoice.source_type = 'credit_package'
+              AND NOT EXISTS (
+                SELECT 1 FROM credit_purchases purchase
+                WHERE purchase.invoice_id = source_invoice.id
+                  AND purchase.status = 'awaiting_payment'
+              )
           )`,
         )
         .bind(
@@ -248,6 +268,7 @@ export async function POST(request: Request) {
           ...invoiceIds,
           establishmentId,
           totalCents,
+          ...invoiceIds,
           ...invoiceIds,
           ...invoiceIds,
         ),

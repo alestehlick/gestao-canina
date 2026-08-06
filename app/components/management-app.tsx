@@ -1854,12 +1854,7 @@ export function ManagementApp() {
       form.get("hasDeposit") === "on"
         ? Number(form.get("depositPercent") ?? 50)
         : null;
-    const priceCents =
-      serviceType === "transport"
-        ? transportDirection === "round_trip"
-          ? 1_000
-          : 500
-        : Math.round(Number(form.get("price") ?? 0) * 100);
+    const priceCents = Math.round(Number(form.get("price") ?? 0) * 100);
     const nextLodgingRateProfile = lodgingRateProfile(
       editDraftDaycareCustomer,
       editDraftAdditionalDog,
@@ -1867,6 +1862,7 @@ export function ManagementApp() {
     if (
       !date ||
       !serviceType ||
+      !Number.isSafeInteger(priceCents) ||
       priceCents < 0 ||
       (serviceType !== "transport" &&
         serviceType !== "hotel" &&
@@ -2463,6 +2459,7 @@ export function ManagementApp() {
       setToast({ message: "O horário final deve ser posterior ao inicial." });
       return;
     }
+    const priceCents = Math.round(price * 100);
     if (
       !Number.isSafeInteger(recurrenceCount) ||
       recurrenceCount < 1 ||
@@ -2471,13 +2468,16 @@ export function ManagementApp() {
       setToast({ message: "Informe uma duração entre 1 e 52 semanas." });
       return;
     }
+    if (!Number.isSafeInteger(priceCents) || priceCents < 0) {
+      setToast({ message: "Informe um valor válido para o serviço." });
+      return;
+    }
 
     const scheduledDates = recurrenceDates(
       date,
       recurrence,
       recurrenceCount,
     );
-    const priceCents = serviceType === "transport" ? (transportDirection === "round_trip" ? 1_000 : 500) : Math.max(0, Math.round(price * 100));
     const nextLodgingRateProfile = lodgingRateProfile(
       serviceDraftDaycareCustomer,
       serviceDraftAdditionalDog,
@@ -4914,9 +4914,7 @@ export function ManagementApp() {
                 step="0.01"
                 value={serviceDraftPrice}
                 onChange={(event) => setServiceDraftPrice(event.target.value)}
-                readOnly={
-                  serviceDraftType === "transport" || signedInRole !== "owner"
-                }
+                readOnly={signedInRole !== "owner"}
                 required
               />
             </label>
@@ -5368,10 +5366,7 @@ export function ManagementApp() {
                 step="0.01"
                 value={editDraftPrice}
                 onChange={(event) => setEditDraftPrice(event.target.value)}
-                readOnly={
-                  editDraftType === "transport" ||
-                  signedInRole !== "owner"
-                }
+                readOnly={signedInRole !== "owner"}
                 required
               />
             </label>

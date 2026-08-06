@@ -156,6 +156,13 @@ test("mantém perfis e navegação móveis enxutos e completos", async () => {
   assert.match(styles, /grid-auto-columns:\s*106px/);
   assert.match(data, /year:\s*"numeric"/);
   assert.match(app, /function bookingOccursOn/);
+  assert.match(app, /const dogsForDay = new Set/);
+  assert.match(app, /label="hospedagens"/);
+  assert.match(app, /label="creches"/);
+  assert.match(app, /label="banhos"/);
+  assert.match(app, /label="Taxi-dogs"/);
+  assert.doesNotMatch(app, /label="programados"/);
+  assert.doesNotMatch(app, /label="serviços no dia"/);
   assert.match(workspace, /lte\(appointments\.startDate, to\)/);
   assert.match(workspace, /gte\(appointments\.endDate, from\)/);
   assert.match(workspace, /eq\(appointmentItems\.paymentPreference, "invoice"\)/);

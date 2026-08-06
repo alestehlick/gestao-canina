@@ -6405,19 +6405,16 @@ function TodayView({
   const visibleBookings = dayBookings.filter(
     (booking) => booking.status !== "cancelled",
   );
-  const activeBookings = visibleBookings.filter(
-    (booking) =>
-      booking.status !== "completed" && booking.status !== "cancelled",
-  );
   const filteredBookings = filterBookings(dayBookings, agendaFilter).filter(
     (booking) => booking.status !== "cancelled",
   ).sort(agendaBookingOrder);
   const isToday = selectedDate === operationalToday;
-  const alertsForDay = new Set(
+  const dogsForDay = new Set(
+    visibleBookings.map((booking) => booking.dogId),
+  ).size;
+  const alertDogsForDay = new Set(
     visibleBookings
-      .filter((booking) =>
-        dogs.find((dog) => dog.id === booking.dogId)?.alert,
-      )
+      .filter((booking) => dogs.find((dog) => dog.id === booking.dogId)?.alert)
       .map((booking) => booking.dogId),
   ).size;
   const birthdays = customers.filter((customer) => customer.birthDate?.slice(5) === selectedDate.slice(5));
@@ -6461,30 +6458,40 @@ function TodayView({
         className="summary-strip"
         aria-label={`Resumo de ${formatSelectedDate(selectedDate)}`}
       >
-        <SummaryItem value={activeBookings.length} label="programados" />
+        <SummaryItem value={dogsForDay} label="cães" />
         <SummaryItem
-          value={visibleBookings.length}
-          label="serviços no dia"
+          value={
+            visibleBookings.filter((booking) => booking.serviceType === "hotel")
+              .length
+          }
+          label="hospedagens"
+        />
+        <SummaryItem
+          value={
+            visibleBookings.filter(
+              (booking) => booking.serviceType === "daycare",
+            ).length
+          }
+          label="creches"
         />
         <SummaryItem
           value={
             visibleBookings.filter(
               (booking) =>
-                booking.serviceType === "transport" &&
-                booking.status !== "completed",
+                booking.serviceType === "bath" ||
+                booking.serviceType === "grooming",
             ).length
           }
-          label="Taxi-dog"
+          label="banhos"
         />
         <SummaryItem
           value={
             visibleBookings.filter(
-              (booking) => booking.status === "completed",
+              (booking) => booking.serviceType === "transport",
             ).length
           }
-          label="concluídos"
+          label="Taxi-dogs"
         />
-        <SummaryItem value={alertsForDay} label="alertas" attention />
       </section>
 
       <div className="dashboard-grid">
@@ -6616,14 +6623,14 @@ function TodayView({
             </section>
           )}
 
-          {alertsForDay > 0 && (
+          {alertDogsForDay > 0 && (
             <section className="panel compact-panel attention-panel">
               <div className="panel-heading">
                 <div>
                   <p className="section-kicker">Cuidados</p>
                   <h2>Requer atenção</h2>
                 </div>
-                <span className="attention-count">{alertsForDay}</span>
+                <span className="attention-count">{alertDogsForDay}</span>
               </div>
               {visibleBookings
                 .map((booking) => ({

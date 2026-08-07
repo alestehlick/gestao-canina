@@ -218,10 +218,10 @@ type AuthStatusPayload = {
 
 const navItems: { id: View; label: string; shortLabel: string }[] = [
   { id: "today", label: "Hoje", shortLabel: "Hoje" },
+  { id: "billing", label: "Cobranças", shortLabel: "Faturas" },
   { id: "requests", label: "Pedidos", shortLabel: "Pedidos" },
   { id: "dogs", label: "Cães", shortLabel: "Cães" },
   { id: "customers", label: "Clientes", shortLabel: "Clientes" },
-  { id: "billing", label: "Cobranças", shortLabel: "Faturas" },
   { id: "cash", label: "Caixa", shortLabel: "Caixa" },
   { id: "activity", label: "Atividades", shortLabel: "Ativ." },
   { id: "access", label: "Acessos", shortLabel: "Acessos" },
@@ -921,7 +921,7 @@ export function ManagementApp() {
   const [cashExclusionInvoice, setCashExclusionInvoice] =
     useState<Invoice | null>(null);
   const [invoiceCorrection, setInvoiceCorrection] = useState<{
-    kind: "void" | "unmerge";
+    kind: "unmerge";
     invoice: Invoice;
   } | null>(null);
   const [view, setView] = useState<View>("today");
@@ -3901,10 +3901,7 @@ export function ManagementApp() {
       return;
     }
     const reason = reasonInput?.trim();
-    if (!reason) {
-      setInvoiceCorrection({ kind: "void", invoice: invoiceState.invoice });
-      return;
-    }
+    if (!reason) return;
     if (runtimeMode === "ready") {
       const result = await runLiveAction(
         "void-invoice",
@@ -4056,6 +4053,8 @@ export function ManagementApp() {
     if (!invoice.mergeId || runtimeMode !== "ready") return false;
     if (!confirmed) {
       setInvoiceCorrection({ kind: "unmerge", invoice });
+      setDialog((current) => (current === "invoice" ? null : current));
+      setInvoiceState(null);
       return false;
     }
     const result = await runLiveAction(
@@ -6226,84 +6225,36 @@ export function ManagementApp() {
 
       {invoiceCorrection && (
         <Dialog
-          title={
-            invoiceCorrection.kind === "void"
-              ? "Cancelar esta fatura?"
-              : "Desfazer a união?"
-          }
-          description={
-            invoiceCorrection.kind === "void"
-              ? `A fatura #${invoiceCorrection.invoice.number} será cancelada e os itens voltarão para correção.`
-              : `A fatura #${invoiceCorrection.invoice.number} será cancelada e as faturas originais serão restauradas.`
-          }
+          title="Desfazer a união?"
+          description={`A fatura #${invoiceCorrection.invoice.number} será cancelada e as faturas originais serão restauradas.`}
           onClose={() => setInvoiceCorrection(null)}
           size="small"
         >
-          {invoiceCorrection.kind === "void" ? (
-            <form
-              className="form-grid"
-              onSubmit={(event) => {
-                event.preventDefault();
-                const reason = String(
-                  new FormData(event.currentTarget).get("reason") ?? "",
-                ).trim();
-                if (!reason) return;
-                void voidInvoice(reason);
-              }}
-            >
-              <label className="field full">
-                <span>Motivo *</span>
-                <textarea
-                  name="reason"
-                  rows={3}
-                  maxLength={500}
-                  autoFocus
-                  required
-                />
-              </label>
-              <div className="dialog-actions full">
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={() => setInvoiceCorrection(null)}
-                >
-                  Voltar
-                </button>
-                <button className="danger-button" type="submit">
-                  Cancelar fatura
-                </button>
-              </div>
-            </form>
-          ) : (
-            <div className="billing-review">
-              <p className="modal-confirmation-copy">
-                Nenhum pagamento será apagado. Esta operação só é permitida
-                enquanto a fatura unificada ainda estiver em aberto e sem
-                compensação.
-              </p>
-              <div className="dialog-actions">
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={() => setInvoiceCorrection(null)}
-                >
-                  Manter união
-                </button>
-                <button
-                  className="danger-button"
-                  type="button"
-                  onClick={() =>
-                    void reverseInvoiceMerge(
-                      invoiceCorrection.invoice,
-                      true,
-                    )
-                  }
-                >
-                  Restaurar faturas originais
-                </button>
-              </div>
+          <div className="billing-review">
+            <p className="modal-confirmation-copy">
+              Nenhum pagamento será apagado. Esta operação só é permitida
+              enquanto a fatura unificada ainda estiver em aberto e sem
+              compensação.
+            </p>
+            <div className="dialog-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setInvoiceCorrection(null)}
+              >
+                Manter união
+              </button>
+              <button
+                className="danger-button"
+                type="button"
+                onClick={() =>
+                  void reverseInvoiceMerge(invoiceCorrection.invoice, true)
+                }
+              >
+                Restaurar faturas originais
+              </button>
             </div>
-          )}
+          </div>
         </Dialog>
       )}
 
@@ -7118,7 +7069,7 @@ function AgendaFilters({
 }) {
   const filters = [
     ["all", "Todos"],
-    ["upcoming", "A iniciar"],
+    ["upcoming", "Em aberto"],
     ["completed", "Concluídos"],
   ] as const;
   return (
@@ -8481,8 +8432,8 @@ function BillingView({
     .filter((invoice) => {
       if (invoice.status !== "paid") return true;
       const entryDate =
-        invoice.issuedAt ??
         invoice.paidAt ??
+        invoice.issuedAt ??
         invoice.periodEnd ??
         invoice.periodStart;
       return (
@@ -8496,9 +8447,19 @@ function BillingView({
       const rightPaid = right.status === "paid";
       if (leftPaid !== rightPaid) return leftPaid ? 1 : -1;
       const leftDate =
-        left.issuedAt ?? left.paidAt ?? left.periodEnd ?? left.periodStart ?? "";
+        (leftPaid ? left.paidAt : left.issuedAt) ??
+        left.issuedAt ??
+        left.paidAt ??
+        left.periodEnd ??
+        left.periodStart ??
+        "";
       const rightDate =
-        right.issuedAt ?? right.paidAt ?? right.periodEnd ?? right.periodStart ?? "";
+        (rightPaid ? right.paidAt : right.issuedAt) ??
+        right.issuedAt ??
+        right.paidAt ??
+        right.periodEnd ??
+        right.periodStart ??
+        "";
       return rightDate.localeCompare(leftDate) || right.number.localeCompare(left.number);
     });
   const isDefaultInvoicePeriod =
@@ -8860,6 +8821,18 @@ function BillingView({
             </div>
             <div className="table-wrap">
               <table className="data-table invoices-table">
+                <colgroup>
+                  {mergeSelectionMode && <col className="invoice-select-column" />}
+                  <col className="invoice-number-column" />
+                  <col className="invoice-customer-column" />
+                  <col className="invoice-items-column" />
+                  <col className="invoice-due-column" />
+                  <col className="invoice-value-column" />
+                  <col className="invoice-status-column" />
+                  <col className="invoice-delivery-column" />
+                  <col className="invoice-cash-column" />
+                  <col className="invoice-actions-column" />
+                </colgroup>
                 <thead>
                   <tr>
                     {mergeSelectionMode && (
@@ -8918,7 +8891,7 @@ function BillingView({
                         <InvoiceStatus invoice={invoice} />
                       </td>
                       <td>
-                        <InvoiceDeliveryStatus invoice={invoice} />
+                        <InvoiceDeliveryStatus invoice={invoice} compact />
                       </td>
                       <td className="cash-inclusion-cell">
                         {invoice.status === "paid" ? (
@@ -8945,7 +8918,7 @@ function BillingView({
                             className="row-link"
                             onClick={() => onOpenInvoice(invoice)}
                           >
-                            {invoice.status === "pending" ? "Ver fatura" : "Detalhes"}
+                            {invoice.status === "pending" ? "Abrir" : "Ver"}
                           </button>
                           <button
                             className={`row-link subtle invoice-note-link${
@@ -8954,7 +8927,7 @@ function BillingView({
                             onClick={() => openInvoiceNote(invoice)}
                             title={invoice.internalNote ?? undefined}
                           >
-                            {invoice.internalNote ?? "Adicionar nota"}
+                            {invoice.internalNote ?? "Nota"}
                           </button>
                           {invoice.mergeId && invoice.status !== "paid" && !invoice.compensationAvailableOn && (
                             <button
@@ -9579,13 +9552,22 @@ function InvoiceDeliveryStatus({
   }
   return (
     <span className={`invoice-delivery-state${compact ? " compact" : ""}`}>
-      {channels.map((channel) => (
-        <span className={`delivery-channel ${channel}`} key={channel}>
-          {channel === "whatsapp"
+      {channels.map((channel) => {
+        const detailedLabel =
+          channel === "whatsapp"
             ? "Compartilhamento por WhatsApp preparado"
-            : "Compartilhamento por e-mail preparado"}
-        </span>
-      ))}
+            : "Compartilhamento por e-mail preparado";
+        return (
+          <span
+            className={`delivery-channel ${channel}`}
+            key={channel}
+            title={detailedLabel}
+            aria-label={detailedLabel}
+          >
+            {compact ? (channel === "whatsapp" ? "WhatsApp" : "E-mail") : detailedLabel}
+          </span>
+        );
+      })}
     </span>
   );
 }
@@ -10607,7 +10589,7 @@ function InvoiceDialog({
     availableOn?: string,
     reason?: string,
   ) => boolean | Promise<boolean>;
-  onVoid: () => void | Promise<void>;
+  onVoid: (reason: string) => void | Promise<void>;
   onDeliveryConfirmed: (
     invoiceId: string,
     channel: "whatsapp" | "email",
@@ -10628,6 +10610,8 @@ function InvoiceDialog({
   const [skipLongStayDiscount, setSkipLongStayDiscount] = useState(false);
   const [reversePaymentOpen, setReversePaymentOpen] = useState(false);
   const [reversePaymentReason, setReversePaymentReason] = useState("");
+  const [cancelInvoiceOpen, setCancelInvoiceOpen] = useState(false);
+  const [cancelInvoiceReason, setCancelInvoiceReason] = useState("");
   const [settlementEditorOpen, setSettlementEditorOpen] = useState(false);
   const [settlementDate, setSettlementDate] = useState(
     state.invoice?.compensationAvailableOn ?? shiftDate(operationalToday, 1),
@@ -11112,9 +11096,69 @@ function InvoiceDialog({
             </form>
           )}
 
+          {!isPaid && !state.invoice?.mergeId && cancelInvoiceOpen && (
+            <form
+              className="invoice-reversal-form"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                const reason = cancelInvoiceReason.trim();
+                if (reason.length < 3) return;
+                await onVoid(reason);
+              }}
+            >
+              <label>
+                <span>Motivo do cancelamento *</span>
+                <textarea
+                  value={cancelInvoiceReason}
+                  onChange={(event) => setCancelInvoiceReason(event.target.value)}
+                  rows={2}
+                  minLength={3}
+                  maxLength={500}
+                  placeholder="Ex.: serviço lançado em duplicidade"
+                  autoFocus
+                  required
+                />
+              </label>
+              <p>
+                A fatura será cancelada e os serviços voltarão para correção em
+                Cobranças. O motivo ficará registrado no histórico.
+              </p>
+              <div>
+                <button
+                  className="text-button muted"
+                  type="button"
+                  onClick={() => {
+                    setCancelInvoiceOpen(false);
+                    setCancelInvoiceReason("");
+                  }}
+                  disabled={busy}
+                >
+                  Voltar
+                </button>
+                <button
+                  className="danger-button"
+                  type="submit"
+                  disabled={busy || cancelInvoiceReason.trim().length < 3}
+                >
+                  {busy ? "Cancelando…" : "Confirmar cancelamento"}
+                </button>
+              </div>
+            </form>
+          )}
+
           <div className="dialog-actions">
-            {!isPaid && (
-              <button className="danger-button" type="button" onClick={onVoid}>
+            {!isPaid && !cancelInvoiceOpen && (
+              <button
+                className="danger-button"
+                type="button"
+                onClick={() => {
+                  if (state.invoice?.mergeId) {
+                    void onVoid("");
+                  } else {
+                    setCancelInvoiceOpen(true);
+                  }
+                }}
+              >
                 {state.invoice?.mergeId ? "Desfazer união" : "Cancelar fatura"}
               </button>
             )}

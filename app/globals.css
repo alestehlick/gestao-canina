@@ -2529,6 +2529,65 @@ h3 {
   font-size: 0.76rem;
 }
 
+.invoices-table {
+  min-width: 960px;
+  table-layout: fixed;
+}
+
+.invoice-select-column {
+  width: 38px;
+}
+
+.invoice-number-column {
+  width: 94px;
+}
+
+.invoice-customer-column {
+  width: 128px;
+}
+
+.invoice-items-column {
+  width: 132px;
+}
+
+.invoice-due-column {
+  width: 108px;
+}
+
+.invoice-value-column {
+  width: 98px;
+}
+
+.invoice-status-column {
+  width: 126px;
+}
+
+.invoice-delivery-column {
+  width: 100px;
+}
+
+.invoice-cash-column {
+  width: 78px;
+}
+
+.invoice-actions-column {
+  width: 84px;
+}
+
+.invoices-table td {
+  overflow-wrap: anywhere;
+}
+
+.invoices-table .invoice-delivery-state {
+  min-width: 0;
+}
+
+.invoices-table .delivery-channel {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .invoice-row-actions {
   display: grid;
   justify-items: start;
@@ -2543,7 +2602,7 @@ h3 {
 }
 
 .invoice-note-link.has-note {
-  max-width: 170px;
+  max-width: 100%;
   color: var(--danger);
   font-style: italic;
   line-height: 1.35;

@@ -297,7 +297,7 @@ export async function GET(request: Request) {
         .select()
         .from(invoices)
         .where(eq(invoices.establishmentId, establishmentId))
-        .orderBy(asc(invoices.status), desc(invoices.createdAt))
+        .orderBy(desc(invoices.updatedAt))
         .limit(1_000),
       db
         .select({
@@ -358,7 +358,8 @@ export async function GET(request: Request) {
             eq(invoiceMerges.status, "active"),
           ),
         )
-        .limit(1_000),
+        .orderBy(desc(invoicePayments.createdAt))
+        .limit(2_000),
       db
         .select({
           invoiceId: invoicePayments.invoiceId,
@@ -429,8 +430,8 @@ export async function GET(request: Request) {
         .select()
         .from(creditPurchases)
         .where(eq(creditPurchases.establishmentId, establishmentId))
-        .orderBy(desc(creditPurchases.createdAt))
-        .limit(300),
+        .orderBy(desc(creditPurchases.updatedAt))
+        .limit(1_000),
       db
         .select({
           accountId: creditMovements.accountId,

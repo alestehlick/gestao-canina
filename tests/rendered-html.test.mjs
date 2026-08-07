@@ -38,7 +38,13 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.doesNotMatch(app, /Registrar chegada/);
   assert.match(app, /const defaultInvoiceFrom = shiftDate\(operationalToday, -6\)/);
   assert.match(app, /const displayedInvoices = invoices/);
+  assert.match(app, /invoice\.paidAt \?\?\s*invoice\.issuedAt/s);
   assert.match(app, /if \(leftPaid !== rightPaid\) return leftPaid \? 1 : -1/);
+  assert.match(app, /\["upcoming", "Em aberto"\]/);
+  assert.match(app, /cancelInvoiceOpen/);
+  assert.match(app, /Motivo do cancelamento/);
+  assert.match(app, /invoice-delivery-column/);
+  assert.match(app, /compact \? \(channel === "whatsapp" \? "WhatsApp" : "E-mail"\)/);
   assert.match(app, /Escolher período/);
   assert.match(app, /Mostrar cobranças/);
   assert.match(app, /whatsapp:\/\/send\?phone=/);
@@ -114,6 +120,9 @@ test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () =
   assert.match(cashSettings, /max: 28/);
   assert.match(payments, /INSERT INTO cash_entries/);
   assert.match(workspace, /cashEntryId/);
+  assert.match(workspace, /orderBy\(desc\(invoices\.updatedAt\)\)/);
+  assert.match(workspace, /orderBy\(desc\(invoicePayments\.createdAt\)\)/);
+  assert.match(workspace, /orderBy\(desc\(creditPurchases\.updatedAt\)\)/);
   assert.match(workspace, /lodgingDailyRateCents/);
   assert.match(cashView, /Entradas consideradas/);
   assert.match(cashRoute, /credit_sold_cents/);

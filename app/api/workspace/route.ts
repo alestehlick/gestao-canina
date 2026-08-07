@@ -358,8 +358,7 @@ export async function GET(request: Request) {
             eq(invoiceMerges.status, "active"),
           ),
         )
-        .orderBy(desc(invoicePayments.createdAt))
-        .limit(2_000),
+        .limit(1_000),
       db
         .select({
           invoiceId: invoicePayments.invoiceId,
@@ -378,7 +377,8 @@ export async function GET(request: Request) {
             eq(invoicePayments.status, "active"),
           ),
         )
-        .limit(1_000),
+        .orderBy(desc(invoicePayments.createdAt))
+        .limit(2_000),
       db
         .select({
           invoiceId: invoiceSettlements.invoiceId,

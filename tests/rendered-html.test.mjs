@@ -121,7 +121,16 @@ test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () =
   assert.match(payments, /INSERT INTO cash_entries/);
   assert.match(workspace, /cashEntryId/);
   assert.match(workspace, /orderBy\(desc\(invoices\.updatedAt\)\)/);
-  assert.match(workspace, /orderBy\(desc\(invoicePayments\.createdAt\)\)/);
+  const mergeQuery = workspace.slice(
+    workspace.indexOf(".from(invoiceMergeMembers)"),
+    workspace.indexOf(".from(invoicePayments)"),
+  );
+  const paymentQuery = workspace.slice(
+    workspace.indexOf(".from(invoicePayments)"),
+    workspace.indexOf(".from(invoiceSettlements)"),
+  );
+  assert.doesNotMatch(mergeQuery, /invoicePayments\.createdAt/);
+  assert.match(paymentQuery, /orderBy\(desc\(invoicePayments\.createdAt\)\)/);
   assert.match(workspace, /orderBy\(desc\(creditPurchases\.updatedAt\)\)/);
   assert.match(workspace, /lodgingDailyRateCents/);
   assert.match(cashView, /Entradas consideradas/);

@@ -47,6 +47,13 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.match(app, /compact \? \(channel === "whatsapp" \? "WhatsApp" : "E-mail"\)/);
   assert.match(app, /Escolher período/);
   assert.match(app, /Mostrar cobranças/);
+  assert.match(app, /Filtrar cobranças por situação/);
+  assert.match(app, /\["compensation", "Em compensação"\]/);
+  assert.match(app, /Cliente · A–Z/);
+  assert.match(app, /Vencimento · mais próximo/);
+  assert.match(app, /invoiceStatus\(invoice\) === invoiceStatusFilter/);
+  assert.match(app, /left\.customerName\.localeCompare\(right\.customerName, "pt-BR"/);
+  assert.match(app, /left\.dueDate \?\? "9999-12-31"/);
   assert.match(app, /whatsapp:\/\/send\?phone=/);
   assert.match(app, /isWindowsWhatsApp/);
   assert.match(app, /Digite o nome do cão/);
@@ -64,6 +71,8 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.doesNotMatch(app, /Mastercard|VISA|cart[aã]o de cr[eé]dito/);
   assert.match(styles, /\.billing-page\s*\{[^}]*min-width:\s*0;/s);
   assert.match(styles, /\.billing-page\s*>\s*\*\s*\{[^}]*min-width:\s*0;/s);
+  assert.match(styles, /\.billing-list-tools\s*\{[^}]*justify-content:\s*space-between;/s);
+  assert.match(styles, /\.billing-status-filters\s*\{[^}]*overflow-x:\s*auto;/s);
 });
 
 test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () => {

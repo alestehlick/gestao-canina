@@ -3588,6 +3588,42 @@ h3 {
   max-width: 820px;
 }
 
+.billing-list-tools {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 14px;
+  padding: 10px 0 12px;
+}
+
+.billing-status-control {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.compact-control-label {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.billing-status-filters {
+  min-width: 0;
+}
+
+.billing-sort-control {
+  width: min(240px, 100%);
+  flex: 0 0 auto;
+}
+
+.billing-sort-control select {
+  min-height: 38px;
+}
+
 .invoice-merge-toolbar {
   display: flex;
   min-height: 52px;
@@ -6068,6 +6104,28 @@ h3 {
     width: 100%;
     flex-wrap: wrap;
     justify-content: flex-start;
+  }
+
+  .billing-list-tools {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .billing-status-filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 3px;
+    scrollbar-width: thin;
+  }
+
+  .billing-status-filters button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .billing-sort-control {
+    width: 100%;
   }
 
   .invoice-merge-toolbar {

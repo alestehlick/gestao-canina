@@ -120,6 +120,13 @@ function billableLongStayDiscountCents(
 }
 
 type BillingTab = "invoice" | "credits" | "receipts";
+type InvoiceListStatus =
+  | "all"
+  | "paid"
+  | "overdue"
+  | "pending"
+  | "compensation";
+type InvoiceListSort = "priority" | "customer" | "dueDate";
 type AgendaServiceFilter =
   | "all"
   | "hotel"
@@ -8373,6 +8380,10 @@ function BillingView({
   const [invoicePeriodTo, setInvoicePeriodTo] = useState(operationalToday);
   const [appliedInvoiceFrom, setAppliedInvoiceFrom] = useState(defaultInvoiceFrom);
   const [appliedInvoiceTo, setAppliedInvoiceTo] = useState(operationalToday);
+  const [invoiceStatusFilter, setInvoiceStatusFilter] =
+    useState<InvoiceListStatus>("all");
+  const [invoiceListSort, setInvoiceListSort] =
+    useState<InvoiceListSort>("priority");
   const [selectedMergeInvoiceIds, setSelectedMergeInvoiceIds] = useState<string[]>([]);
   const [mergeSelectionMode, setMergeSelectionMode] = useState(false);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
@@ -8428,6 +8439,12 @@ function BillingView({
   const awaitingPackages = creditPurchases.filter(
     (purchase) => purchase.status === "awaiting_payment",
   ).length;
+  const invoiceStatus = (invoice: Invoice): Exclude<InvoiceListStatus, "all"> => {
+    if (invoice.status === "paid") return "paid";
+    if (invoice.compensationAvailableOn) return "compensation";
+    if (invoice.status === "overdue") return "overdue";
+    return "pending";
+  };
   const displayedInvoices = invoices
     .filter((invoice) => {
       if (invoice.status !== "paid") return true;
@@ -8442,7 +8459,32 @@ function BillingView({
         entryDate! <= appliedInvoiceTo
       );
     })
+    .filter(
+      (invoice) =>
+        invoiceStatusFilter === "all" ||
+        invoiceStatus(invoice) === invoiceStatusFilter,
+    )
     .sort((left, right) => {
+      if (invoiceListSort === "customer") {
+        return (
+          left.customerName.localeCompare(right.customerName, "pt-BR", {
+            sensitivity: "base",
+          }) ||
+          (left.dueDate ?? "").localeCompare(right.dueDate ?? "") ||
+          left.number.localeCompare(right.number)
+        );
+      }
+      if (invoiceListSort === "dueDate") {
+        return (
+          (left.dueDate ?? "9999-12-31").localeCompare(
+            right.dueDate ?? "9999-12-31",
+          ) ||
+          left.customerName.localeCompare(right.customerName, "pt-BR", {
+            sensitivity: "base",
+          }) ||
+          left.number.localeCompare(right.number)
+        );
+      }
       const leftPaid = left.status === "paid";
       const rightPaid = right.status === "paid";
       if (leftPaid !== rightPaid) return leftPaid ? 1 : -1;
@@ -8780,6 +8822,46 @@ function BillingView({
                 </button>
               </form>
             )}
+            <div className="billing-list-tools">
+              <div className="billing-status-control">
+                <span className="compact-control-label">Situação</span>
+                <div className="filter-chips billing-status-filters" aria-label="Filtrar cobranças por situação">
+                  {([
+                    ["all", "Todas"],
+                    ["paid", "Pago"],
+                    ["overdue", "Vencido"],
+                    ["pending", "Fatura pendente"],
+                    ["compensation", "Em compensação"],
+                  ] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={invoiceStatusFilter === value ? "active" : ""}
+                      aria-pressed={invoiceStatusFilter === value}
+                      onClick={() => {
+                        setInvoiceStatusFilter(value);
+                        setSelectedMergeInvoiceIds([]);
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <label className="field billing-sort-control">
+                <span>Ordenar por</span>
+                <select
+                  value={invoiceListSort}
+                  onChange={(event) =>
+                    setInvoiceListSort(event.target.value as InvoiceListSort)
+                  }
+                >
+                  <option value="priority">Situação e atualização</option>
+                  <option value="customer">Cliente · A–Z</option>
+                  <option value="dueDate">Vencimento · mais próximo</option>
+                </select>
+              </label>
+            </div>
             <div className="invoice-merge-toolbar">
               {mergeSelectionMode ? (
                 <>
@@ -9075,8 +9157,8 @@ function BillingView({
             </div>
             {!displayedInvoices.length && (
               <EmptyState
-                title="Nenhuma cobrança neste período"
-                description="Escolha outro intervalo para consultar cobranças anteriores."
+                title="Nenhuma cobrança com estes filtros"
+                description="Altere a situação ou o período para consultar outras cobranças."
               />
             )}
           </section>

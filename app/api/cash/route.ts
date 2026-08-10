@@ -4,6 +4,7 @@ import {
   auditEvents,
   cashEntries,
   establishments,
+  financialAccounts,
   invoicePayments,
   invoices,
 } from "@/db/schema";
@@ -55,7 +56,7 @@ function shiftAnchorMonth(anchorMonth: string, delta: number) {
 export async function GET(request: Request) {
   const requestId = crypto.randomUUID();
   try {
-    const identity = await requireIdentity(request, ["owner"]);
+    const identity = await requireIdentity(request, ["owner", "finance"]);
     const establishmentId = identity.establishmentId!;
     const anchorMonth =
       new URL(request.url).searchParams.get("month") ??
@@ -94,6 +95,8 @@ export async function GET(request: Request) {
         direction: cashEntries.direction,
         origin: cashEntries.origin,
         sourcePaymentId: cashEntries.sourcePaymentId,
+        financialAccountId: cashEntries.financialAccountId,
+        financialAccountName: financialAccounts.name,
         occurredOn: cashEntries.occurredOn,
         amountCents: cashEntries.amountCents,
         category: cashEntries.category,
@@ -113,6 +116,10 @@ export async function GET(request: Request) {
         eq(invoicePayments.id, cashEntries.sourcePaymentId),
       )
       .leftJoin(invoices, eq(invoices.id, invoicePayments.invoiceId))
+      .leftJoin(
+        financialAccounts,
+        eq(financialAccounts.id, cashEntries.financialAccountId),
+      )
       .where(
         and(
           eq(cashEntries.establishmentId, establishmentId),
@@ -354,7 +361,7 @@ export async function POST(request: Request) {
   const requestId = crypto.randomUUID();
   try {
     assertSameOrigin(request);
-    const identity = await requireIdentity(request, ["owner"]);
+    const identity = await requireIdentity(request, ["owner", "finance"]);
     const body = await readJsonObject(request);
     const direction = requiredString(body, "direction", 20);
     if (!directions.has(direction)) {
@@ -379,9 +386,37 @@ export async function POST(request: Request) {
     const category = requiredString(body, "category", 60);
     const description = requiredString(body, "description", 160);
     const note = optionalString(body, "note", 500);
+    const requestedFinancialAccountId = optionalString(
+      body,
+      "financialAccountId",
+      80,
+    );
     const id = crypto.randomUUID();
     const establishmentId = identity.establishmentId!;
     const db = getDb();
+    const [financialAccount] = await db
+      .select({ id: financialAccounts.id })
+      .from(financialAccounts)
+      .where(
+        requestedFinancialAccountId
+          ? and(
+              eq(financialAccounts.id, requestedFinancialAccountId),
+              eq(financialAccounts.establishmentId, establishmentId),
+              eq(financialAccounts.active, true),
+            )
+          : and(
+              eq(financialAccounts.establishmentId, establishmentId),
+              eq(financialAccounts.active, true),
+            ),
+      )
+      .limit(1);
+    if (!financialAccount) {
+      throw new HttpError(
+        409,
+        "financial_account_required",
+        "Cadastre ou escolha uma conta financeira ativa.",
+      );
+    }
 
     await db.batch([
       db.insert(cashEntries).values({
@@ -389,6 +424,7 @@ export async function POST(request: Request) {
         establishmentId,
         direction: direction as "inflow" | "outflow",
         origin: "manual",
+        financialAccountId: financialAccount.id,
         occurredOn,
         amountCents,
         category,

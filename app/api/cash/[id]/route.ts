@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditEvents, cashEntries } from "@/db/schema";
+import { auditEvents, cashEntries, financialAccounts } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
 import {
   assertSameOrigin,
@@ -32,7 +32,7 @@ export async function PATCH(
   const requestId = crypto.randomUUID();
   try {
     assertSameOrigin(request);
-    const identity = await requireIdentity(request, ["owner"]);
+    const identity = await requireIdentity(request, ["owner", "finance"]);
     const { id } = await context.params;
     const body = await readJsonObject(request);
     const action = requiredString(body, "action", 20);
@@ -176,6 +176,23 @@ export async function PATCH(
     const category = requiredString(body, "category", 60);
     const description = requiredString(body, "description", 160);
     const note = optionalString(body, "note", 500);
+    const requestedFinancialAccountId = optionalString(body, "financialAccountId", 80);
+    const financialAccountId = requestedFinancialAccountId ?? entry.financialAccountId;
+    if (!financialAccountId) {
+      throw new HttpError(400, "financial_account_required", "Escolha a conta de entrada ou saída.");
+    }
+    const [financialAccount] = await db
+      .select({ id: financialAccounts.id, name: financialAccounts.name })
+      .from(financialAccounts)
+      .where(and(
+        eq(financialAccounts.id, financialAccountId),
+        eq(financialAccounts.establishmentId, establishmentId),
+        eq(financialAccounts.active, true),
+      ))
+      .limit(1);
+    if (!financialAccount) {
+      throw new HttpError(404, "financial_account_not_found", "A conta selecionada não está ativa.");
+    }
     const now = new Date().toISOString();
 
     await db.batch([
@@ -188,6 +205,7 @@ export async function PATCH(
           category,
           description,
           note,
+          financialAccountId,
           updatedByUserId: identity.userId,
           updatedAt: now,
         })
@@ -214,7 +232,7 @@ export async function PATCH(
             amountCents: entry.amountCents,
             category: entry.category,
           },
-          after: { direction, occurredOn, amountCents, category },
+          after: { direction, occurredOn, amountCents, category, financialAccountId, financialAccountName: financialAccount.name },
         }),
       }),
     ]);

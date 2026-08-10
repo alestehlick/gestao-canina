@@ -20,6 +20,8 @@ type CashEntry = {
   direction: CashDirection;
   origin: "invoice_payment" | "manual";
   sourcePaymentId: string | null;
+  financialAccountId: string | null;
+  financialAccountName: string | null;
   occurredOn: string;
   amountCents: number;
   category: string;
@@ -83,6 +85,15 @@ type CashDraft = {
   category: string;
   description: string;
   note: string;
+  financialAccountId: string;
+};
+
+type FinancialAccount = {
+  id: string;
+  name: string;
+  institution: string | null;
+  kind: "checking" | "savings" | "cash" | "other";
+  active: boolean;
 };
 
 const inflowCategories = [
@@ -164,6 +175,7 @@ async function cashRequest<T>(url: string, init?: RequestInit): Promise<T> {
 function draftFor(
   referenceDate: string,
   direction: CashDirection = "outflow",
+  financialAccountId = "",
 ): CashDraft {
   const categories =
     direction === "inflow" ? inflowCategories : outflowCategories;
@@ -174,15 +186,18 @@ function draftFor(
     category: categories[0],
     description: "",
     note: "",
+    financialAccountId,
   };
 }
 
 export function CashView({
   referenceDate,
   onChanged,
+  canEditSettings = false,
 }: {
   referenceDate: string;
   onChanged: () => void;
+  canEditSettings?: boolean;
 }) {
   const currentMonth = referenceDate.slice(0, 7);
   const [anchorMonth, setAnchorMonth] = useState(currentMonth);
@@ -197,13 +212,20 @@ export function CashView({
   const [formOpen, setFormOpen] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [financialAccounts, setFinancialAccounts] = useState<FinancialAccount[]>([]);
+  const [accountFilter, setAccountFilter] = useState("all");
+  const [newAccountOpen, setNewAccountOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const result = await cashRequest<CashPayload>(
-        `/api/cash?month=${encodeURIComponent(anchorMonth)}`,
-      );
+      const [result, accountResult] = await Promise.all([
+        cashRequest<CashPayload>(`/api/cash?month=${encodeURIComponent(anchorMonth)}`),
+        cashRequest<{ accounts: FinancialAccount[] }>(
+          `/api/financial-accounts${canEditSettings ? "?includeInactive=true" : ""}`,
+        ),
+      ]);
       setPayload(result);
+      setFinancialAccounts(accountResult.accounts);
       setError("");
     } catch (reason) {
       setError(
@@ -212,7 +234,7 @@ export function CashView({
           : "Não foi possível carregar o Caixa.",
       );
     }
-  }, [anchorMonth]);
+  }, [anchorMonth, canEditSettings]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
@@ -220,7 +242,10 @@ export function CashView({
   }, [load]);
 
   const entries = useMemo(() => {
-    const all = payload?.entries ?? [];
+    let all = payload?.entries ?? [];
+    if (accountFilter !== "all") {
+      all = all.filter((entry) => entry.financialAccountId === accountFilter);
+    }
     if (filter === "excluded") {
       return all.filter((entry) => entry.status === "excluded");
     }
@@ -231,14 +256,20 @@ export function CashView({
       );
     }
     return all;
-  }, [filter, payload]);
+  }, [accountFilter, filter, payload]);
 
   const categories =
     draft.direction === "inflow" ? inflowCategories : outflowCategories;
 
   function openNew(direction: CashDirection) {
     setEditingId(null);
-    setDraft(draftFor(referenceDate, direction));
+    setDraft(
+      draftFor(
+        referenceDate,
+        direction,
+        financialAccounts.find((account) => account.active)?.id ?? "",
+      ),
+    );
     setFormOpen(true);
   }
 
@@ -251,6 +282,7 @@ export function CashView({
       category: entry.category,
       description: entry.description,
       note: entry.note ?? "",
+      financialAccountId: entry.financialAccountId ?? "",
     });
     setFormOpen(true);
   }
@@ -281,6 +313,7 @@ export function CashView({
         category: draft.category,
         description: draft.description,
         note: draft.note || undefined,
+        financialAccountId: draft.financialAccountId,
       };
       await cashRequest(
         editingId ? `/api/cash/${editingId}` : "/api/cash",
@@ -355,6 +388,55 @@ export function CashView({
         reason instanceof Error
           ? reason.message
           : "Não foi possível salvar a configuração.",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function createFinancialAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    const form = new FormData(event.currentTarget);
+    setBusy("financial-account");
+    try {
+      await cashRequest("/api/financial-accounts", {
+        method: "POST",
+        body: JSON.stringify({
+          name: String(form.get("name") ?? "").trim(),
+          institution: String(form.get("institution") ?? "").trim() || null,
+          kind: String(form.get("kind") ?? "checking"),
+        }),
+      });
+      setNewAccountOpen(false);
+      await load();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Não foi possível cadastrar a conta.",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function toggleFinancialAccount(account: FinancialAccount) {
+    if (busy) return;
+    setBusy(`financial-account:${account.id}`);
+    try {
+      await cashRequest(`/api/financial-accounts/${account.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          action: account.active ? "archive" : "activate",
+        }),
+      });
+      await load();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Não foi possível alterar a conta.",
       );
     } finally {
       setBusy("");
@@ -728,6 +810,31 @@ export function CashView({
                 ))}
               </select>
             </label>
+            <label className="field">
+              <span>Conta</span>
+              <select
+                value={draft.financialAccountId}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    financialAccountId: event.target.value,
+                  }))
+                }
+                required
+              >
+                {financialAccounts
+                  .filter(
+                    (account) =>
+                      account.active || account.id === draft.financialAccountId,
+                  )
+                  .map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name}
+                      {account.institution ? ` · ${account.institution}` : ""}
+                    </option>
+                  ))}
+              </select>
+            </label>
             <label className="field cash-description-field">
               <span>Descrição</span>
               <input
@@ -796,6 +903,20 @@ export function CashView({
             </button>
           ))}
         </div>
+        <label className="cash-account-filter">
+          <span>Conta</span>
+          <select
+            value={accountFilter}
+            onChange={(event) => setAccountFilter(event.target.value)}
+          >
+            <option value="all">Todas as contas</option>
+            {financialAccounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.name}{account.active ? "" : " · inativa"}
+              </option>
+            ))}
+          </select>
+        </label>
         {!!payload?.totals.excludedCount && (
           <p className="cash-excluded-note">
             {payload.totals.excludedCount} lançamento(s) desconsiderado(s), preservado(s) no histórico.
@@ -834,6 +955,9 @@ export function CashView({
                             {entry.origin === "invoice_payment"
                               ? `${entry.customerName ?? "Cliente"} · lançamento automático`
                               : entry.note || "Lançamento manual"}
+                            {entry.financialAccountName
+                              ? ` · ${entry.financialAccountName}`
+                              : ""}
                           </small>
                         </span>
                       </td>
@@ -900,6 +1024,9 @@ export function CashView({
                     <strong>{entry.description}</strong>
                     <small>
                       {formatBrazilianDate(entry.occurredOn)} · {entry.category}
+                      {entry.financialAccountName
+                        ? ` · ${entry.financialAccountName}`
+                        : ""}
                     </small>
                   </span>
                   <strong
@@ -946,7 +1073,67 @@ export function CashView({
         )}
       </section>
 
-      <details className="panel cash-settings">
+      {canEditSettings && (
+        <details className="panel cash-settings">
+          <summary>Contas de recebimento</summary>
+          <div className="financial-account-list">
+            {financialAccounts.map((account) => (
+              <div key={account.id}>
+                <span>
+                  <strong>{account.name}</strong>
+                  <small>
+                    {account.institution || "Sem instituição informada"}
+                    {account.active ? "" : " · inativa"}
+                  </small>
+                </span>
+                <button
+                  type="button"
+                  className="text-button muted"
+                  disabled={busy === `financial-account:${account.id}`}
+                  onClick={() => void toggleFinancialAccount(account)}
+                >
+                  {account.active ? "Inativar" : "Reativar"}
+                </button>
+              </div>
+            ))}
+          </div>
+          {newAccountOpen ? (
+            <form className="cash-account-form" onSubmit={createFinancialAccount}>
+              <label className="field">
+                <span>Nome da conta</span>
+                <input name="name" placeholder="Ex.: Conta principal" maxLength={80} required />
+              </label>
+              <label className="field">
+                <span>Instituição (opcional)</span>
+                <input name="institution" maxLength={80} />
+              </label>
+              <label className="field">
+                <span>Tipo</span>
+                <select name="kind" defaultValue="checking">
+                  <option value="checking">Conta corrente</option>
+                  <option value="savings">Poupança</option>
+                  <option value="cash">Dinheiro em caixa</option>
+                  <option value="other">Outra</option>
+                </select>
+              </label>
+              <div className="cash-form-actions">
+                <button type="button" className="secondary-button" onClick={() => setNewAccountOpen(false)}>
+                  Cancelar
+                </button>
+                <button type="submit" className="primary-button" disabled={busy === "financial-account"}>
+                  Salvar conta
+                </button>
+              </div>
+            </form>
+          ) : (
+            <button type="button" className="secondary-button" onClick={() => setNewAccountOpen(true)}>
+              + Nova conta
+            </button>
+          )}
+        </details>
+      )}
+
+      {canEditSettings && <details className="panel cash-settings">
         <summary>Configurar início do mês financeiro</summary>
         <form onSubmit={saveStartDay}>
           <label className="field">
@@ -977,7 +1164,7 @@ export function CashView({
             {busy === "settings" ? "Salvando…" : "Salvar configuração"}
           </button>
         </form>
-      </details>
+      </details>}
     </div>
   );
 }

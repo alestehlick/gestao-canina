@@ -1,10 +1,11 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { getD1Database, getDb } from "@/db";
 import {
   appointmentItems,
   appointments,
   auditEvents,
   establishments,
+  invoices,
   serviceCatalog,
 } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
@@ -1000,8 +1001,56 @@ export async function PATCH(
         }
       }
 
+      const removingLodgingDeposit =
+        service.code === "hotel" &&
+        appointment.depositPercent !== null &&
+        depositPercent === null;
+      const openDepositInvoiceIds: string[] = [];
+      if (removingLodgingDeposit) {
+        const linkedInvoices = await getD1Database()
+          .prepare(
+            `SELECT DISTINCT i.id, i.status, i.source_type AS sourceType,
+              EXISTS (
+                SELECT 1 FROM invoice_payments ip
+                WHERE ip.invoice_id = i.id AND ip.status = 'active'
+              ) AS hasPayment,
+              EXISTS (
+                SELECT 1 FROM invoice_settlements s
+                WHERE s.invoice_id = i.id AND s.status = 'scheduled'
+              ) AS hasSettlement
+            FROM invoice_items ii
+            INNER JOIN invoices i ON i.id = ii.invoice_id
+            WHERE ii.appointment_item_id = ?
+              AND i.establishment_id = ?
+              AND i.status <> 'void'`,
+          )
+          .bind(item.id, establishmentId)
+          .all<{
+            id: string;
+            status: string;
+            sourceType: string;
+            hasPayment: number;
+            hasSettlement: number;
+          }>();
+        for (const linked of linkedInvoices.results) {
+          if (
+            linked.status === "paid" ||
+            linked.hasPayment ||
+            linked.hasSettlement ||
+            linked.sourceType !== "lodging_deposit"
+          ) {
+            throw new HttpError(
+              409,
+              "lodging_deposit_already_billed",
+              "O sinal já participa de uma cobrança. Cancele ou desfaça essa cobrança antes de removê-lo da hospedagem.",
+            );
+          }
+          openDepositInvoiceIds.push(linked.id);
+        }
+      }
+
       const now = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
-      await db.batch([
+      const updateStatements = [
         db
           .update(appointments)
           .set({
@@ -1038,6 +1087,17 @@ export async function PATCH(
             updatedAt: now,
           })
           .where(eq(appointmentItems.id, item.id)),
+        ...(openDepositInvoiceIds.length
+          ? [db
+              .update(invoices)
+              .set({
+                status: "void" as const,
+                voidedAt: now,
+                voidReason: "Sinal removido do agendamento antes do pagamento",
+                updatedAt: now,
+              })
+              .where(inArray(invoices.id, openDepositInvoiceIds))]
+          : []),
         db.insert(auditEvents).values({
           id: crypto.randomUUID(),
           establishmentId,
@@ -1047,8 +1107,17 @@ export async function PATCH(
           entityType: "appointment",
           entityId: id,
           requestId,
+          metadataJson: JSON.stringify({
+            serviceName: service.name,
+            dogId: appointment.dogId,
+            startDate,
+            endDate,
+            depositPercent,
+            voidedDepositInvoiceIds: openDepositInvoiceIds,
+          }),
         }),
-      ]);
+      ] as const;
+      await db.batch(updateStatements);
 
       return json({
         appointment: {

@@ -6804,6 +6804,188 @@ h3 {
   }
 }
 
+.billing-utility-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.credit-renewal-panel {
+  background: #fffaf0;
+  border: 1px solid #eadfca;
+  border-radius: 14px;
+  margin-bottom: 18px;
+  padding: 0 16px;
+}
+
+.credit-renewal-panel summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  list-style: none;
+  min-height: 52px;
+}
+
+.credit-renewal-panel summary::-webkit-details-marker { display: none; }
+
+.credit-renewal-panel summary strong,
+.attention-count {
+  align-items: center;
+  background: #f3e6ca;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.78rem;
+  justify-content: center;
+  min-height: 28px;
+  min-width: 28px;
+  padding: 0 8px;
+}
+
+.credit-renewal-list,
+.overdue-reminder-list,
+.financial-account-list {
+  display: grid;
+}
+
+.credit-renewal-list > div,
+.overdue-reminder-list > div,
+.financial-account-list > div {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px 0;
+}
+
+.credit-renewal-list span,
+.overdue-reminder-list span,
+.financial-account-list span {
+  display: grid;
+  gap: 2px;
+}
+
+.credit-renewal-list small,
+.overdue-reminder-list small,
+.financial-account-list small,
+.compact-help {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.overdue-reminder-panel {
+  border-color: #e6c7bc;
+}
+
+.overdue-reminder-panel .section-kicker { color: #a74735; }
+
+.quick-service-form { max-width: 680px; }
+
+.quick-choice-group {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+}
+
+.quick-choice-group legend {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0 5px;
+}
+
+.quick-choice-group label {
+  align-items: center;
+  background: var(--surface-muted);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 7px;
+  padding: 8px 11px;
+}
+
+.quick-choice-group label:has(input:checked) {
+  background: #e8f1ed;
+  border-color: #9ebeb0;
+  color: #164f3c;
+}
+
+.quick-service-summary {
+  align-items: baseline;
+  background: #f4f0e8;
+  border-radius: 12px;
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.quick-service-summary strong { font-size: 1.35rem; }
+
+.statement-form { align-items: end; }
+
+.statement-preview {
+  background: #f7f4ee;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+}
+
+.statement-preview > div {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.cash-account-filter {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.cash-account-filter select { min-width: 160px; }
+
+.cash-account-form {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  padding-top: 14px;
+}
+
+.cash-account-form label { display: grid; gap: 5px; }
+
+@media (max-width: 760px) {
+  .billing-utility-actions,
+  .day-heading {
+    align-items: stretch;
+  }
+
+  .billing-utility-actions > button { flex: 1 1 100%; }
+
+  .credit-renewal-list > div,
+  .overdue-reminder-list > div,
+  .financial-account-list > div {
+    align-items: flex-start;
+  }
+
+  .quick-choice-group { align-items: stretch; flex-direction: column; }
+
+  .quick-choice-group label { border-radius: 10px; }
+
+  .cash-account-form { grid-template-columns: 1fr; }
+
+  .cash-account-filter { align-items: stretch; flex-direction: column; }
+}
+
 @media print {
   .sidebar,
   .mobile-header,

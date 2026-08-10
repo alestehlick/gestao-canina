@@ -119,7 +119,8 @@ test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () =
   assert.match(schema, /sqliteTable\(\s*"cash_entries"/);
   assert.match(schema, /cashMonthStartDay/);
   assert.match(schema, /cash_entries_source_payment_unique/);
-  assert.match(cashRoute, /requireIdentity\(request, \["owner"\]\)/);
+  assert.match(cashRoute, /requireIdentity\(request, \["owner", "finance"\]\)/);
+  assert.match(cashRoute, /financialAccountId/);
   assert.match(cashRoute, /between\(cashEntries\.occurredOn/);
   assert.match(cashEntryRoute, /automatic_cash_entry_locked/);
   assert.match(cashEntryRoute, /cash\.entry_excluded/);
@@ -643,9 +644,11 @@ test("unifica faturas abertas com reversão segura e auditável", async () => {
   assert.doesNotMatch(app, /invoice\.sourceType !== "credit_package"/);
   assert.match(mergeRoute, /requireIdentity\(request, \["owner", "finance"\]\)/);
   assert.match(mergeRoute, /sourceType === "credit_package"/);
-  assert.match(mergeRoute, /creditPurchaseByInvoice/);
+  assert.match(mergeRoute, /purchaseByInvoice/);
+  assert.match(mergeRoute, /previousMergeRows/);
+  assert.match(app, /Consolidar abertas por cliente/);
   assert.match(mergeRoute, /invoice_payments/);
-  assert.match(mergeRoute, /status = 'active'/);
+  assert.match(mergeRoute, /status\s*=\s*'active'/);
   assert.match(mergeRoute, /invoice_settlements/);
   assert.match(mergeRoute, /await d1\.batch\(statements\)/);
   assert.match(unmergeRoute, /status = 'reversed'/);
@@ -662,4 +665,32 @@ test("unifica faturas abertas com reversão segura e auditável", async () => {
   assert.match(migration, /CREATE TABLE `invoice_merges`/);
   assert.match(data, /"invoice\.merged": "Faturas unificadas"/);
   assert.match(data, /"invoice\.merge_reversed": "União de faturas desfeita"/);
+});
+
+test("mantém extratos, contas, agendamento rápido e alertas operacionais coerentes", async () => {
+  const [app, batchRoute, statementRoute, accountRoute, schema, portal, migration] =
+    await Promise.all([
+      readFile(new URL("../app/components/management-app.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/appointments/batch/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/statements/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/financial-accounts/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/portal/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../drizzle/0015_financial_accounts.sql", import.meta.url), "utf8"),
+    ]);
+
+  assert.match(app, /Agendamento rápido/);
+  assert.match(app, /Possivelmente esquecidos/);
+  assert.match(app, /Próximos de renovar/);
+  assert.match(app, /Emitir extrato do cliente/);
+  assert.match(batchRoute, /mixed_customers/);
+  assert.match(batchRoute, /lodging_requires_individual_booking/);
+  assert.match(batchRoute, /await d1\.batch\(statements\)/);
+  assert.match(statementRoute, /openingBalanceCents/);
+  assert.match(statementRoute, /closingBalanceCents/);
+  assert.match(statementRoute, /identity\.role === "customer"/);
+  assert.match(accountRoute, /requireIdentity\(request, \["owner", "finance"\]\)/);
+  assert.match(schema, /sqliteTable\(\s*"financial_accounts"/);
+  assert.match(portal, /eq\(customerAccounts\.status, "active"\)/);
+  assert.match(migration, /financial_account_id/);
 });

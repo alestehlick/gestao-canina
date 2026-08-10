@@ -138,6 +138,41 @@ export const appUsers = sqliteTable(
   ],
 );
 
+export const financialAccounts = sqliteTable(
+  "financial_accounts",
+  {
+    id: text("id").primaryKey(),
+    establishmentId: text("establishment_id")
+      .notNull()
+      .references(() => establishments.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+    institution: text("institution"),
+    kind: text("kind", {
+      enum: ["checking", "savings", "cash", "other"],
+    })
+      .notNull()
+      .default("checking"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    displayOrder: integer("display_order").notNull().default(0),
+    createdByUserId: text("created_by_user_id").references(() => appUsers.id, {
+      onDelete: "set null",
+    }),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (table) => [
+    index("financial_accounts_establishment_active_idx").on(
+      table.establishmentId,
+      table.active,
+      table.displayOrder,
+    ),
+    uniqueIndex("financial_accounts_establishment_name_unique").on(
+      table.establishmentId,
+      table.name,
+    ),
+  ],
+);
+
 export const adminCredentials = sqliteTable(
   "admin_credentials",
   {
@@ -990,6 +1025,10 @@ export const invoicePayments = sqliteTable(
     invoiceId: text("invoice_id")
       .notNull()
       .references(() => invoices.id, { onDelete: "restrict" }),
+    financialAccountId: text("financial_account_id").references(
+      () => financialAccounts.id,
+      { onDelete: "restrict" },
+    ),
     amountCents: integer("amount_cents").notNull(),
     method: text("method", { enum: ["manual"] }).notNull().default("manual"),
     status: text("status", { enum: ["active", "reversed"] })
@@ -1021,6 +1060,10 @@ export const invoicePayments = sqliteTable(
       table.status,
       table.paidAt,
     ),
+    index("invoice_payments_financial_account_idx").on(
+      table.financialAccountId,
+      table.paidAt,
+    ),
     check("invoice_payments_amount_positive", sql`${table.amountCents} > 0`),
     check(
       "invoice_payments_reversal_valid",
@@ -1039,6 +1082,10 @@ export const invoiceSettlements = sqliteTable(
     invoiceId: text("invoice_id")
       .notNull()
       .references(() => invoices.id, { onDelete: "restrict" }),
+    financialAccountId: text("financial_account_id").references(
+      () => financialAccounts.id,
+      { onDelete: "restrict" },
+    ),
     amountCents: integer("amount_cents").notNull(),
     availableOn: text("available_on").notNull(),
     note: text("note"),
@@ -1070,6 +1117,10 @@ export const invoiceSettlements = sqliteTable(
     index("invoice_settlements_establishment_available_idx").on(
       table.establishmentId,
       table.status,
+      table.availableOn,
+    ),
+    index("invoice_settlements_financial_account_idx").on(
+      table.financialAccountId,
       table.availableOn,
     ),
     check("invoice_settlements_amount_positive", sql`${table.amountCents} > 0`),
@@ -1157,6 +1208,10 @@ export const cashEntries = sqliteTable(
       () => invoicePayments.id,
       { onDelete: "restrict" },
     ),
+    financialAccountId: text("financial_account_id").references(
+      () => financialAccounts.id,
+      { onDelete: "restrict" },
+    ),
     occurredOn: text("occurred_on").notNull(),
     amountCents: integer("amount_cents").notNull(),
     category: text("category").notNull(),
@@ -1191,6 +1246,10 @@ export const cashEntries = sqliteTable(
     index("cash_entries_establishment_status_idx").on(
       table.establishmentId,
       table.status,
+      table.occurredOn,
+    ),
+    index("cash_entries_financial_account_idx").on(
+      table.financialAccountId,
       table.occurredOn,
     ),
     check("cash_entries_amount_positive", sql`${table.amountCents} > 0`),

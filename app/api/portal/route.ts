@@ -50,6 +50,7 @@ async function getCustomerContext(userId: string, establishmentId: string) {
     })
     .from(appUsers)
     .innerJoin(tutors, eq(tutors.id, appUsers.tutorId))
+    .innerJoin(customerAccounts, eq(customerAccounts.id, tutors.accountId))
     .where(
       and(
         eq(appUsers.id, userId),
@@ -57,6 +58,7 @@ async function getCustomerContext(userId: string, establishmentId: string) {
         eq(appUsers.role, "customer"),
         eq(appUsers.status, "active"),
         eq(tutors.status, "active"),
+        eq(customerAccounts.status, "active"),
       ),
     )
     .limit(1);

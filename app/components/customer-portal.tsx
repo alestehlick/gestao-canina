@@ -11,6 +11,10 @@ import {
   BrazilianDateInput,
   formatBrazilianDate,
 } from "@/app/components/brazilian-date-input";
+import {
+  generateStatementPdf,
+  type CustomerStatement,
+} from "@/lib/statement-pdf";
 
 type PortalData = {
   identity: { email: string; displayName: string; role: "customer" };
@@ -491,6 +495,43 @@ export default function CustomerPortal() {
     }
   }
 
+  async function downloadStatement() {
+    if (!data || busy) return;
+    const from = `${today.slice(0, 8)}01`;
+    setBusy("statement");
+    try {
+      const response = await fetch(
+        `/api/statements?from=${encodeURIComponent(from)}&to=${encodeURIComponent(today)}`,
+        { credentials: "same-origin", cache: "no-store" },
+      );
+      const statement = await readResponse<CustomerStatement>(response);
+      const generated = await generateStatementPdf(statement);
+      if (
+        navigator.share &&
+        (!navigator.canShare || navigator.canShare({ files: [generated.file] }))
+      ) {
+        await navigator.share({
+          title: "Extrato Hospet Quintal",
+          text: `Extrato de ${shortDate(from)} a ${shortDate(today)}`,
+          files: [generated.file],
+        });
+      } else {
+        const url = URL.createObjectURL(generated.blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = generated.filename;
+        anchor.click();
+        URL.revokeObjectURL(url);
+      }
+      setMessage("Extrato preparado com segurança.");
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      setError(reason instanceof Error ? reason.message : "Não foi possível gerar o extrato.");
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function logout() {
     await fetch("/api/auth/logout", {
       method: "POST",
@@ -792,6 +833,14 @@ export default function CustomerPortal() {
                   <p className="section-kicker">Documentos</p>
                   <h2>Faturas</h2>
                 </div>
+                <button
+                  type="button"
+                  className="text-button"
+                  disabled={busy === "statement"}
+                  onClick={() => void downloadStatement()}
+                >
+                  {busy === "statement" ? "Preparando…" : "Extrato do mês"}
+                </button>
               </div>
               {data.invoices
                 .filter((invoice) => invoice.status !== "void")

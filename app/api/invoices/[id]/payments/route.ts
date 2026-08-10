@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { getD1Database, getDb } from "@/db";
 import {
   creditPurchases,
+  financialAccounts,
   invoiceMergeMembers,
   invoiceMerges,
   invoices,
@@ -82,6 +83,35 @@ export async function POST(
     const establishmentId = identity.establishmentId!;
     const db = getDb();
 
+    const requestedFinancialAccountId = optionalString(
+      body,
+      "financialAccountId",
+      80,
+    );
+    const [selectedFinancialAccount] = await db
+      .select({ id: financialAccounts.id, name: financialAccounts.name })
+      .from(financialAccounts)
+      .where(
+        requestedFinancialAccountId
+          ? and(
+              eq(financialAccounts.id, requestedFinancialAccountId),
+              eq(financialAccounts.establishmentId, establishmentId),
+              eq(financialAccounts.active, true),
+            )
+          : and(
+              eq(financialAccounts.establishmentId, establishmentId),
+              eq(financialAccounts.active, true),
+            ),
+      )
+      .limit(1);
+    if (!selectedFinancialAccount) {
+      throw new HttpError(
+        409,
+        "financial_account_required",
+        "Cadastre ou escolha uma conta de recebimento ativa.",
+      );
+    }
+
     const [invoice] = await db
       .select()
       .from(invoices)
@@ -128,6 +158,18 @@ export async function POST(
         ),
       )
       .limit(1);
+    const usedFinancialAccount =
+      scheduledSettlement?.financialAccountId &&
+      scheduledSettlement.financialAccountId !== selectedFinancialAccount.id
+        ? (await db
+            .select({ id: financialAccounts.id, name: financialAccounts.name })
+            .from(financialAccounts)
+            .where(and(
+              eq(financialAccounts.id, scheduledSettlement.financialAccountId),
+              eq(financialAccounts.establishmentId, establishmentId),
+            ))
+            .limit(1))[0] ?? selectedFinancialAccount
+        : selectedFinancialAccount;
 
     if (settlementMode === "schedule") {
       const availableOn = optionalString(body, "availableOn", 10);
@@ -152,10 +194,10 @@ export async function POST(
         d1
           .prepare(
             `INSERT INTO invoice_settlements (
-              id, establishment_id, invoice_id, amount_cents, available_on,
+              id, establishment_id, invoice_id, financial_account_id, amount_cents, available_on,
               note, status, created_by_user_id, created_at, updated_at
             )
-            SELECT ?, ?, id, total_cents, ?, ?, 'scheduled', ?, ${nowExpression}, ${nowExpression}
+            SELECT ?, ?, id, ?, total_cents, ?, ?, 'scheduled', ?, ${nowExpression}, ${nowExpression}
             FROM invoices
             WHERE id = ? AND establishment_id = ? AND status = 'issued'
               AND NOT EXISTS (
@@ -169,6 +211,7 @@ export async function POST(
           .bind(
             settlementId,
             establishmentId,
+            selectedFinancialAccount.id,
             availableOn,
             note,
             identity.userId,
@@ -196,7 +239,13 @@ export async function POST(
             identity.role,
             invoiceId,
             requestId,
-            JSON.stringify({ availableOn, amountCents: invoice.totalCents, note }),
+            JSON.stringify({
+              availableOn,
+              amountCents: invoice.totalCents,
+              note,
+              financialAccountId: selectedFinancialAccount.id,
+              financialAccountName: selectedFinancialAccount.name,
+            }),
             settlementId,
           ),
       ]);
@@ -360,10 +409,10 @@ export async function POST(
       d1
         .prepare(
           `INSERT INTO invoice_payments (
-            id, establishment_id, invoice_id, amount_cents, method, status, note,
+            id, establishment_id, invoice_id, financial_account_id, amount_cents, method, status, note,
             paid_at, recorded_by_user_id, created_at
           )
-          SELECT ?, ?, id, ?, 'manual', 'active', ?, ?, ?, ${nowExpression}
+          SELECT ?, ?, id, ?, ?, 'manual', 'active', ?, ?, ?, ${nowExpression}
           FROM invoices
           WHERE id = ? AND establishment_id = ? AND status = 'issued'
             AND NOT EXISTS (
@@ -375,6 +424,7 @@ export async function POST(
         .bind(
           paymentId,
           establishmentId,
+          usedFinancialAccount.id,
           paymentAmountCents,
           note,
           paidAt,
@@ -407,12 +457,12 @@ export async function POST(
       d1
         .prepare(
           `INSERT INTO cash_entries (
-            id, establishment_id, direction, origin, source_payment_id,
+            id, establishment_id, direction, origin, source_payment_id, financial_account_id,
             occurred_on, amount_cents, category, description, note, status,
             exclusion_reason, created_by_user_id, updated_by_user_id,
             excluded_by_user_id, excluded_at, created_at, updated_at
           )
-          SELECT ?, ip.establishment_id, 'inflow', 'invoice_payment', ip.id,
+          SELECT ?, ip.establishment_id, 'inflow', 'invoice_payment', ip.id, ip.financial_account_id,
             substr(ip.paid_at, 1, 10), ip.amount_cents,
             CASE i.source_type
               WHEN 'credit_package' THEN 'Créditos'
@@ -544,6 +594,9 @@ export async function POST(
             releasedCreditPurchaseIds: purchasesToGrant.map(
               (purchase) => purchase.id,
             ),
+            financialAccountId:
+              usedFinancialAccount.id,
+            financialAccountName: usedFinancialAccount.name,
           }),
           paymentId,
         ),

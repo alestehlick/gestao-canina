@@ -808,8 +808,6 @@ export async function PATCH(
         body.serviceCatalogId === undefined
           ? item.serviceCatalogId
           : optionalString(body, "serviceCatalogId", 80);
-      const requestedPriceCents =
-        body.priceCents === undefined ? item.totalCents : body.priceCents;
 
       if (
         !startDate ||
@@ -830,19 +828,6 @@ export async function PATCH(
           "Revise a data e os horários do serviço.",
         );
       }
-      if (
-        typeof requestedPriceCents !== "number" ||
-        !Number.isSafeInteger(requestedPriceCents) ||
-        requestedPriceCents < 0 ||
-        requestedPriceCents > 100_000_000
-      ) {
-        throw new HttpError(
-          400,
-          "invalid_price",
-          "O valor do serviço é inválido.",
-        );
-      }
-
       const [service] = await db
         .select()
         .from(serviceCatalog)
@@ -952,7 +937,11 @@ export async function PATCH(
             ? taxiDogPriceCents(service.basePriceCents, direction)
             : service.basePriceCents;
       const priceCents =
-        identity.role === "owner" ? requestedPriceCents : catalogPriceCents;
+        item.serviceCatalogId !== service.id ||
+        service.code === "hotel" ||
+        service.code === "taxi_dog"
+          ? catalogPriceCents
+          : item.totalCents;
       const duplicate = await getD1Database()
         .prepare(
           `SELECT 1 AS found

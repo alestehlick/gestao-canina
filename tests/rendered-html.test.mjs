@@ -59,8 +59,8 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.match(app, /Digite o nome do cão/);
   assert.match(app, /service-dog-suggestions/);
   assert.match(app, /normalize\(`\$\{dog\.name\} \$\{dog\.customerName\}`\)\.includes\(query\)/);
-  assert.match(app, /readOnly=\{signedInRole !== "owner"\}/);
-  assert.match(app, /const priceCents = Math\.round\(price \* 100\)/);
+  assert.doesNotMatch(app, /name="price"/);
+  assert.match(app, /Cobrança regular/);
   assert.doesNotMatch(app, /serviceType === "transport" \? \(transportDirection === "round_trip"/);
   assert.match(app, /Não aplicar desconto por longa estadia/);
   assert.match(app, /Total pela diária padrão/);
@@ -557,7 +557,7 @@ test("separa acessos, protege o portal e registra pedidos dos clientes", async (
   assert.match(requests, /customer\.request_created/);
   assert.match(workspace, /identity\.role === "staff"/);
   assert.match(workspace, /cpf: identity\.role === "owner"/);
-  assert.match(app, /signedInRole !== "owner"/);
+  assert.match(app, /signedInRole === "owner"/);
   assert.match(app, /Pedidos dos clientes/);
   assert.match(schema, /sqliteTable\(\s*"account_invitations"/);
   assert.match(schema, /sqliteTable\(\s*"customer_requests"/);
@@ -606,10 +606,9 @@ test("mantém a política de hospedagem clara e auditável", async () => {
 
   assert.match(app, /cliente de creche regular/);
   assert.match(app, /segundo cão ou mais/);
-  assert.match(app, /value=\{serviceDraftPrice\}/);
-  assert.match(app, /setServiceDraftPrice/);
-  assert.match(app, /value=\{editDraftPrice\}/);
-  assert.match(app, /setEditDraftPrice/);
+  assert.doesNotMatch(app, /name="price"/);
+  assert.doesNotMatch(createAppointment, /body\.priceCents/);
+  assert.doesNotMatch(editAppointment, /requestedPriceCents/);
   assert.match(app, /Não aplicar desconto por longa estadia/);
   assert.match(createAppointment, /lodging_rate_profile/);
   assert.match(editAppointment, /lodgingRateProfile/);
@@ -668,12 +667,13 @@ test("unifica faturas abertas com reversão segura e auditável", async () => {
 });
 
 test("mantém extratos, contas, agendamento rápido e alertas operacionais coerentes", async () => {
-  const [app, batchRoute, statementRoute, accountRoute, schema, portal, migration] =
+  const [app, batchRoute, statementRoute, accountRoute, regularBillingRoute, schema, portal, migration] =
     await Promise.all([
       readFile(new URL("../app/components/management-app.tsx", import.meta.url), "utf8"),
       readFile(new URL("../app/api/appointments/batch/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/statements/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/financial-accounts/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/appointment-items/[id]/billing/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/portal/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../drizzle/0015_financial_accounts.sql", import.meta.url), "utf8"),
@@ -681,6 +681,9 @@ test("mantém extratos, contas, agendamento rápido e alertas operacionais coere
 
   assert.match(app, /Agendamento rápido/);
   assert.match(app, /Possivelmente esquecidos/);
+  assert.match(app, /\(booking\.endDate \?\? booking\.date\) < operationalToday/);
+  assert.match(app, /Cobrança regular/);
+  assert.match(app, /Confirmar e incluir/);
   assert.match(app, /Próximos de renovar/);
   assert.match(app, /Emitir extrato do cliente/);
   assert.match(batchRoute, /mixed_customers/);
@@ -690,6 +693,9 @@ test("mantém extratos, contas, agendamento rápido e alertas operacionais coere
   assert.match(statementRoute, /closingBalanceCents/);
   assert.match(statementRoute, /identity\.role === "customer"/);
   assert.match(accountRoute, /requireIdentity\(request, \["owner", "finance"\]\)/);
+  assert.match(regularBillingRoute, /billing\.regular_selected/);
+  assert.match(regularBillingRoute, /billing_item_locked/);
+  assert.match(regularBillingRoute, /active_invoice_id IS NULL/);
   assert.match(schema, /sqliteTable\(\s*"financial_accounts"/);
   assert.match(portal, /eq\(customerAccounts\.status, "active"\)/);
   assert.match(migration, /financial_account_id/);

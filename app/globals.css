@@ -3421,7 +3421,7 @@ h3 {
   --service-soft: var(--other-soft);
   display: grid;
   min-height: 58px;
-  grid-template-columns: 24px 92px minmax(170px, 1.1fr) 1fr auto auto;
+  grid-template-columns: 24px 92px minmax(170px, 1.1fr) 1fr auto minmax(180px, auto);
   align-items: center;
   gap: 12px;
   border-top: 1px solid var(--line-soft);
@@ -3435,21 +3435,48 @@ h3 {
   opacity: 0.45;
 }
 
-.billable-select input {
-  width: 17px;
-  height: 17px;
-  accent-color: var(--forest);
+.billable-selection-state {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: 0.75rem;
 }
 
-.billable-select {
-  display: grid;
-  place-items: center;
+.billable-selection-state.selected {
+  border-color: var(--forest);
+  background: var(--forest);
+  color: #fff;
+}
+
+.billable-payment-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .billable-credit-action {
   min-width: 96px;
   justify-self: end;
   white-space: nowrap;
+}
+
+.regular-billing-summary {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  padding: 14px;
+}
+
+.regular-billing-summary span,
+.regular-billing-summary small {
+  color: var(--muted);
 }
 
 .panel-heading-note {
@@ -5512,7 +5539,7 @@ h3 {
   }
 
   .agenda-panel {
-    order: 1;
+    order: 3;
     width: 100%;
   }
 
@@ -5521,8 +5548,16 @@ h3 {
   }
 
   .dashboard-rail > .compact-panel {
-    order: 2;
+    order: 4;
     width: 100%;
+  }
+
+  .dashboard-rail > .overdue-reminder-panel {
+    order: 1;
+  }
+
+  .dashboard-rail > .tasks-panel {
+    order: 2;
   }
 
   .agenda-heading {
@@ -6017,7 +6052,7 @@ h3 {
     content: "";
   }
 
-  .billable-row > .billable-select {
+  .billable-row > .billable-selection-state {
     grid-row: 1 / span 4;
     align-self: start;
     margin-top: 2px;
@@ -6054,12 +6089,16 @@ h3 {
     font-size: 0.87rem;
   }
 
-  .billable-credit-action {
+  .billable-payment-actions {
     grid-column: 2 / -1;
     grid-row: 4;
-    justify-self: start;
-    min-width: 0;
+    justify-content: flex-start;
+    flex-wrap: wrap;
     margin-top: 2px;
+  }
+
+  .billable-credit-action {
+    min-width: 0;
   }
 
   .selection-bar {

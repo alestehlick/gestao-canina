@@ -126,6 +126,24 @@ function billableLongStayDiscountCents(
   return Math.min(service.amountCents, fullDiscountCents);
 }
 
+function regularBillingAmountCents(service: BillableService) {
+  const lodging = service.lodging;
+  if (!lodging) return service.amountCents;
+
+  if (lodging.dailyRateCents) {
+    return Math.round(lodging.dailyRateCents * lodging.nights);
+  }
+
+  const depositPercent = lodging.depositPercent ?? 0;
+  if (service.billingKind === "lodging_deposit" && depositPercent > 0) {
+    return Math.round((service.amountCents * 100) / depositPercent);
+  }
+  if (service.billingKind === "lodging_balance" && depositPercent < 100) {
+    return Math.round((service.amountCents * 100) / (100 - depositPercent));
+  }
+  return service.amountCents;
+}
+
 type BillingTab = "invoice" | "credits" | "receipts";
 type InvoiceListStatus =
   | "all"
@@ -991,7 +1009,6 @@ export function ManagementApp() {
   const [editDraftDaycareCustomer, setEditDraftDaycareCustomer] =
     useState(false);
   const [editDraftAdditionalDog, setEditDraftAdditionalDog] = useState(false);
-  const [editDraftPrice, setEditDraftPrice] = useState("0.00");
   const [editDraftDate, setEditDraftDate] = useState(operationalToday);
   const [editDraftEndDate, setEditDraftEndDate] = useState(
     shiftDate(operationalToday, 1),
@@ -1001,6 +1018,8 @@ export function ManagementApp() {
   const [customerToEdit, setCustomerToEdit] = useState<Customer | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [invoiceState, setInvoiceState] = useState<InvoiceState | null>(null);
+  const [regularBillingService, setRegularBillingService] =
+    useState<BillableService | null>(null);
   const [billingTab, setBillingTab] = useState<BillingTab>("invoice");
   const [creditCustomerId, setCreditCustomerId] = useState<string>("");
   const [creditAdjustmentCustomerId, setCreditAdjustmentCustomerId] =
@@ -1020,7 +1039,6 @@ export function ManagementApp() {
     useState(false);
   const [serviceDraftAdditionalDog, setServiceDraftAdditionalDog] =
     useState(false);
-  const [serviceDraftPrice, setServiceDraftPrice] = useState("0.00");
   const [serviceDraftDate, setServiceDraftDate] = useState(operationalToday);
   const [serviceDraftEndDate, setServiceDraftEndDate] = useState(
     shiftDate(operationalToday, 1),
@@ -1533,7 +1551,6 @@ export function ManagementApp() {
     setServiceDraftHasDeposit(false);
     setServiceDraftDaycareCustomer(false);
     setServiceDraftAdditionalDog(false);
-    setServiceDraftPrice((servicePrices.daycare / 100).toFixed(2));
     setServiceDraftRecurrence("none");
     setServiceDraftDate(selectedDateRef.current);
     setServiceDraftEndDate(shiftDate(selectedDateRef.current, 1));
@@ -1811,7 +1828,6 @@ export function ManagementApp() {
       booking.lodgingRateProfile === "additional_dog" ||
         booking.lodgingRateProfile === "daycare_additional_dog",
     );
-    setEditDraftPrice((booking.priceCents / 100).toFixed(2));
     setEditDraftDate(booking.date);
     setEditDraftEndDate(
       booking.endDate ?? shiftDate(booking.date, 1),
@@ -1849,7 +1865,6 @@ export function ManagementApp() {
       form.get("hasDeposit") === "on"
         ? Number(form.get("depositPercent") ?? 50)
         : null;
-    const priceCents = Math.round(Number(form.get("price") ?? 0) * 100);
     const nextLodgingRateProfile = lodgingRateProfile(
       editDraftDaycareCustomer,
       editDraftAdditionalDog,
@@ -1857,8 +1872,6 @@ export function ManagementApp() {
     if (
       !date ||
       !serviceType ||
-      !Number.isSafeInteger(priceCents) ||
-      priceCents < 0 ||
       (serviceType !== "transport" &&
         serviceType !== "hotel" &&
         !time)
@@ -1916,7 +1929,6 @@ export function ManagementApp() {
                 endTime:
                   serviceType === "transport" ? null : endTime || null,
                 serviceCatalogId: service.id,
-                priceCents,
                 paymentPreference: "invoice" as const,
                 internalNotes: note ?? null,
                 transportDirection,
@@ -1976,7 +1988,11 @@ export function ManagementApp() {
                   serviceType === "transport"
                     ? transportDirection
                     : undefined,
-                priceCents,
+                priceCents:
+                  serviceType === "hotel"
+                    ? lodgingDailyRate(lodgingPricing, nextLodgingRateProfile) * lodgingNights
+                    : servicePrices[serviceType] *
+                      (serviceType === "transport" && transportDirection === "round_trip" ? 2 : 1),
                 paymentPreference: "invoice" as const,
                 note,
               }
@@ -2413,7 +2429,6 @@ export function ManagementApp() {
     const lodgingNights = Number(form.get("lodgingNights") ?? 0);
     const depositPercent = form.get("hasDeposit") === "on" ? Number(form.get("depositPercent") ?? 50) : null;
     const transportDirection = String(form.get("transportDirection") ?? "one_way") === "round_trip" ? "round_trip" : "one_way";
-    const price = Number(form.get("price") ?? 0);
     const recurrence = String(form.get("recurrence") ?? "none") as
       | "none"
       | "weekly";
@@ -2451,7 +2466,6 @@ export function ManagementApp() {
       setToast({ message: "O horário final deve ser posterior ao inicial." });
       return;
     }
-    const priceCents = Math.round(price * 100);
     if (
       !Number.isSafeInteger(recurrenceCount) ||
       recurrenceCount < 1 ||
@@ -2460,11 +2474,6 @@ export function ManagementApp() {
       setToast({ message: "Informe uma duração entre 1 e 52 semanas." });
       return;
     }
-    if (!Number.isSafeInteger(priceCents) || priceCents < 0) {
-      setToast({ message: "Informe um valor válido para o serviço." });
-      return;
-    }
-
     const scheduledDates = recurrenceDates(
       date,
       recurrence,
@@ -2504,7 +2513,6 @@ export function ManagementApp() {
                   ? undefined
                   : endTime || undefined,
               internalNotes: note,
-              priceCents,
               transportDirection,
               lodgingNights:
                 serviceType === "hotel" ? lodgingNights : undefined,
@@ -2569,8 +2577,9 @@ export function ManagementApp() {
         status: "scheduled",
         priceCents:
           serviceType === "hotel"
-            ? Math.round(priceCents * lodgingNights)
-            : priceCents,
+            ? lodgingDailyRate(lodgingPricing, nextLodgingRateProfile) * lodgingNights
+            : servicePrices[serviceType] *
+              (serviceType === "transport" && transportDirection === "round_trip" ? 2 : 1),
         paymentPreference: "invoice",
         settlementStatus: "pending",
         note,
@@ -2961,6 +2970,62 @@ export function ManagementApp() {
         creditUnits === 1 ? "crédito utilizado" : "créditos utilizados"
       }. O recibo está pronto.`,
     });
+  }
+
+  async function saveRegularBilling(service: BillableService, amountCents: number) {
+    if (!service.appointmentItemId || !Number.isSafeInteger(amountCents) || amountCents < 1) {
+      setToast({ message: "Informe um valor válido para a cobrança." });
+      return false;
+    }
+
+    const firstSelected = billableServices.find(
+      (item) => item.id === selectedBillables[0],
+    );
+    if (firstSelected && firstSelected.customerId !== service.customerId) {
+      setToast({ message: "Conclua primeiro a fatura do cliente já selecionado." });
+      return false;
+    }
+
+    if (runtimeMode === "ready") {
+      const result = await runLiveAction(
+        `regular-billing:${service.appointmentItemId}`,
+        () =>
+          requestJson(`/api/appointment-items/${service.appointmentItemId}/billing`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              amountCents,
+              billingKind: service.billingKind ?? "service",
+            }),
+          }),
+        {
+          refresh: true,
+          successMessage: "Valor confirmado. Serviço incluído na próxima fatura.",
+        },
+      );
+      if (!result) return false;
+    } else {
+      setBillableServices((current) =>
+        current.map((item) =>
+          item.id === service.id
+            ? {
+                ...item,
+                amountCents:
+                  item.billingKind === "lodging_deposit"
+                    ? Math.round(amountCents * ((item.lodging?.depositPercent ?? 0) / 100))
+                    : item.billingKind === "lodging_balance"
+                      ? Math.round(amountCents * ((100 - (item.lodging?.depositPercent ?? 0)) / 100))
+                      : amountCents,
+              }
+            : item,
+        ),
+      );
+    }
+
+    setSelectedBillables((current) =>
+      current.includes(service.id) ? current : [...current, service.id],
+    );
+    setRegularBillingService(null);
+    return true;
   }
 
   function openCreditPackage(customerId?: string) {
@@ -4749,6 +4814,7 @@ export function ManagementApp() {
               creditPurchases={creditPurchases}
               receipts={receipts}
               onToggleBillable={toggleBillable}
+              onRegularBilling={setRegularBillingService}
               onUseCredits={useCreditsForBillable}
               onCreateInvoice={openInvoiceForSelection}
               onOpenInvoice={openExistingInvoice}
@@ -4874,11 +4940,7 @@ export function ManagementApp() {
       {dialog === "service" && (
         <Dialog
           title="Novo serviço"
-          description={
-            signedInRole === "owner"
-              ? "Agende um cuidado e defina o valor aplicado."
-              : "Agende um cuidado com o valor padrão definido pela administração."
-          }
+          description="Agende o cuidado. A forma de quitação e o valor serão confirmados após a conclusão."
           onClose={() => setDialog(null)}
         >
           <form className="form-grid" onSubmit={submitService}>
@@ -4968,17 +5030,6 @@ export function ManagementApp() {
                     const nextEndDate = shiftDate(nextDate, 1);
                     setServiceDraftEndDate(nextEndDate);
                     setServiceDraftLodgingNights(1);
-                    setServiceDraftPrice(
-                      (
-                        lodgingDailyRate(
-                          lodgingPricing,
-                          lodgingRateProfile(
-                            serviceDraftDaycareCustomer,
-                            serviceDraftAdditionalDog,
-                          ),
-                        ) / 100
-                      ).toFixed(2),
-                    );
                   }
                 }}
               />
@@ -5000,18 +5051,6 @@ export function ManagementApp() {
                     );
                     if (options.length) {
                       setServiceDraftLodgingNights(options[0]);
-                      setServiceDraftPrice(
-                        (
-                          (lodgingDailyRate(
-                            lodgingPricing,
-                            lodgingRateProfile(
-                              serviceDraftDaycareCustomer,
-                              serviceDraftAdditionalDog,
-                            ),
-                          ) * options[0]) /
-                          100
-                        ).toFixed(2),
-                      );
                     }
                   }}
                 />
@@ -5038,30 +5077,6 @@ export function ManagementApp() {
                     setServiceDraftEndDate(nextEndDate);
                     const nextNights = options[0] ?? 1;
                     setServiceDraftLodgingNights(nextNights);
-                    setServiceDraftPrice(
-                      (
-                        (lodgingDailyRate(
-                          lodgingPricing,
-                          lodgingRateProfile(
-                            serviceDraftDaycareCustomer,
-                            serviceDraftAdditionalDog,
-                          ),
-                        ) * nextNights) /
-                        100
-                      ).toFixed(2),
-                    );
-                  } else if (next === "transport") {
-                    setServiceDraftPrice(
-                      (
-                        (servicePrices.transport *
-                          (serviceDraftTransportDirection === "round_trip"
-                            ? 2
-                            : 1)) /
-                        100
-                      ).toFixed(2),
-                    );
-                  } else {
-                    setServiceDraftPrice((servicePrices[next] / 100).toFixed(2));
                   }
                 }}
               >
@@ -5122,13 +5137,6 @@ export function ManagementApp() {
                 <select name="transportDirection" value={serviceDraftTransportDirection} onChange={(event) => {
                   const nextDirection = event.target.value as "one_way" | "round_trip";
                   setServiceDraftTransportDirection(nextDirection);
-                  setServiceDraftPrice(
-                    (
-                      (servicePrices.transport *
-                        (nextDirection === "round_trip" ? 2 : 1)) /
-                      100
-                    ).toFixed(2),
-                  );
                 }}>
                   <option value="one_way">
                     Ida · {formatCurrency(servicePrices.transport)}
@@ -5149,18 +5157,6 @@ export function ManagementApp() {
                     onChange={(event) => {
                       const nextNights = Number(event.target.value);
                       setServiceDraftLodgingNights(nextNights);
-                      setServiceDraftPrice(
-                        (
-                          (lodgingDailyRate(
-                            lodgingPricing,
-                            lodgingRateProfile(
-                              serviceDraftDaycareCustomer,
-                              serviceDraftAdditionalDog,
-                            ),
-                          ) * nextNights) /
-                          100
-                        ).toFixed(2),
-                      );
                     }}
                     required
                   >
@@ -5187,18 +5183,6 @@ export function ManagementApp() {
                     onChange={(event) => {
                       const checked = event.target.checked;
                       setServiceDraftDaycareCustomer(checked);
-                      setServiceDraftPrice(
-                        (
-                          (lodgingDailyRate(
-                            lodgingPricing,
-                            lodgingRateProfile(
-                              checked,
-                              serviceDraftAdditionalDog,
-                            ),
-                          ) * serviceDraftLodgingNights) /
-                          100
-                        ).toFixed(2),
-                      );
                     }}
                   />
                   <span>Aplicar diária para cliente de creche regular</span>
@@ -5210,18 +5194,6 @@ export function ManagementApp() {
                     onChange={(event) => {
                       const checked = event.target.checked;
                       setServiceDraftAdditionalDog(checked);
-                      setServiceDraftPrice(
-                        (
-                          (lodgingDailyRate(
-                            lodgingPricing,
-                            lodgingRateProfile(
-                              serviceDraftDaycareCustomer,
-                              checked,
-                            ),
-                          ) * serviceDraftLodgingNights) /
-                          100
-                        ).toFixed(2),
-                      );
                     }}
                   />
                   <span>Aplicar diária para segundo cão ou mais nesta reserva</span>
@@ -5269,23 +5241,10 @@ export function ManagementApp() {
                 )}
               </>
             )}
-            <label className="field">
-              <span>
-                {serviceDraftType === "hotel"
-                  ? "Valor total da hospedagem (R$) *"
-                  : "Valor aplicado (R$) *"}
-              </span>
-              <input
-                name="price"
-                type="number"
-                min="0"
-                step="0.01"
-                value={serviceDraftPrice}
-                onChange={(event) => setServiceDraftPrice(event.target.value)}
-                readOnly={signedInRole !== "owner"}
-                required
-              />
-            </label>
+            <div className="form-guidance">
+              <strong>Cobrança após a conclusão</strong>
+              <span>Em Cobranças, escolha entre créditos ou cobrança regular e confirme o valor.</span>
+            </div>
             <label className="field">
               <span>Recorrência</span>
               <select
@@ -5382,17 +5341,6 @@ export function ManagementApp() {
                     const nextEndDate = shiftDate(nextDate, 1);
                     setEditDraftEndDate(nextEndDate);
                     setEditDraftLodgingNights(1);
-                    setEditDraftPrice(
-                      (
-                        lodgingDailyRate(
-                          lodgingPricing,
-                          lodgingRateProfile(
-                            editDraftDaycareCustomer,
-                            editDraftAdditionalDog,
-                          ),
-                        ) / 100
-                      ).toFixed(2),
-                    );
                   }
                 }}
               />
@@ -5414,18 +5362,6 @@ export function ManagementApp() {
                     );
                     if (options.length) {
                       setEditDraftLodgingNights(options[0]);
-                      setEditDraftPrice(
-                        (
-                          (lodgingDailyRate(
-                            lodgingPricing,
-                            lodgingRateProfile(
-                              editDraftDaycareCustomer,
-                              editDraftAdditionalDog,
-                            ),
-                          ) * options[0]) /
-                          100
-                        ).toFixed(2),
-                      );
                     }
                   }}
                 />
@@ -5452,30 +5388,6 @@ export function ManagementApp() {
                     setEditDraftEndDate(nextEndDate);
                     const nextNights = options[0] ?? 1;
                     setEditDraftLodgingNights(nextNights);
-                    setEditDraftPrice(
-                      (
-                        (lodgingDailyRate(
-                          lodgingPricing,
-                          lodgingRateProfile(
-                            editDraftDaycareCustomer,
-                            editDraftAdditionalDog,
-                          ),
-                        ) * nextNights) /
-                        100
-                      ).toFixed(2),
-                    );
-                  } else if (next === "transport") {
-                    setEditDraftPrice(
-                      (
-                        (servicePrices.transport *
-                          (editDraftTransportDirection === "round_trip"
-                            ? 2
-                            : 1)) /
-                        100
-                      ).toFixed(2),
-                    );
-                  } else {
-                    setEditDraftPrice((servicePrices[next] / 100).toFixed(2));
                   }
                 }}
               >
@@ -5546,13 +5458,6 @@ export function ManagementApp() {
                       | "one_way"
                       | "round_trip";
                     setEditDraftTransportDirection(nextDirection);
-                    setEditDraftPrice(
-                      (
-                        (servicePrices.transport *
-                          (nextDirection === "round_trip" ? 2 : 1)) /
-                        100
-                      ).toFixed(2),
-                    );
                   }}
                 >
                   <option value="one_way">
@@ -5574,18 +5479,6 @@ export function ManagementApp() {
                     onChange={(event) => {
                       const nextNights = Number(event.target.value);
                       setEditDraftLodgingNights(nextNights);
-                      setEditDraftPrice(
-                        (
-                          (lodgingDailyRate(
-                            lodgingPricing,
-                            lodgingRateProfile(
-                              editDraftDaycareCustomer,
-                              editDraftAdditionalDog,
-                            ),
-                          ) * nextNights) /
-                          100
-                        ).toFixed(2),
-                      );
                     }}
                     required
                   >
@@ -5612,18 +5505,6 @@ export function ManagementApp() {
                     onChange={(event) => {
                       const checked = event.target.checked;
                       setEditDraftDaycareCustomer(checked);
-                      setEditDraftPrice(
-                        (
-                          (lodgingDailyRate(
-                            lodgingPricing,
-                            lodgingRateProfile(
-                              checked,
-                              editDraftAdditionalDog,
-                            ),
-                          ) * editDraftLodgingNights) /
-                          100
-                        ).toFixed(2),
-                      );
                     }}
                   />
                   <span>Aplicar diária para cliente de creche regular</span>
@@ -5635,18 +5516,6 @@ export function ManagementApp() {
                     onChange={(event) => {
                       const checked = event.target.checked;
                       setEditDraftAdditionalDog(checked);
-                      setEditDraftPrice(
-                        (
-                          (lodgingDailyRate(
-                            lodgingPricing,
-                            lodgingRateProfile(
-                              editDraftDaycareCustomer,
-                              checked,
-                            ),
-                          ) * editDraftLodgingNights) /
-                          100
-                        ).toFixed(2),
-                      );
                     }}
                   />
                   <span>Aplicar diária para segundo cão ou mais nesta reserva</span>
@@ -5694,26 +5563,9 @@ export function ManagementApp() {
                 )}
               </>
             )}
-            <label className="field">
-              <span>
-                {editDraftType === "hotel"
-                  ? "Valor total da hospedagem (R$) *"
-                  : "Valor aplicado (R$) *"}
-              </span>
-              <input
-                name="price"
-                type="number"
-                min="0"
-                step="0.01"
-                value={editDraftPrice}
-                onChange={(event) => setEditDraftPrice(event.target.value)}
-                readOnly={signedInRole !== "owner"}
-                required
-              />
-            </label>
             <div className="form-guidance">
               <strong>Cobrança após a conclusão</strong>
-              <span>Créditos ou fatura serão escolhidos em Cobranças.</span>
+              <span>Em Cobranças, escolha entre créditos ou cobrança regular e confirme o valor.</span>
             </div>
             <label className="field full">
               <span>Observação interna</span>
@@ -6313,6 +6165,17 @@ export function ManagementApp() {
         />
       )}
 
+      {regularBillingService && (
+        <RegularBillingDialog
+          service={regularBillingService}
+          busy={busyAction === `regular-billing:${regularBillingService.appointmentItemId}`}
+          onClose={() => setRegularBillingService(null)}
+          onSubmit={(amountCents) =>
+            saveRegularBilling(regularBillingService, amountCents)
+          }
+        />
+      )}
+
       {dialog === "invoice" && invoiceState && (
         <InvoiceDialog
           state={invoiceState}
@@ -6819,32 +6682,12 @@ function TodayView({
       .filter((vaccine) => vaccine.expiresOn <= shiftDate(selectedDate, 30))
       .map((vaccine) => ({ dog, vaccine })),
   );
-  const nowParts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "America/Sao_Paulo",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date());
-  const currentMinutes =
-    Number(nowParts.find((part) => part.type === "hour")?.value ?? 0) * 60 +
-    Number(nowParts.find((part) => part.type === "minute")?.value ?? 0);
-  const timeOrder = (value: string | undefined) => {
-    if (!value) return null;
-    if (value === "manha") return 12 * 60;
-    if (value === "tarde") return 18 * 60;
-    if (value === "noite") return 23 * 60 + 59;
-    const [hours, minutes] = value.split(":").map(Number);
-    return hours * 60 + minutes;
-  };
   const overlookedBookings = bookings
-    .filter((booking) => {
-      if (!["scheduled", "confirmed"].includes(booking.status)) return false;
-      const finalDate = booking.endDate ?? booking.date;
-      if (finalDate < operationalToday) return true;
-      if (finalDate !== operationalToday) return false;
-      const finalTime = timeOrder(booking.endTime ?? booking.time);
-      return finalTime !== null && currentMinutes > finalTime;
-    })
+    .filter(
+      (booking) =>
+        ["scheduled", "confirmed"].includes(booking.status) &&
+        (booking.endDate ?? booking.date) < operationalToday,
+    )
     .sort((left, right) =>
       (left.endDate ?? left.date).localeCompare(right.endDate ?? right.date) || agendaBookingOrder(left, right),
     );
@@ -6996,7 +6839,7 @@ function TodayView({
         </section>
 
         <aside className="dashboard-rail">
-          <section className="panel compact-panel">
+          <section className="panel compact-panel tasks-panel">
             <div className="panel-heading">
               <div>
                 <p className="section-kicker">Equipe</p>
@@ -7043,7 +6886,7 @@ function TodayView({
                 </div>
                 <span className="attention-count">{overlookedBookings.length}</span>
               </div>
-              <p className="compact-help">O horário ou período já terminou, mas o atendimento continua aberto.</p>
+              <p className="compact-help">O dia do atendimento já passou, mas ele continua aberto.</p>
               <div className="overdue-reminder-list">
                 {overlookedBookings.slice(0, 6).map((booking) => (
                   <div key={booking.id}>
@@ -8659,6 +8502,7 @@ function BillingView({
   creditPurchases,
   receipts,
   onToggleBillable,
+  onRegularBilling,
   onUseCredits,
   onCreateInvoice,
   onOpenInvoice,
@@ -8683,6 +8527,7 @@ function BillingView({
   creditPurchases: CreditPurchase[];
   receipts: ServiceReceipt[];
   onToggleBillable: (service: BillableService) => void;
+  onRegularBilling: (service: BillableService) => void;
   onUseCredits: (service: BillableService) => void | Promise<void>;
   onCreateInvoice: () => void;
   onOpenInvoice: (invoice: Invoice) => void;
@@ -9052,8 +8897,8 @@ function BillingView({
                 <p className="section-kicker">Aguardando faturamento</p>
                 <h2>Serviços concluídos</h2>
                 <small className="panel-heading-note">
-                  Selecione serviços para criar uma fatura ou quite um item com
-                  créditos disponíveis.
+                  Escolha Regular para conferir o valor e incluir na fatura, ou
+                  quite o serviço com créditos disponíveis.
                 </small>
               </div>
               <span className="invoice-only-badge">
@@ -9089,16 +8934,13 @@ function BillingView({
                       }`}
                       key={service.id}
                     >
-                      <label className="billable-select">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          disabled={disabled}
-                          onChange={() => onToggleBillable(service)}
-                          aria-label={`Selecionar ${service.service} de ${service.dogName} para faturar`}
-                        />
-                        <span className="sr-only">Selecionar para faturar</span>
-                      </label>
+                      <span
+                        className={`billable-selection-state${checked ? " selected" : ""}`}
+                        aria-label={checked ? "Incluído na próxima fatura" : "Aguardando escolha"}
+                        title={checked ? "Incluído na próxima fatura" : "Aguardando escolha"}
+                      >
+                        {checked ? "✓" : "·"}
+                      </span>
                       <span className="billable-date">{service.date}</span>
                       <span className="billable-identity">
                         <strong>{service.dogName}</strong>
@@ -9115,25 +8957,37 @@ function BillingView({
                       <strong className="billable-amount">
                         {formatCurrency(service.amountCents)}
                       </strong>
-                      {canUseCredits && (
+                      <span className="billable-payment-actions">
                         <button
                           type="button"
-                          className="text-button billable-credit-action"
-                          disabled={availableCredits < creditUnits}
-                          onClick={() => void onUseCredits(service)}
-                          title={
-                            availableCredits < creditUnits
-                              ? `Saldo atual: ${availableCredits}`
-                              : `Saldo após o uso: ${availableCredits - creditUnits}`
+                          className={checked ? "secondary-button compact-button selected" : "secondary-button compact-button"}
+                          disabled={disabled && !checked}
+                          onClick={() =>
+                            checked ? onToggleBillable(service) : onRegularBilling(service)
                           }
                         >
-                          {availableCredits < creditUnits
-                            ? "Sem saldo"
-                            : `Usar ${creditUnits} ${
-                                creditUnits === 1 ? "crédito" : "créditos"
-                              }`}
+                          {checked ? "Regular ✓" : "Regular"}
                         </button>
-                      )}
+                        {canUseCredits && (
+                          <button
+                            type="button"
+                            className="text-button billable-credit-action"
+                            disabled={checked || availableCredits < creditUnits}
+                            onClick={() => void onUseCredits(service)}
+                            title={
+                              availableCredits < creditUnits
+                                ? `Saldo atual: ${availableCredits}`
+                                : `Saldo após o uso: ${availableCredits - creditUnits}`
+                            }
+                          >
+                            {availableCredits < creditUnits
+                              ? "Sem saldo"
+                              : `Usar ${creditUnits} ${
+                                  creditUnits === 1 ? "crédito" : "créditos"
+                                }`}
+                          </button>
+                        )}
+                      </span>
                     </div>
                   );
                 })}
@@ -10766,6 +10620,81 @@ function AccessView({ customers }: { customers: Customer[] }) {
         </div>
       </section>
     </div>
+  );
+}
+
+function RegularBillingDialog({
+  service,
+  busy,
+  onClose,
+  onSubmit,
+}: {
+  service: BillableService;
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (amountCents: number) => boolean | Promise<boolean>;
+}) {
+  const [amount, setAmount] = useState(
+    (regularBillingAmountCents(service) / 100).toFixed(2),
+  );
+  const [error, setError] = useState("");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const amountCents = Math.round(Number(amount.replace(",", ".")) * 100);
+    if (!Number.isSafeInteger(amountCents) || amountCents < 1) {
+      setError("Informe um valor maior que zero.");
+      return;
+    }
+    setError("");
+    await onSubmit(amountCents);
+  }
+
+  return (
+    <Dialog
+      title="Cobrança regular"
+      description="Confirme o valor antes de incluir este serviço na próxima fatura."
+      onClose={onClose}
+      size="small"
+    >
+      <form className="form-grid" onSubmit={submit}>
+        <div className="regular-billing-summary full">
+          <strong>{service.dogName} · {service.service}</strong>
+          <span>{service.customerName} · {service.date}</span>
+          {service.lodging && (
+            <small>
+              Check-in {formatBrazilianDate(service.lodging.checkInDate)} · check-out {formatBrazilianDate(service.lodging.checkOutDate)} · {service.lodging.nights} diárias
+            </small>
+          )}
+        </div>
+        <label className="field full">
+          <span>{service.lodging ? "Valor total da hospedagem (R$)" : "Valor do serviço (R$)"}</span>
+          <input
+            name="amount"
+            type="number"
+            min="0.01"
+            max="1000000"
+            step="0.01"
+            inputMode="decimal"
+            value={amount}
+            onChange={(event) => setAmount(event.target.value)}
+            required
+          />
+        </label>
+        {error && <p className="form-error full">{error}</p>}
+        <p className="compact-help full">
+          Isto apenas prepara o serviço para faturamento. O pagamento será registrado depois, na fatura.
+        </p>
+        <div className="dialog-actions full">
+          <button className="secondary-button" type="button" onClick={onClose} disabled={busy}>
+            Voltar
+          </button>
+          <button className="primary-button" type="submit" disabled={busy}>
+            {busy ? "Salvando…" : "Confirmar e incluir"}
+          </button>
+        </div>
+      </form>
+    </Dialog>
   );
 }
 

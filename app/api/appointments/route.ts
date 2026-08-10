@@ -127,22 +127,6 @@ export async function POST(request: Request) {
         "Informe uma duração entre 1 e 52 semanas.",
       );
     }
-    const customPriceCents =
-      body.priceCents === undefined ? null : body.priceCents;
-    if (
-      customPriceCents !== null &&
-      (typeof customPriceCents !== "number" ||
-        !Number.isSafeInteger(customPriceCents) ||
-        customPriceCents < 0 ||
-        customPriceCents > 100_000_000)
-    ) {
-      throw new HttpError(
-        400,
-        "invalid_price",
-        "O valor do serviço é inválido.",
-      );
-    }
-
     if (!isoDatePattern.test(startDate) || !isoDatePattern.test(endDate)) {
       throw new HttpError(400, "invalid_date", "A data informada é inválida.");
     }
@@ -266,11 +250,9 @@ export async function POST(request: Request) {
                 (lodgingNights ?? 1),
             )
           : service.basePriceCents;
-    // Somente administradores podem conceder valores especiais.
-    const priceCents =
-      identity.role === "owner"
-        ? (customPriceCents ?? catalogPriceCents)
-        : catalogPriceCents;
+    // O agendamento preserva o valor de referência. Eventuais ajustes são
+    // decididos somente após a conclusão, no fluxo de cobrança regular.
+    const priceCents = catalogPriceCents;
     const recurringScheduleId =
       recurrence === "weekly" ? crypto.randomUUID() : null;
     const occurrenceDates = Array.from(

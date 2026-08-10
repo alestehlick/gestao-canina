@@ -667,11 +667,12 @@ test("unifica faturas abertas com reversão segura e auditável", async () => {
 });
 
 test("mantém extratos, contas, agendamento rápido e alertas operacionais coerentes", async () => {
-  const [app, batchRoute, statementRoute, accountRoute, regularBillingRoute, schema, portal, migration] =
+  const [app, batchRoute, statementRoute, statementPdf, accountRoute, regularBillingRoute, schema, portal, migration] =
     await Promise.all([
       readFile(new URL("../app/components/management-app.tsx", import.meta.url), "utf8"),
       readFile(new URL("../app/api/appointments/batch/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/statements/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../lib/statement-pdf.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/financial-accounts/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/appointment-items/[id]/billing/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
@@ -691,7 +692,15 @@ test("mantém extratos, contas, agendamento rápido e alertas operacionais coere
   assert.match(batchRoute, /await d1\.batch\(statements\)/);
   assert.match(statementRoute, /openingBalanceCents/);
   assert.match(statementRoute, /closingBalanceCents/);
+  assert.match(statementRoute, /chargesInPeriodCents/);
+  assert.match(statementRoute, /paymentsInPeriodCents/);
+  assert.match(statementRoute, /Math\.max\(0, -runningBalanceCents\)/);
+  assert.match(statementRoute, /inArray\(invoices\.status, \["issued", "paid"\]\)/);
   assert.match(statementRoute, /identity\.role === "customer"/);
+  assert.match(statementPdf, /Pagamento recebido/);
+  assert.match(statementPdf, /Crédito a favor do cliente/);
+  assert.doesNotMatch(statementPdf, /`− \$\{money\(entry\.creditCents\)\}`/);
+  assert.match(app, /Pagamentos recebidos/);
   assert.match(accountRoute, /requireIdentity\(request, \["owner", "finance"\]\)/);
   assert.match(regularBillingRoute, /billing\.regular_selected/);
   assert.match(regularBillingRoute, /billing_item_locked/);

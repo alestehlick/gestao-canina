@@ -91,6 +91,7 @@ export async function GET(request: Request) {
         eq(invoicePayments.establishmentId, establishmentId),
         eq(invoicePayments.status, "active"),
         eq(invoices.accountId, accountId),
+        inArray(invoices.status, ["issued", "paid"]),
       )).orderBy(asc(invoicePayments.paidAt)),
       db.select({
         id: creditMovements.id,
@@ -168,6 +169,7 @@ export async function GET(request: Request) {
       date: dateOnly(invoice.issuedAt ?? invoice.createdAt),
       type: "invoice" as const,
       reference: invoice.invoiceNumber,
+      dueDate: invoice.dueDate,
       description: [
         ...(itemsByInvoice.get(invoice.id) ?? [])
           .map((item) => `${item.dogName} · ${item.serviceName}`),
@@ -184,6 +186,7 @@ export async function GET(request: Request) {
       date: dateOnly(payment.paidAt),
       type: "payment" as const,
       reference: payment.invoiceNumber,
+      dueDate: null,
       description: `Pagamento da fatura ${payment.invoiceNumber}`,
       debitCents: 0,
       creditCents: payment.amountCents,
@@ -201,6 +204,14 @@ export async function GET(request: Request) {
         runningBalanceCents += entry.debitCents - entry.creditCents;
         return { ...entry, runningBalanceCents };
       });
+    const chargesInPeriodCents = entries.reduce(
+      (total, entry) => total + entry.debitCents,
+      0,
+    );
+    const paymentsInPeriodCents = entries.reduce(
+      (total, entry) => total + entry.creditCents,
+      0,
+    );
     const creditMovementsInPeriod = creditRows
       .filter((movement) => dateOnly(movement.occurredAt) >= from! && dateOnly(movement.occurredAt) <= to!)
       .map((movement) => ({
@@ -216,12 +227,22 @@ export async function GET(request: Request) {
       period: { from, to },
       openingBalanceCents,
       closingBalanceCents: runningBalanceCents,
+      summary: {
+        openingAmountDueCents: Math.max(0, openingBalanceCents),
+        openingCustomerCreditCents: Math.max(0, -openingBalanceCents),
+        chargesInPeriodCents,
+        paymentsInPeriodCents,
+        amountDueCents: Math.max(0, runningBalanceCents),
+        customerCreditCents: Math.max(0, -runningBalanceCents),
+      },
       entries,
       creditMovements: creditMovementsInPeriod,
-      creditBalances: creditBalanceRows.map((row) => ({
-        serviceName: row.serviceName,
-        units: Number(row.units),
-      })),
+      creditBalances: creditBalanceRows
+        .map((row) => ({
+          serviceName: row.serviceName,
+          units: Number(row.units),
+        }))
+        .filter((row) => row.units > 0),
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {

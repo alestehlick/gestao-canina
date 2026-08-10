@@ -6984,6 +6984,47 @@ h3 {
   justify-content: space-between;
 }
 
+.statement-opening {
+  border-bottom: 1px solid var(--line-soft);
+  gap: 12px;
+  padding-bottom: 10px;
+}
+
+.statement-opening span,
+.statement-entry-count,
+.statement-summary-grid small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.statement-summary-grid {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.statement-summary-grid > span {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 11px;
+}
+
+.statement-summary-grid strong {
+  font-size: 0.92rem;
+}
+
+.statement-closing.due {
+  background: #faf6ed;
+}
+
+.statement-closing.credit,
+.statement-closing.settled {
+  background: #f2f7f4;
+}
+
 .cash-account-filter {
   align-items: center;
   display: flex;
@@ -7023,6 +7064,15 @@ h3 {
   .cash-account-form { grid-template-columns: 1fr; }
 
   .cash-account-filter { align-items: stretch; flex-direction: column; }
+
+  .statement-opening {
+    align-items: flex-start !important;
+    flex-direction: column;
+  }
+
+  .statement-summary-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media print {

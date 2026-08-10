@@ -18,6 +18,7 @@ import {
 } from "@/app/components/brazilian-date-input";
 import { CashView } from "@/app/components/cash-view";
 import {
+  describeStatementBalance,
   generateStatementPdf,
   type CustomerStatement,
 } from "@/lib/statement-pdf";
@@ -11027,6 +11028,12 @@ function StatementDialog({
   const [statement, setStatement] = useState<CustomerStatement | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const closingStatementBalance = statement
+    ? describeStatementBalance(statement.closingBalanceCents)
+    : null;
+  const openingStatementBalance = statement
+    ? describeStatementBalance(statement.openingBalanceCents)
+    : null;
 
   async function loadStatement(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
@@ -11129,18 +11136,31 @@ function StatementDialog({
       </form>
       {statement && (
         <section className="statement-preview">
-          <div>
-            <span>Saldo anterior</span>
-            <strong>{formatCurrency(statement.openingBalanceCents)}</strong>
+          <div className="statement-opening full">
+            <span>Situação no início do período</span>
+            <strong>
+              {openingStatementBalance?.label}: {formatCurrency(openingStatementBalance?.amountCents ?? 0)}
+            </strong>
           </div>
-          <div>
-            <span>Movimentações</span>
-            <strong>{statement.entries.length}</strong>
+          <div className="statement-summary-grid full">
+            <span>
+              <small>Faturado no período</small>
+              <strong>{formatCurrency(statement.summary.chargesInPeriodCents)}</strong>
+            </span>
+            <span>
+              <small>Pagamentos recebidos</small>
+              <strong>{formatCurrency(statement.summary.paymentsInPeriodCents)}</strong>
+            </span>
+            <span className={`statement-closing ${closingStatementBalance?.kind ?? "settled"}`}>
+              <small>{closingStatementBalance?.label}</small>
+              <strong>{formatCurrency(closingStatementBalance?.amountCents ?? 0)}</strong>
+            </span>
           </div>
-          <div>
-            <span>Saldo final</span>
-            <strong>{formatCurrency(statement.closingBalanceCents)}</strong>
-          </div>
+          <small className="statement-entry-count full">
+            {statement.entries.length === 1
+              ? "1 movimentação no período"
+              : `${statement.entries.length} movimentações no período`}
+          </small>
           <div className="invoice-delivery-options full">
             <button type="button" className="invoice-delivery-button whatsapp" disabled={Boolean(busy)} onClick={() => void deliver("whatsapp")}>
               <span>WA</span><strong>WhatsApp</strong><small>Compartilhar PDF</small>

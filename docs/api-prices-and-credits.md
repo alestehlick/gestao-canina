@@ -20,23 +20,24 @@ Aceita uma atualização parcial dos preços e horários:
     "hotel": 18000,
     "daycare": 7000,
     "bath": 7000,
-    "bath_grooming": 9000,
     "taxi_dog": 500
   },
+  "bathGroomingAddonCents": 3000,
   "daycareStartTime": "07:30",
   "daycareEndTime": "19:30"
 }
 ```
 
 O valor de `taxi_dog` representa a ida. A interface calcula ida e volta usando
-duas vezes esse valor.
+duas vezes esse valor. `bathGroomingAddonCents` é o adicional aplicado quando
+um banho inclui tosa.
 
 ## Venda de créditos
 
 ### `POST /api/credit-purchases`
 
 Cria uma compra de créditos e sua fatura pendente. Os serviços aceitos são
-`daycare`, `bath`, `bath_grooming` e `taxi_dog`.
+`daycare`, `bath` e `taxi_dog`. Tosa não possui créditos próprios.
 
 Para vender um pacote cadastrado:
 

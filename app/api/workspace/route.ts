@@ -251,6 +251,7 @@ export async function GET(request: Request) {
           paymentPreference: appointmentItems.paymentPreference,
           settlementMethod: appointmentItems.settlementMethod,
           billingPricingProfile: appointmentItems.billingPricingProfile,
+          detailsJson: appointmentItems.detailsJson,
           settledAt: appointmentItems.settledAt,
           activeInvoiceId: appointmentItems.activeInvoiceId,
         })
@@ -523,6 +524,7 @@ export async function GET(request: Request) {
       | "paymentPreference"
       | "settlementMethod"
       | "billingPricingProfile"
+      | "detailsJson"
       | "settledAt"
       | "activeInvoiceId"
     > & {
@@ -538,6 +540,7 @@ export async function GET(request: Request) {
         paymentPreference: "invoice" | "credit";
         settlementMethod: "unsettled" | "invoice" | "credit";
         billingPricingProfile: string | null;
+        detailsJson: string | null;
         settledAt: string | null;
         activeInvoiceId: string | null;
       }>;
@@ -595,6 +598,7 @@ export async function GET(request: Request) {
           paymentPreference: row.paymentPreference,
           settlementMethod: row.settlementMethod,
           billingPricingProfile: row.billingPricingProfile,
+          detailsJson: row.detailsJson,
           settledAt: row.settledAt,
           activeInvoiceId: row.activeInvoiceId,
         });

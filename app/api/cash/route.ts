@@ -146,7 +146,12 @@ export async function GET(request: Request) {
       await d1.batch([
         d1
           .prepare(
-            `SELECT sc.code AS service_code,
+            `SELECT CASE
+                WHEN sc.code = 'bath'
+                  AND json_extract(ai.details_json, '$.groomingAddon') = 1
+                  THEN 'bath_grooming'
+                ELSE sc.code
+              END AS service_code,
               ii.appointment_item_id AS item_id,
               ai.appointment_id AS appointment_id,
               a.account_id AS account_id,

@@ -74,6 +74,7 @@ export async function GET(request: Request) {
         bathUnder4DaycareUnitCents: establishments.bathUnder4DaycareUnitCents,
         bath4PlusRegularUnitCents: establishments.bath4PlusRegularUnitCents,
         bath4PlusDaycareUnitCents: establishments.bath4PlusDaycareUnitCents,
+        bathGroomingAddonCents: establishments.bathGroomingAddonCents,
         taxiDogShortUnitCents: establishments.taxiDogShortUnitCents,
         taxiDogLongUnitCents: establishments.taxiDogLongUnitCents,
       })
@@ -259,6 +260,19 @@ export async function PATCH(request: Request) {
       typeof body.daycareEndTime === "string"
         ? body.daycareEndTime
         : "19:30";
+    const bathGroomingAddonCents = body.bathGroomingAddonCents;
+    if (
+      typeof bathGroomingAddonCents !== "number" ||
+      !Number.isSafeInteger(bathGroomingAddonCents) ||
+      bathGroomingAddonCents < 1 ||
+      bathGroomingAddonCents > 100_000_000
+    ) {
+      throw new HttpError(
+        400,
+        "invalid_grooming_addon_price",
+        "Informe um valor válido para a tosa junto ao banho.",
+      );
+    }
     if (
       !/^\d{2}:\d{2}$/.test(daycareStartTime) ||
       !/^\d{2}:\d{2}$/.test(daycareEndTime) ||
@@ -329,6 +343,7 @@ export async function PATCH(request: Request) {
           hotelDaycareAdditionalDogDailyRateCents:
             lodgingPricing.daycareAdditionalDogDailyRateCents as number,
           hotelLongStayDiscountPercent: longStayDiscountPercent,
+          bathGroomingAddonCents,
           ...normalizedCreditPricing,
           updatedAt: sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
         })
@@ -348,6 +363,7 @@ export async function PATCH(request: Request) {
           daycareEndTime,
           lodgingPricing,
           creditPricing: normalizedCreditPricing,
+          bathGroomingAddonCents,
         }),
       }),
     ]);
@@ -359,6 +375,7 @@ export async function PATCH(request: Request) {
       daycareHours: { daycareStartTime, daycareEndTime },
       lodgingPricing,
       creditPricing: normalizedCreditPricing,
+      bathGroomingAddonCents,
     });
   } catch (error) {
     return errorResponse(error, requestId);

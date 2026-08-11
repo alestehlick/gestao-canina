@@ -598,6 +598,19 @@ async function reopenCompletedAppointment({
       .bind(appointmentId, guardAuditId),
     d1
       .prepare(
+        `UPDATE appointment_items
+        SET status = 'cancelled',
+          updated_at = ${nowExpression}
+        WHERE appointment_id = ?
+          AND json_extract(details_json, '$.source') =
+            'grooming_addon_after_bath_credit'
+          AND EXISTS (
+            SELECT 1 FROM audit_events WHERE id = ?
+          )`,
+      )
+      .bind(appointmentId, guardAuditId),
+    d1
+      .prepare(
         `UPDATE appointments
         SET status = 'scheduled',
           cancellation_reason = NULL,
@@ -846,6 +859,18 @@ export async function PATCH(
           "O serviço selecionado não foi encontrado.",
         );
       }
+      if (service.code === "bath_grooming") {
+        throw new HttpError(
+          400,
+          "service_not_schedulable",
+          "Escolha banho e marque a opção de incluir tosa.",
+        );
+      }
+      if (body.groomingAddon !== undefined && typeof body.groomingAddon !== "boolean") {
+        throw new HttpError(400, "invalid_grooming_addon", "Revise a opção de tosa.");
+      }
+      const groomingAddon =
+        service.code === "bath" && body.groomingAddon === true;
       const direction =
         body.transportDirection === "round_trip"
           ? "round_trip"
@@ -935,11 +960,13 @@ export async function PATCH(
             )
           : service.code === "taxi_dog"
             ? taxiDogPriceCents(service.basePriceCents, direction)
-            : service.basePriceCents;
+            : service.basePriceCents +
+              (groomingAddon ? establishment.bathGroomingAddonCents : 0);
       const priceCents =
         item.serviceCatalogId !== service.id ||
         service.code === "hotel" ||
-        service.code === "taxi_dog"
+        service.code === "taxi_dog" ||
+        service.code === "bath"
           ? catalogPriceCents
           : item.totalCents;
       const duplicate = await getD1Database()
@@ -1062,7 +1089,7 @@ export async function PATCH(
           .update(appointmentItems)
           .set({
             serviceCatalogId: service.id,
-            serviceNameSnapshot: service.name,
+            serviceNameSnapshot: groomingAddon ? "Banho e tosa" : service.name,
             unitPriceCents: priceCents,
             totalCents: priceCents,
             descriptionSnapshot:
@@ -1070,9 +1097,14 @@ export async function PATCH(
                 ? direction === "round_trip"
                   ? "Ida e volta"
                   : "Ida"
+                : groomingAddon
+                  ? "Com tosa"
                 : service.code === "hotel" && depositPercent
                   ? `Sinal de ${depositPercent}% no check-in; saldo no check-out.`
                   : null,
+            detailsJson: groomingAddon
+              ? JSON.stringify({ groomingAddon: true })
+              : null,
             updatedAt: now,
           })
           .where(eq(appointmentItems.id, item.id)),
@@ -1102,6 +1134,7 @@ export async function PATCH(
             startDate,
             endDate,
             depositPercent,
+            groomingAddon,
             voidedDepositInvoiceIds: openDepositInvoiceIds,
           }),
         }),
@@ -1120,11 +1153,12 @@ export async function PATCH(
           depositPercent,
           lodgingRateProfile,
           serviceCatalogId: service.id,
-          serviceName: service.name,
+          serviceName: groomingAddon ? "Banho e tosa" : service.name,
           priceCents,
           paymentPreference: item.paymentPreference,
           transportDirection:
             service.code === "taxi_dog" ? direction : null,
+          groomingAddon,
         },
       });
     }

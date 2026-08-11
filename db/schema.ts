@@ -45,6 +45,7 @@ export const establishments = sqliteTable("establishments", {
   bathUnder4DaycareUnitCents: integer("bath_under_4_daycare_unit_cents").notNull().default(5_500),
   bath4PlusRegularUnitCents: integer("bath_4_plus_regular_unit_cents").notNull().default(5_500),
   bath4PlusDaycareUnitCents: integer("bath_4_plus_daycare_unit_cents").notNull().default(5_000),
+  bathGroomingAddonCents: integer("bath_grooming_addon_cents").notNull().default(3_000),
   taxiDogShortUnitCents: integer("taxi_dog_short_unit_cents").notNull().default(500),
   taxiDogLongUnitCents: integer("taxi_dog_long_unit_cents").notNull().default(1_000),
   cashMonthStartDay: integer("cash_month_start_day").notNull().default(1),

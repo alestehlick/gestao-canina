@@ -1020,6 +1020,7 @@ export function ManagementApp() {
     useState<ServiceType>("daycare");
   const [editDraftTransportDirection, setEditDraftTransportDirection] =
     useState<"one_way" | "round_trip">("one_way");
+  const [editDraftGroomingAddon, setEditDraftGroomingAddon] = useState(false);
   const [editDraftHasDeposit, setEditDraftHasDeposit] = useState(false);
   const [editDraftDaycareCustomer, setEditDraftDaycareCustomer] =
     useState(false);
@@ -1049,6 +1050,8 @@ export function ManagementApp() {
     useState<ServiceType>("daycare");
   const [serviceDraftTransportDirection, setServiceDraftTransportDirection] =
     useState<"one_way" | "round_trip">("one_way");
+  const [serviceDraftGroomingAddon, setServiceDraftGroomingAddon] =
+    useState(false);
   const [serviceDraftHasDeposit, setServiceDraftHasDeposit] = useState(false);
   const [serviceDraftDaycareCustomer, setServiceDraftDaycareCustomer] =
     useState(false);
@@ -1064,6 +1067,7 @@ export function ManagementApp() {
   >("none");
   const [daycareStartTime, setDaycareStartTime] = useState("07:30");
   const [daycareEndTime, setDaycareEndTime] = useState("19:30");
+  const [groomingAddonPriceCents, setGroomingAddonPriceCents] = useState(3_000);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [sessionExpiresAt, setSessionExpiresAt] = useState<string | null>(null);
 
@@ -1094,6 +1098,7 @@ export function ManagementApp() {
     setCreditPricing(defaultCreditPricing);
     setDaycareStartTime("07:30");
     setDaycareEndTime("19:30");
+    setGroomingAddonPriceCents(3_000);
     setSelectedDogId(null);
     setSelectedCustomerId(null);
     setSelectedBillables([]);
@@ -1137,6 +1142,7 @@ export function ManagementApp() {
     setServicePrices(defaultServicePrices);
     setLodgingPricing(defaultLodgingPricing);
     setCreditPricing(defaultCreditPricing);
+    setGroomingAddonPriceCents(3_000);
     setSessionExpiresAt(null);
     setCreditCustomerId((current) => current || demoCustomers[0]?.id || "");
     setRuntimeMode("demo");
@@ -1178,6 +1184,9 @@ export function ManagementApp() {
         defaultLodgingPricing.longStayDiscountPercent,
     });
     setCreditPricing(creditPricingFromEstablishment(payload.establishment));
+    setGroomingAddonPriceCents(
+      payload.establishment.bathGroomingAddonCents ?? 3_000,
+    );
     setDaycareStartTime(payload.establishment.daycareStartTime || "07:30");
     setDaycareEndTime(payload.establishment.daycareEndTime || "19:30");
     setCreditCustomerId((current) =>
@@ -1833,7 +1842,10 @@ export function ManagementApp() {
 
   function openBookingEditor(booking: Booking) {
     setBookingToEdit(booking);
-    setEditDraftType(booking.serviceType);
+    setEditDraftType(booking.serviceType === "grooming" ? "bath" : booking.serviceType);
+    setEditDraftGroomingAddon(
+      booking.groomingAddon === true || booking.serviceType === "grooming",
+    );
     setEditDraftTransportDirection(
       booking.transportDirection ?? "one_way",
     );
@@ -1878,6 +1890,8 @@ export function ManagementApp() {
       String(form.get("transportDirection") ?? "one_way") === "round_trip"
         ? "round_trip"
         : "one_way";
+    const groomingAddon =
+      serviceType === "bath" && form.get("groomingAddon") === "on";
     const lodgingNights = Number(form.get("lodgingNights") ?? 0);
     const depositPercent =
       form.get("hasDeposit") === "on"
@@ -1950,6 +1964,7 @@ export function ManagementApp() {
                 paymentPreference: "invoice" as const,
                 internalNotes: note ?? null,
                 transportDirection,
+                groomingAddon,
                 lodgingNights:
                   serviceType === "hotel" ? lodgingNights : null,
                 depositPercent:
@@ -2001,7 +2016,11 @@ export function ManagementApp() {
                     ? lodgingPricing.standardDailyRateCents
                     : undefined,
                 serviceType,
-                service: serviceLabels[serviceType],
+                groomingAddon,
+                service:
+                  serviceType === "bath" && groomingAddon
+                    ? "Banho e tosa"
+                    : serviceLabels[serviceType],
                 transportDirection:
                   serviceType === "transport"
                     ? transportDirection
@@ -2009,7 +2028,10 @@ export function ManagementApp() {
                 priceCents:
                   serviceType === "hotel"
                     ? lodgingDailyRate(lodgingPricing, nextLodgingRateProfile) * lodgingNights
-                    : servicePrices[serviceType] *
+                    : (servicePrices[serviceType] +
+                        (serviceType === "bath" && groomingAddon
+                          ? groomingAddonPriceCents
+                          : 0)) *
                       (serviceType === "transport" && transportDirection === "round_trip" ? 2 : 1),
                 paymentPreference: "invoice" as const,
                 note,
@@ -2447,6 +2469,8 @@ export function ManagementApp() {
     const lodgingNights = Number(form.get("lodgingNights") ?? 0);
     const depositPercent = form.get("hasDeposit") === "on" ? Number(form.get("depositPercent") ?? 50) : null;
     const transportDirection = String(form.get("transportDirection") ?? "one_way") === "round_trip" ? "round_trip" : "one_way";
+    const groomingAddon =
+      serviceType === "bath" && form.get("groomingAddon") === "on";
     const recurrence = String(form.get("recurrence") ?? "none") as
       | "none"
       | "weekly";
@@ -2532,6 +2556,7 @@ export function ManagementApp() {
                   : endTime || undefined,
               internalNotes: note,
               transportDirection,
+              groomingAddon,
               lodgingNights:
                 serviceType === "hotel" ? lodgingNights : undefined,
               depositPercent:
@@ -2590,13 +2615,20 @@ export function ManagementApp() {
         dogName: dog.name,
         customerId: dog.customerId,
         customerName: dog.customerName,
-        service: serviceLabels[serviceType],
+        service:
+          serviceType === "bath" && groomingAddon
+            ? "Banho e tosa"
+            : serviceLabels[serviceType],
         serviceType,
+        groomingAddon,
         status: "scheduled",
         priceCents:
           serviceType === "hotel"
             ? lodgingDailyRate(lodgingPricing, nextLodgingRateProfile) * lodgingNights
-            : servicePrices[serviceType] *
+            : (servicePrices[serviceType] +
+                (serviceType === "bath" && groomingAddon
+                  ? groomingAddonPriceCents
+                  : 0)) *
               (serviceType === "transport" && transportDirection === "round_trip" ? 2 : 1),
         paymentPreference: "invoice",
         settlementStatus: "pending",
@@ -2927,7 +2959,10 @@ export function ManagementApp() {
       const result = await runLiveAction(
         `use-credit:${service.appointmentItemId}`,
         () =>
-          requestJson<{ receipt?: { id: string } }>("/api/credits/consume", {
+          requestJson<{
+            receipt?: { id: string };
+            chargeCreated?: boolean;
+          }>("/api/credits/consume", {
             method: "POST",
             body: JSON.stringify({
               appointmentItemId: service.appointmentItemId,
@@ -2935,15 +2970,19 @@ export function ManagementApp() {
           }),
         {
           refresh: true,
-          successMessage: `${creditUnits} ${
-            creditUnits === 1 ? "crédito utilizado" : "créditos utilizados"
-          }. O recibo está pronto.`,
         },
       );
       if (result) {
         setSelectedBillables((current) =>
           current.filter((id) => id !== service.id),
         );
+        setToast({
+          message: result.chargeCreated
+            ? "Crédito de banho utilizado. O recibo está pronto e a tosa foi separada para cobrança regular."
+            : `${creditUnits} ${
+                creditUnits === 1 ? "crédito utilizado" : "créditos utilizados"
+              }. O recibo está pronto.`,
+        });
       }
       return;
     }
@@ -2961,9 +3000,23 @@ export function ManagementApp() {
         [serviceType]: nextBalance,
       },
     }));
-    setBillableServices((current) =>
-      current.filter((item) => item.id !== service.id),
-    );
+    const hasGroomingAddon =
+      serviceType === "bath" && service.service.toLowerCase().includes("tosa");
+    setBillableServices((current) => [
+      ...(hasGroomingAddon
+        ? [
+            {
+              ...service,
+              id: `grooming-${service.id}`,
+              service: "Tosa",
+              serviceType: "grooming" as const,
+              creditUnits: undefined,
+              amountCents: groomingAddonPriceCents,
+            },
+          ]
+        : []),
+      ...current.filter((item) => item.id !== service.id),
+    ]);
     setSelectedBillables((current) =>
       current.filter((id) => id !== service.id),
     );
@@ -2975,7 +3028,7 @@ export function ManagementApp() {
         customerName: service.customerName,
         dogName: service.dogName,
         serviceType: serviceType as CreditServiceType,
-        service: service.service,
+        service: hasGroomingAddon ? "Banho" : service.service,
         date: service.date,
         creditUnits,
         remainingBalance: nextBalance,
@@ -2984,9 +3037,11 @@ export function ManagementApp() {
       ...current,
     ]);
     setToast({
-      message: `${creditUnits} ${
-        creditUnits === 1 ? "crédito utilizado" : "créditos utilizados"
-      }. O recibo está pronto.`,
+      message: hasGroomingAddon
+        ? "Crédito de banho utilizado. A tosa foi separada para cobrança regular."
+        : `${creditUnits} ${
+            creditUnits === 1 ? "crédito utilizado" : "créditos utilizados"
+          }. O recibo está pronto.`,
     });
   }
 
@@ -3209,8 +3264,9 @@ export function ManagementApp() {
       taxiDogShortUnitCents: moneyField("taxiDogShortUnit"),
       taxiDogLongUnitCents: moneyField("taxiDogLongUnit"),
     };
+    const nextGroomingAddonPriceCents = moneyField("bathGroomingAddon");
     next.hotel = nextLodgingPricing.standardDailyRateCents;
-    for (const serviceType of ["daycare", "bath", "grooming"] as const) {
+    for (const serviceType of ["daycare", "bath"] as const) {
       const cents = Math.round(Number(form.get(serviceType) ?? 0) * 100);
       if (!Number.isFinite(cents) || cents < 1) {
         setToast({ message: "Revise todos os valores antes de salvar." });
@@ -3228,6 +3284,13 @@ export function ManagementApp() {
       nextLodgingPricing.longStayDiscountPercent > 99
     ) {
       setToast({ message: "Revise os valores e o desconto da hospedagem." });
+      return;
+    }
+    if (
+      !Number.isSafeInteger(nextGroomingAddonPriceCents) ||
+      nextGroomingAddonPriceCents < 1
+    ) {
+      setToast({ message: "Revise o valor adicional da tosa." });
       return;
     }
     if (
@@ -3263,13 +3326,13 @@ export function ManagementApp() {
                 hotel: next.hotel,
                 daycare: next.daycare,
                 bath: next.bath,
-                bath_grooming: next.grooming,
                 taxi_dog: next.transport,
               },
               daycareStartTime: nextDaycareStartTime,
               daycareEndTime: nextDaycareEndTime,
               lodgingPricing: nextLodgingPricing,
               creditPricing: nextCreditPricing,
+              bathGroomingAddonCents: nextGroomingAddonPriceCents,
             }),
           }),
         {
@@ -3284,6 +3347,7 @@ export function ManagementApp() {
         setDaycareEndTime(nextDaycareEndTime);
         setLodgingPricing(nextLodgingPricing);
         setCreditPricing(nextCreditPricing);
+        setGroomingAddonPriceCents(nextGroomingAddonPriceCents);
       }
       return;
     }
@@ -3293,6 +3357,7 @@ export function ManagementApp() {
     setDaycareEndTime(nextDaycareEndTime);
     setLodgingPricing(nextLodgingPricing);
     setCreditPricing(nextCreditPricing);
+    setGroomingAddonPriceCents(nextGroomingAddonPriceCents);
     setToast({
       message:
         "Preços padrão salvos. Novos serviços já usarão os valores atualizados.",
@@ -4937,6 +5002,7 @@ export function ManagementApp() {
               prices={servicePrices}
               lodgingPricing={lodgingPricing}
               creditPricing={creditPricing}
+              groomingAddonPriceCents={groomingAddonPriceCents}
               daycareStartTime={daycareStartTime}
               daycareEndTime={daycareEndTime}
               onSave={saveDefaultPrices}
@@ -5147,6 +5213,7 @@ export function ManagementApp() {
                 onChange={(event) => {
                   const next = event.target.value as ServiceType;
                   setServiceDraftType(next);
+                  if (next !== "bath") setServiceDraftGroomingAddon(false);
                   if (next !== "hotel") setServiceDraftHasDeposit(false);
                   if (next === "hotel") {
                     const nextEndDate =
@@ -5163,13 +5230,29 @@ export function ManagementApp() {
                   }
                 }}
               >
-                {Object.entries(serviceLabels).map(([key, label]) => (
+                {Object.entries(serviceLabels).filter(([key]) => key !== "grooming").map(([key, label]) => (
                   <option key={key} value={key}>
                     {label}
                   </option>
                 ))}
               </select>
             </label>
+            {serviceDraftType === "bath" && (
+              <label className="check-field full">
+                <input
+                  name="groomingAddon"
+                  type="checkbox"
+                  checked={serviceDraftGroomingAddon}
+                  onChange={(event) =>
+                    setServiceDraftGroomingAddon(event.target.checked)
+                  }
+                />
+                <span>
+                  Incluir tosa
+                  <small>O adicional será cobrado após o atendimento.</small>
+                </span>
+              </label>
+            )}
             {serviceDraftType !== "transport" && (
               <>
                 {serviceDraftType === "hotel" || serviceDraftType === "daycare" ? (
@@ -5222,10 +5305,10 @@ export function ManagementApp() {
                   setServiceDraftTransportDirection(nextDirection);
                 }}>
                   <option value="one_way">
-                    Ida · {formatCurrency(servicePrices.transport)}
+                    Ida
                   </option>
                   <option value="round_trip">
-                    Ida e volta · {formatCurrency(servicePrices.transport * 2)}
+                    Ida e volta
                   </option>
                 </select>
               </label>
@@ -5458,6 +5541,7 @@ export function ManagementApp() {
                 onChange={(event) => {
                   const next = event.target.value as ServiceType;
                   setEditDraftType(next);
+                  if (next !== "bath") setEditDraftGroomingAddon(false);
                   if (next !== "hotel") setEditDraftHasDeposit(false);
                   if (next === "hotel") {
                     const nextEndDate =
@@ -5474,13 +5558,29 @@ export function ManagementApp() {
                   }
                 }}
               >
-                {Object.entries(serviceLabels).map(([key, label]) => (
+                {Object.entries(serviceLabels).filter(([key]) => key !== "grooming").map(([key, label]) => (
                   <option key={key} value={key}>
                     {label}
                   </option>
                 ))}
               </select>
             </label>
+            {editDraftType === "bath" && (
+              <label className="check-field full">
+                <input
+                  name="groomingAddon"
+                  type="checkbox"
+                  checked={editDraftGroomingAddon}
+                  onChange={(event) =>
+                    setEditDraftGroomingAddon(event.target.checked)
+                  }
+                />
+                <span>
+                  Incluir tosa
+                  <small>O adicional será cobrado após o atendimento.</small>
+                </span>
+              </label>
+            )}
             {editDraftType !== "transport" && (
               <>
                 {editDraftType === "hotel" || editDraftType === "daycare" ? (
@@ -5544,10 +5644,10 @@ export function ManagementApp() {
                   }}
                 >
                   <option value="one_way">
-                    Ida · {formatCurrency(servicePrices.transport)}
+                    Ida
                   </option>
                   <option value="round_trip">
-                    Ida e volta · {formatCurrency(servicePrices.transport * 2)}
+                    Ida e volta
                   </option>
                 </select>
               </label>
@@ -9797,6 +9897,7 @@ function SettingsView({
   prices,
   lodgingPricing,
   creditPricing,
+  groomingAddonPriceCents,
   daycareStartTime,
   daycareEndTime,
   onSave,
@@ -9804,6 +9905,7 @@ function SettingsView({
   prices: Record<ServiceType, number>;
   lodgingPricing: LodgingPricing;
   creditPricing: CreditPricingSettings;
+  groomingAddonPriceCents: number;
   daycareStartTime: string;
   daycareEndTime: string;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
@@ -9847,7 +9949,12 @@ function SettingsView({
         <div className="price-settings-grid">
           {moneyInput("daycare", "Creche avulsa", prices.daycare, "por diária")}
           {moneyInput("bath", "Banho avulso", prices.bath, "por serviço")}
-          {moneyInput("grooming", "Banho e tosa", prices.grooming, "por serviço; sem créditos")}
+          {moneyInput(
+            "bathGroomingAddon",
+            "Tosa junto ao banho",
+            groomingAddonPriceCents,
+            "valor adicional ao banho",
+          )}
         </div>
         <section className="lodging-pricing-settings">
           <div>

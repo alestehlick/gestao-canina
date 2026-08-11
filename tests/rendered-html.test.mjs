@@ -147,6 +147,7 @@ test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () =
   assert.match(cashRoute, /credit_sold_cents/);
   assert.match(cashRoute, /ce\.status = 'included'/);
   assert.match(cashRoute, /ce\.occurred_on BETWEEN \? AND \?/);
+  assert.match(cashRoute, /json_extract\(ai\.details_json, '\$\.groomingAddon'\) = 1/);
   assert.match(cashView, /Receita recebida no período/);
   assert.match(cashRoute, /\["hotel", "Hospedagem"\]/);
   assert.match(cashView, /Créditos vendidos:/);
@@ -406,7 +407,7 @@ test("mantém o primeiro acesso e o login protegidos sem bloqueio global da cont
 });
 
 test("preserva as regras de faturas, sinais e créditos", async () => {
-  const [invoices, payments, reversePayment, settlement, consume, purchases, prices, workspaceData, managementApp, invoiceNotes, invoiceNotesMigration, schema, serviceRules, creditPricing, creditPricingMigration] = await Promise.all([
+  const [invoices, payments, reversePayment, settlement, consume, purchases, prices, workspaceData, managementApp, invoiceNotes, invoiceNotesMigration, schema, serviceRules, creditPricing, creditPricingMigration, appointments, groomingAddonMigration] = await Promise.all([
     readFile(new URL("../app/api/invoices/route.ts", import.meta.url), "utf8"),
     readFile(
       new URL("../app/api/invoices/[id]/payments/route.ts", import.meta.url),
@@ -443,6 +444,8 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
     readFile(new URL("../lib/service-rules.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/credit-pricing.ts", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0017_credit_pricing.sql", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/appointments/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0018_bath_grooming_addon.sql", import.meta.url), "utf8"),
   ]);
 
   assert.match(invoices, /active_invoice_id = \?/);
@@ -474,8 +477,15 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
   assert.match(creditPricing, /daycareMultiDogDiscountPercent: 15/);
   assert.match(creditPricing, /direction === "round_trip" \? oneWay \* 2 : oneWay/);
   assert.match(creditPricingMigration, /billing_pricing_profile/);
-  assert.doesNotMatch(consume, /bath_grooming/);
+  assert.match(consume, /eq\(serviceCatalog\.code, "bath_grooming"\)/);
+  assert.match(consume, /grooming_addon_after_bath_credit/);
+  assert.match(consume, /description_snapshot, details_json, unit_price_cents/);
+  assert.match(consume, /chargeCreated: groomingAddon/);
   assert.doesNotMatch(purchases, /bath_grooming/);
+  assert.match(appointments, /service_not_schedulable/);
+  assert.match(appointments, /groomingAddon \? "Banho e tosa"/);
+  assert.match(prices, /bathGroomingAddonCents/);
+  assert.match(groomingAddonMigration, /bath_grooming_addon_cents/);
   assert.match(consume, /\) >= \?/);
   assert.match(purchases, /default_price_required/);
   assert.match(prices, /value < 1/);

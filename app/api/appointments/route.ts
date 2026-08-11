@@ -195,6 +195,17 @@ export async function POST(request: Request) {
         "Cão ou serviço não encontrado.",
       );
     }
+    if (service.code === "bath_grooming") {
+      throw new HttpError(
+        400,
+        "service_not_schedulable",
+        "Agende um banho e marque a opção de incluir tosa.",
+      );
+    }
+    if (body.groomingAddon !== undefined && typeof body.groomingAddon !== "boolean") {
+      throw new HttpError(400, "invalid_grooming_addon", "Revise a opção de tosa.");
+    }
+    const groomingAddon = service.code === "bath" && body.groomingAddon === true;
     if (recurrence === "weekly" && service.code === "hotel") {
       throw new HttpError(
         400,
@@ -249,7 +260,8 @@ export async function POST(request: Request) {
               lodgingDailyRateCents(establishment, lodgingRateProfile!) *
                 (lodgingNights ?? 1),
             )
-          : service.basePriceCents;
+          : service.basePriceCents +
+            (groomingAddon ? establishment.bathGroomingAddonCents : 0);
     // O agendamento preserva o valor de referência. Eventuais ajustes são
     // decididos somente após a conclusão, no fluxo de cobrança regular.
     const priceCents = catalogPriceCents;
@@ -314,9 +326,15 @@ export async function POST(request: Request) {
         ? direction === "round_trip"
           ? "Ida e volta"
           : "Ida"
+        : groomingAddon
+          ? "Com tosa"
         : service.code === "hotel" && depositPercent
           ? `Sinal de ${depositPercent}% no check-in; saldo no check-out.`
           : null;
+    const serviceName = groomingAddon ? "Banho e tosa" : service.name;
+    const detailsJson = groomingAddon
+      ? JSON.stringify({ groomingAddon: true })
+      : null;
     const d1 = getD1Database();
     const statements = [];
 
@@ -396,7 +414,7 @@ export async function POST(request: Request) {
       const placeholders = itemChunk
         .map(
           () =>
-            `(?, ?, ?, ?, ?, ?, 1, ?, 'scheduled', ?, 'unsettled',
+            `(?, ?, ?, ?, ?, ?, ?, 1, ?, 'scheduled', ?, 'unsettled',
               ${nowExpression}, ${nowExpression})`,
         )
         .join(", ");
@@ -405,7 +423,7 @@ export async function POST(request: Request) {
           .prepare(
             `INSERT INTO appointment_items (
               id, appointment_id, service_catalog_id, service_name_snapshot,
-              description_snapshot, unit_price_cents, quantity, total_cents,
+              description_snapshot, details_json, unit_price_cents, quantity, total_cents,
               status, payment_preference, settlement_method, created_at,
               updated_at
             ) VALUES ${placeholders}`,
@@ -415,8 +433,9 @@ export async function POST(request: Request) {
               created.itemId,
               created.id,
               service.id,
-              service.name,
+              serviceName,
               description,
+              detailsJson,
               priceCents,
               priceCents,
               "invoice",
@@ -453,6 +472,7 @@ export async function POST(request: Request) {
             serviceCatalogId: service.id,
             transportDirection:
               service.code === "taxi_dog" ? direction : null,
+            groomingAddon,
             lodgingNights:
               service.code === "hotel" ? lodgingNights : null,
             depositPercent:
@@ -471,7 +491,7 @@ export async function POST(request: Request) {
           itemId: createdAppointments[0].itemId,
           dogId: dog.id,
           dogName: dog.name,
-          serviceName: service.name,
+          serviceName,
           priceCents,
           startDate: createdAppointments[0].startDate,
           endDate: createdAppointments[0].endDate,
@@ -481,6 +501,7 @@ export async function POST(request: Request) {
           paymentPreference: "invoice",
           settlementMethod: "unsettled",
           recurringScheduleId,
+          groomingAddon,
         },
         appointments: createdAppointments.map((item) => ({
           ...item,

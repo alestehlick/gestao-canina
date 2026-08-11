@@ -67,11 +67,12 @@ Use **Novo serviço**, selecione o cão e escolha o tipo:
 
 - **Creche**: usa os horários padrão definidos nas configurações.
 - **Hospedagem**: pede entrada, saída e número de diárias.
-- **Banho**.
-- **Banho e tosa**.
+- **Banho**: marque **Incluir tosa** quando necessário.
 - **Taxi-dog**: escolha ida ou ida e volta; não exige horário.
 
-O valor sugerido vem das configurações. Um administrador pode alterá-lo para um atendimento específico sem mudar o preço padrão. Funcionários sempre usam o valor definido pela administração.
+Nenhum valor é digitado na Agenda. Depois de concluir o atendimento, confira ou ajuste o valor ao escolher **Regular** em **Cobranças**.
+
+Banho com tosa é mantido como um único atendimento. Se o banho for pago de modo regular, os dois valores entram juntos em uma única fatura. Se o banho for quitado com crédito, o crédito cobre apenas o banho e a tosa fica separada para cobrança regular.
 
 O agendamento não define a forma de quitação. Primeiro realize e conclua o
 serviço. Depois, em **Cobranças > Faturas**, escolha entre criar uma fatura ou
@@ -254,7 +255,7 @@ Em **Configurações**, o administrador define:
 - diária da hospedagem;
 - creche;
 - banho;
-- banho e tosa;
+- adicional da tosa junto ao banho;
 - Taxi-dog de ida;
 - horário padrão de entrada e saída da creche.
 

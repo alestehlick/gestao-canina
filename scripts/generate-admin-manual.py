@@ -221,9 +221,10 @@ sections = [
             (
                 "6. Criar um serviço",
                 [
-                    "Use <b>Novo serviço</b>, escolha o cão e selecione Creche, Hospedagem, Banho, Banho e tosa ou Taxi-dog.",
+                    "Use <b>Novo serviço</b>, escolha o cão e selecione Creche, Hospedagem, Banho ou Taxi-dog. No Banho, marque <b>Incluir tosa</b> quando necessário.",
                     "A Creche usa os horários padrão das configurações. O Taxi-dog pede ida ou ida e volta e não exige horário.",
-                    "O administrador pode alterar o preço de um atendimento sem mudar o padrão. Funcionários sempre usam o valor definido pela administração.",
+                    "Nenhum valor é digitado na Agenda. Depois de concluir o atendimento, confira ou ajuste o valor ao escolher <b>Regular</b> em Cobranças.",
+                    "No pagamento regular, banho e tosa entram juntos em uma única fatura. Quando um crédito quita o banho, a tosa fica separada para cobrança regular.",
                     "O agendamento não define a forma de quitação. Conclua o serviço e, em <b>Cobranças &gt; Faturas</b>, escolha entre criar uma fatura ou usar créditos disponíveis.",
                     "Para repetir semanalmente, escolha <b>Toda semana</b> e informe de 2 a 52 semanas. Ao cancelar, escolha somente o dia, deste dia em diante ou toda a recorrência. Atendimentos concluídos são preservados.",
                 ],
@@ -372,7 +373,7 @@ story.extend(
         Paragraph("Configurações e rotina", h1),
         Paragraph("19. Preços e horários padrão", h2),
         Paragraph(
-            "Em <b>Configurações</b>, defina diária da hospedagem, creche, banho, banho e tosa, Taxi-dog de ida e horários da creche.",
+            "Em <b>Configurações</b>, defina diária da hospedagem, creche, banho, adicional da tosa, Taxi-dog de ida e horários da creche.",
             body,
         ),
         Paragraph(

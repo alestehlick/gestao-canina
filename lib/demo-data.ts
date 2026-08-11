@@ -78,6 +78,7 @@ export type Booking = {
   service: string;
   serviceType: ServiceType;
   transportDirection?: "one_way" | "round_trip";
+  groomingAddon?: boolean;
   status: BookingStatus;
   priceCents: number;
   paymentPreference: "invoice" | "credit";

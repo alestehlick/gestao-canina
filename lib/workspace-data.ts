@@ -136,6 +136,7 @@ export type WorkspaceAppointmentItem = {
   paymentPreference: "invoice" | "credit";
   settlementMethod: "unsettled" | "invoice" | "credit";
   billingPricingProfile?: string | null;
+  detailsJson?: string | null;
   settledAt: string | null;
   activeInvoiceId?: string | null;
 };
@@ -357,6 +358,7 @@ export type WorkspaceReadyPayload = {
     bathUnder4DaycareUnitCents: number;
     bath4PlusRegularUnitCents: number;
     bath4PlusDaycareUnitCents: number;
+    bathGroomingAddonCents: number;
     taxiDogShortUnitCents: number;
     taxiDogLongUnitCents: number;
     cashMonthStartDay: number;
@@ -570,6 +572,18 @@ export function mapWorkspaceCustomers(
     });
 }
 
+function parseAppointmentItemDetails(value: string | null | undefined) {
+  if (!value) return {} as { groomingAddon?: boolean };
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object"
+      ? (parsed as { groomingAddon?: boolean })
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 export function mapWorkspaceBookings(
   payload: WorkspaceReadyPayload,
 ): Booking[] {
@@ -674,6 +688,9 @@ export function mapWorkspaceBookings(
             ? "round_trip"
             : "one_way"
           : undefined,
+      groomingAddon:
+        firstService?.code === "bath" &&
+        parseAppointmentItemDetails(firstItem?.detailsJson).groomingAddon === true,
       status: appointment.status,
       priceCents: displayItems.reduce(
         (total, item) => total + Math.max(0, item.totalCents),

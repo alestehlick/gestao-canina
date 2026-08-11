@@ -7,6 +7,7 @@ import {
   creditReceipts,
   customerAccounts,
   dogs,
+  establishments,
   serviceCatalog,
   tutors,
 } from "@/db/schema";
@@ -65,6 +66,7 @@ export async function POST(request: Request) {
         serviceCode: serviceCatalog.code,
         serviceName: appointmentItems.serviceNameSnapshot,
         description: appointmentItems.descriptionSnapshot,
+        detailsJson: appointmentItems.detailsJson,
         serviceDate: appointments.startDate,
         dogName: dogs.name,
         customerName: customerAccounts.displayName,
@@ -139,6 +141,43 @@ export async function POST(request: Request) {
       item.serviceCode,
       item.description,
     );
+    let itemDetails: { groomingAddon?: boolean } = {};
+    try {
+      itemDetails = item.detailsJson
+        ? (JSON.parse(item.detailsJson) as { groomingAddon?: boolean })
+        : {};
+    } catch {
+      itemDetails = {};
+    }
+    const groomingAddon =
+      item.serviceCode === "bath" && itemDetails.groomingAddon === true;
+    const [[groomingService], [establishment]] = groomingAddon
+      ? await Promise.all([
+          db
+            .select()
+            .from(serviceCatalog)
+            .where(
+              and(
+                eq(serviceCatalog.establishmentId, establishmentId),
+                eq(serviceCatalog.code, "bath_grooming"),
+                eq(serviceCatalog.active, true),
+              ),
+            )
+            .limit(1),
+          db
+            .select()
+            .from(establishments)
+            .where(eq(establishments.id, establishmentId))
+            .limit(1),
+        ])
+      : [[null], [null]];
+    if (groomingAddon && (!groomingService || !establishment)) {
+      throw new HttpError(
+        409,
+        "grooming_charge_unavailable",
+        "Não foi possível preparar a cobrança da tosa. Revise as Configurações.",
+      );
+    }
 
     const contacts = await db
       .select({
@@ -165,6 +204,13 @@ export async function POST(request: Request) {
     const movementId = crypto.randomUUID();
     const newReceiptId = crypto.randomUUID();
     const newReceiptNumber = receiptNumber();
+    const groomingChargeId = groomingAddon ? crypto.randomUUID() : null;
+    const groomingChargeDetails = groomingAddon
+      ? JSON.stringify({
+          source: "grooming_addon_after_bath_credit",
+          parentBathItemId: appointmentItemId,
+        })
+      : null;
     const idempotencyKey = `credit-consume:${appointmentItemId}`;
     const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
     const d1 = getD1Database();
@@ -243,12 +289,47 @@ export async function POST(request: Request) {
           newReceiptNumber,
           item.customerName,
           item.dogName,
-          item.serviceName,
+          groomingAddon ? "Banho" : item.serviceName,
           item.serviceDate,
           creditUnits,
           JSON.stringify([...channels]),
           movementId,
         ),
+      ...(groomingAddon
+        ? [
+            d1
+              .prepare(
+                `INSERT INTO appointment_items (
+                  id, appointment_id, service_catalog_id, service_name_snapshot,
+                  description_snapshot, details_json, unit_price_cents, quantity,
+                  total_cents, status, payment_preference, settlement_method,
+                  created_at, updated_at
+                )
+                SELECT ?, ?, ?, 'Tosa', 'Complemento do banho pago com crédito',
+                  ?, ?, 1, ?, 'completed', 'invoice', 'unsettled',
+                  ${nowExpression}, ${nowExpression}
+                WHERE EXISTS (
+                  SELECT 1 FROM credit_movements WHERE id = ?
+                ) AND NOT EXISTS (
+                  SELECT 1 FROM appointment_items
+                  WHERE appointment_id = ?
+                    AND details_json = ?
+                    AND status <> 'cancelled'
+                )`,
+              )
+              .bind(
+                groomingChargeId,
+                item.appointmentId,
+                groomingService!.id,
+                groomingChargeDetails,
+                establishment!.bathGroomingAddonCents,
+                establishment!.bathGroomingAddonCents,
+                movementId,
+                item.appointmentId,
+                groomingChargeDetails,
+              ),
+          ]
+        : []),
       d1
         .prepare(
           `INSERT INTO audit_events (
@@ -275,6 +356,8 @@ export async function POST(request: Request) {
             serviceCatalogId: item.serviceCatalogId,
             accountId: item.accountId,
             creditUnits,
+            groomingAddon,
+            groomingChargeId,
           }),
           movementId,
         ),
@@ -306,7 +389,6 @@ export async function POST(request: Request) {
           : "O pagamento deste serviço foi alterado por outra operação.",
       );
     }
-
     const [[receipt], [remaining]] = await Promise.all([
       db
         .select()
@@ -335,7 +417,8 @@ export async function POST(request: Request) {
       idempotent: false,
       remainingUnits: Number(remaining?.value ?? 0),
       receipt,
-      chargeCreated: false,
+      chargeCreated: groomingAddon,
+      groomingChargeId,
       nextAction: {
         type: "deliver_receipt",
         channels: [...channels],

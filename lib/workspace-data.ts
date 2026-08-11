@@ -135,6 +135,7 @@ export type WorkspaceAppointmentItem = {
   status: "scheduled" | "completed" | "cancelled";
   paymentPreference: "invoice" | "credit";
   settlementMethod: "unsettled" | "invoice" | "credit";
+  billingPricingProfile?: string | null;
   settledAt: string | null;
   activeInvoiceId?: string | null;
 };
@@ -273,6 +274,9 @@ export type WorkspaceCreditPurchase = {
   creditUnits: number;
   standardValueCents: number;
   amountCents: number;
+  pricingProfileSnapshot: string;
+  suggestedUnitPriceCents: number | null;
+  suggestedAmountCents: number | null;
   status: "awaiting_payment" | "paid" | "cancelled" | "refunded";
   grantMovementId: string | null;
   createdByUserId: string | null;
@@ -344,6 +348,17 @@ export type WorkspaceReadyPayload = {
     hotelAdditionalDogDailyRateCents: number;
     hotelDaycareAdditionalDogDailyRateCents: number;
     hotelLongStayDiscountPercent: number;
+    daycareUnder4UnitCents: number;
+    daycare4To7UnitCents: number;
+    daycare8To11UnitCents: number;
+    daycare12PlusUnitCents: number;
+    daycareMultiDogDiscountPercent: number;
+    bathUnder4RegularUnitCents: number;
+    bathUnder4DaycareUnitCents: number;
+    bath4PlusRegularUnitCents: number;
+    bath4PlusDaycareUnitCents: number;
+    taxiDogShortUnitCents: number;
+    taxiDogLongUnitCents: number;
     cashMonthStartDay: number;
     createdAt: string;
     updatedAt: string;
@@ -391,7 +406,6 @@ export type WorkspaceUiData = {
 const creditServiceTypes: CreditServiceType[] = [
   "daycare",
   "bath",
-  "grooming",
   "transport",
 ];
 
@@ -748,11 +762,18 @@ export function mapWorkspaceBillableServices(
         serviceType,
         creditUnits:
           serviceCode &&
-          ["daycare", "bath", "bath_grooming", "taxi_dog"].includes(
+          ["daycare", "bath", "taxi_dog"].includes(
             serviceCode,
           )
             ? creditUnitsForServiceCode(serviceCode, item.description)
             : undefined,
+        transportDirection:
+          serviceCode === "taxi_dog" && item.description === "Ida e volta"
+            ? ("round_trip" as const)
+            : serviceCode === "taxi_dog"
+              ? ("one_way" as const)
+              : undefined,
+        billingPricingProfile: item.billingPricingProfile ?? undefined,
         lodging,
       };
 
@@ -1025,6 +1046,10 @@ export function mapWorkspaceCreditPurchases(
         units: Math.max(0, Math.trunc(purchase.creditUnits)),
         amountCents: Math.max(0, purchase.amountCents),
         standardValueCents: Math.max(0, purchase.standardValueCents),
+        pricingProfile: purchase.pricingProfileSnapshot,
+        suggestedUnitPriceCents:
+          purchase.suggestedUnitPriceCents ?? undefined,
+        suggestedAmountCents: purchase.suggestedAmountCents ?? undefined,
         status:
           purchase.status === "awaiting_payment"
             ? "awaiting_payment"

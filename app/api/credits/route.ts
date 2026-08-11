@@ -19,7 +19,6 @@ import {
 const creditServiceCodes = [
   "daycare",
   "bath",
-  "bath_grooming",
   "taxi_dog",
 ] as const;
 

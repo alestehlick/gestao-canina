@@ -36,6 +36,17 @@ export const establishments = sqliteTable("establishments", {
   hotelLongStayDiscountPercent: integer("hotel_long_stay_discount_percent")
     .notNull()
     .default(5),
+  daycareUnder4UnitCents: integer("daycare_under_4_unit_cents").notNull().default(6_500),
+  daycare4To7UnitCents: integer("daycare_4_to_7_unit_cents").notNull().default(6_000),
+  daycare8To11UnitCents: integer("daycare_8_to_11_unit_cents").notNull().default(5_800),
+  daycare12PlusUnitCents: integer("daycare_12_plus_unit_cents").notNull().default(5_600),
+  daycareMultiDogDiscountPercent: integer("daycare_multi_dog_discount_percent").notNull().default(15),
+  bathUnder4RegularUnitCents: integer("bath_under_4_regular_unit_cents").notNull().default(6_000),
+  bathUnder4DaycareUnitCents: integer("bath_under_4_daycare_unit_cents").notNull().default(5_500),
+  bath4PlusRegularUnitCents: integer("bath_4_plus_regular_unit_cents").notNull().default(5_500),
+  bath4PlusDaycareUnitCents: integer("bath_4_plus_daycare_unit_cents").notNull().default(5_000),
+  taxiDogShortUnitCents: integer("taxi_dog_short_unit_cents").notNull().default(500),
+  taxiDogLongUnitCents: integer("taxi_dog_long_unit_cents").notNull().default(1_000),
   cashMonthStartDay: integer("cash_month_start_day").notNull().default(1),
   createdAt: text("created_at").notNull().default(now),
   updatedAt: text("updated_at").notNull().default(now),
@@ -596,6 +607,7 @@ export const appointmentItems = sqliteTable(
     })
       .notNull()
       .default("unsettled"),
+    billingPricingProfile: text("billing_pricing_profile"),
     creditMovementId: text("credit_movement_id"),
     settledAt: text("settled_at"),
     createdAt: text("created_at").notNull().default(now),
@@ -840,6 +852,9 @@ export const creditPurchases = sqliteTable(
     creditUnits: integer("credit_units").notNull(),
     standardValueCents: integer("standard_value_cents").notNull(),
     amountCents: integer("amount_cents").notNull(),
+    pricingProfileSnapshot: text("pricing_profile_snapshot").notNull().default("legacy"),
+    suggestedUnitPriceCents: integer("suggested_unit_price_cents"),
+    suggestedAmountCents: integer("suggested_amount_cents"),
     status: text("status", {
       enum: ["awaiting_payment", "paid", "cancelled", "refunded"],
     })

@@ -36,12 +36,21 @@ export async function PATCH(
       min: 1,
       max: 100_000_000,
     });
+    const rawPricingProfile = body.pricingProfile;
+    if (
+      rawPricingProfile !== undefined &&
+      rawPricingProfile !== null &&
+      (typeof rawPricingProfile !== "string" || rawPricingProfile.length > 40)
+    ) {
+      throw new HttpError(400, "invalid_pricing_profile", "Revise a condição de preço escolhida.");
+    }
     const establishmentId = identity.establishmentId!;
     const db = getDb();
     const [item] = await db
       .select({
         id: appointmentItems.id,
         previousAmountCents: appointmentItems.totalCents,
+        previousPricingProfile: appointmentItems.billingPricingProfile,
         appointmentId: appointments.id,
         appointmentStatus: appointments.status,
         depositPercent: appointments.depositPercent,
@@ -65,6 +74,21 @@ export async function PATCH(
       .limit(1);
     if (!item) {
       throw new HttpError(404, "appointment_item_not_found", "O serviço concluído não foi encontrado.");
+    }
+    const pricingProfile =
+      item.serviceCode === "taxi_dog"
+        ? rawPricingProfile === "taxi_long"
+          ? "taxi_long"
+          : rawPricingProfile === "taxi_short"
+            ? "taxi_short"
+            : null
+        : null;
+    if (item.serviceCode === "taxi_dog" && !pricingProfile) {
+      throw new HttpError(
+        400,
+        "taxi_distance_required",
+        "Escolha distância curta ou longa para o Taxi-dog.",
+      );
     }
     const isLodgingDeposit = body.billingKind === "lodging_deposit";
     const operationallyReady = isLodgingDeposit
@@ -90,6 +114,7 @@ export async function PATCH(
       d1.prepare(
         `UPDATE appointment_items
          SET unit_price_cents = ?, total_cents = ?, payment_preference = 'invoice',
+           billing_pricing_profile = ?,
            updated_at = ${nowExpression}
          WHERE id = ? AND active_invoice_id IS NULL
            AND settlement_method = 'unsettled'
@@ -109,6 +134,7 @@ export async function PATCH(
       ).bind(
         amountCents,
         amountCents,
+        pricingProfile,
         id,
         establishmentId,
         isLodgingDeposit ? 1 : 0,
@@ -148,7 +174,9 @@ export async function PATCH(
           customerName: item.customerName,
           serviceName: item.serviceName,
           previousAmountCents: item.previousAmountCents,
+          previousPricingProfile: item.previousPricingProfile,
           amountCents,
+          pricingProfile,
         }),
         id,
         amountCents,
@@ -164,7 +192,9 @@ export async function PATCH(
         "O serviço foi alterado. Atualize a página e tente novamente.",
       );
     }
-    return json({ item: { id, amountCents, paymentPreference: "invoice" } });
+    return json({
+      item: { id, amountCents, paymentPreference: "invoice", pricingProfile },
+    });
   } catch (error) {
     return errorResponse(error, requestId);
   }

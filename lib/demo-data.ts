@@ -158,6 +158,8 @@ export type BillableService = {
   date: string;
   service: string;
   serviceType?: ServiceType;
+  transportDirection?: "one_way" | "round_trip";
+  billingPricingProfile?: string;
   creditUnits?: number;
   amountCents: number;
   selectable?: boolean;
@@ -188,6 +190,14 @@ export type CreditPurchase = {
   units: number;
   amountCents: number;
   standardValueCents: number;
+  pricingProfile?: string;
+  suggestedUnitPriceCents?: number;
+  suggestedAmountCents?: number;
+  pricingContext?: {
+    multiDog?: boolean;
+    daycareCustomer?: boolean;
+    taxiDistance?: "short" | "long";
+  };
   status: "awaiting_payment" | "paid" | "cancelled";
   createdAt: string;
   invoiceId?: string;

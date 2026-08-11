@@ -24,7 +24,6 @@ import { creditUnitsForServiceCode } from "@/lib/service-rules";
 const creditServiceCodes = new Set([
   "daycare",
   "bath",
-  "bath_grooming",
   "taxi_dog",
 ]);
 

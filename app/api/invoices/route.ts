@@ -127,6 +127,7 @@ export async function POST(request: Request) {
         paymentPreference: appointmentItems.paymentPreference,
         settlementMethod: appointmentItems.settlementMethod,
         activeInvoiceId: appointmentItems.activeInvoiceId,
+        billingPricingProfile: appointmentItems.billingPricingProfile,
         serviceCode: serviceCatalog.code,
         serviceName: appointmentItems.serviceNameSnapshot,
         description: appointmentItems.descriptionSnapshot,
@@ -356,6 +357,15 @@ export async function POST(request: Request) {
       const longStayNote = longStayDiscount.percent
         ? ` Desconto de longa estadia de ${longStayDiscount.percent}% aplicado.`
         : "";
+      const taxiDistanceLabel =
+        row.serviceCode === "taxi_dog"
+          ? row.billingPricingProfile === "taxi_long"
+            ? "distância longa"
+            : "distância curta"
+          : null;
+      const serviceName = taxiDistanceLabel
+        ? `${row.serviceName} · ${taxiDistanceLabel}`
+        : row.serviceName;
       if (row.billingKind === "service") {
         return {
           ...row,
@@ -365,7 +375,7 @@ export async function POST(request: Request) {
               : row.amountCents,
           lodgingLongStayDiscountPercent: longStayDiscount.percent,
           lodgingLongStayDiscountCents: longStayDiscount.cents,
-          invoiceServiceName: row.serviceName,
+          invoiceServiceName: serviceName,
           invoiceDescription:
             (row.description || `${row.serviceName} de ${row.dogName}`) +
             longStayNote,

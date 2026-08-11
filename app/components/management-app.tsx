@@ -60,6 +60,19 @@ import {
   type WorkspaceReadyPayload,
   type WorkspaceService,
 } from "@/lib/workspace-data";
+import {
+  creditPricingFromEstablishment,
+  creditPricingProfile,
+  creditPricingProfileLabel,
+  defaultCreditPricing,
+  suggestedCreditTotalCents,
+  suggestedCreditUnitCents,
+  taxiDogRegularCents,
+  type ActiveCreditServiceType,
+  type CreditPricingContext,
+  type CreditPricingSettings,
+  type TaxiDogDistance,
+} from "@/lib/credit-pricing";
 
 type View =
   | "today"
@@ -325,7 +338,6 @@ const pageCopy: Record<
 const creditServiceTypes: CreditServiceType[] = [
   "daycare",
   "bath",
-  "grooming",
   "transport",
 ];
 
@@ -982,6 +994,8 @@ export function ManagementApp() {
     useState<Record<ServiceType, number>>(defaultServicePrices);
   const [lodgingPricing, setLodgingPricing] =
     useState<LodgingPricing>(defaultLodgingPricing);
+  const [creditPricing, setCreditPricing] =
+    useState<CreditPricingSettings>(defaultCreditPricing);
   const [selectedDate, setSelectedDate] = useState(operationalToday);
   const [selectedBillables, setSelectedBillables] = useState<string[]>([]);
   const [selectedDogId, setSelectedDogId] = useState<string | null>(null);
@@ -1077,6 +1091,7 @@ export function ManagementApp() {
     setFinancialAccounts([]);
     setServicePrices(defaultServicePrices);
     setLodgingPricing(defaultLodgingPricing);
+    setCreditPricing(defaultCreditPricing);
     setDaycareStartTime("07:30");
     setDaycareEndTime("19:30");
     setSelectedDogId(null);
@@ -1121,6 +1136,7 @@ export function ManagementApp() {
     setActivities(auditFixtures);
     setServicePrices(defaultServicePrices);
     setLodgingPricing(defaultLodgingPricing);
+    setCreditPricing(defaultCreditPricing);
     setSessionExpiresAt(null);
     setCreditCustomerId((current) => current || demoCustomers[0]?.id || "");
     setRuntimeMode("demo");
@@ -1161,6 +1177,7 @@ export function ManagementApp() {
         payload.establishment.hotelLongStayDiscountPercent ??
         defaultLodgingPricing.longStayDiscountPercent,
     });
+    setCreditPricing(creditPricingFromEstablishment(payload.establishment));
     setDaycareStartTime(payload.establishment.daycareStartTime || "07:30");
     setDaycareEndTime(payload.establishment.daycareEndTime || "19:30");
     setCreditCustomerId((current) =>
@@ -2973,7 +2990,11 @@ export function ManagementApp() {
     });
   }
 
-  async function saveRegularBilling(service: BillableService, amountCents: number) {
+  async function saveRegularBilling(
+    service: BillableService,
+    amountCents: number,
+    pricingProfile?: string,
+  ) {
     if (!service.appointmentItemId || !Number.isSafeInteger(amountCents) || amountCents < 1) {
       setToast({ message: "Informe um valor válido para a cobrança." });
       return false;
@@ -2996,6 +3017,7 @@ export function ManagementApp() {
             body: JSON.stringify({
               amountCents,
               billingKind: service.billingKind ?? "service",
+              pricingProfile,
             }),
           }),
         {
@@ -3010,6 +3032,7 @@ export function ManagementApp() {
           item.id === service.id
             ? {
                 ...item,
+                billingPricingProfile: pricingProfile,
                 amountCents:
                   item.billingKind === "lodging_deposit"
                     ? Math.round(amountCents * ((item.lodging?.depositPercent ?? 0) / 100))
@@ -3092,6 +3115,11 @@ export function ManagementApp() {
     ) as CreditServiceType;
     const units = Math.floor(Number(form.get("units") ?? 0));
     const amountCents = Math.round(Number(form.get("packagePrice") ?? 0) * 100);
+    const pricingContext: CreditPricingContext = {
+      multiDog: form.get("multiDog") === "on",
+      daycareCustomer: form.get("daycareCustomer") === "on",
+      taxiDistance: form.get("taxiDistance") === "long" ? "long" : "short",
+    };
     if (
       !customer ||
       !creditServiceTypes.includes(serviceType) ||
@@ -3102,7 +3130,19 @@ export function ManagementApp() {
       setToast({ message: "Revise o cliente, a quantidade e o valor do pacote." });
       return;
     }
-    const standardValueCents = servicePrices[serviceType] * units;
+    const activeServiceType = serviceType as ActiveCreditServiceType;
+    const suggestedUnitPriceCents = suggestedCreditUnitCents(
+      creditPricing,
+      activeServiceType,
+      units,
+      pricingContext,
+    );
+    const standardValueCents = suggestedCreditTotalCents(
+      creditPricing,
+      activeServiceType,
+      units,
+      pricingContext,
+    );
     setInvoiceState({
       step: "review",
       kind: "credit_package",
@@ -3118,6 +3158,10 @@ export function ManagementApp() {
         units,
         amountCents,
         standardValueCents,
+        suggestedUnitPriceCents,
+        suggestedAmountCents: standardValueCents,
+        pricingProfile: creditPricingProfile(activeServiceType, pricingContext),
+        pricingContext,
       },
     });
     setDialog("invoice");
@@ -3148,8 +3192,25 @@ export function ManagementApp() {
         form.get("hotelLongStayDiscountPercent") ?? 0,
       ),
     };
+    const moneyField = (name: string) =>
+      Math.round(Number(form.get(name) ?? 0) * 100);
+    const nextCreditPricing: CreditPricingSettings = {
+      daycareUnder4UnitCents: moneyField("daycareUnder4Unit"),
+      daycare4To7UnitCents: moneyField("daycare4To7Unit"),
+      daycare8To11UnitCents: moneyField("daycare8To11Unit"),
+      daycare12PlusUnitCents: moneyField("daycare12PlusUnit"),
+      daycareMultiDogDiscountPercent: Number(
+        form.get("daycareMultiDogDiscountPercent") ?? 0,
+      ),
+      bathUnder4RegularUnitCents: moneyField("bathUnder4RegularUnit"),
+      bathUnder4DaycareUnitCents: moneyField("bathUnder4DaycareUnit"),
+      bath4PlusRegularUnitCents: moneyField("bath4PlusRegularUnit"),
+      bath4PlusDaycareUnitCents: moneyField("bath4PlusDaycareUnit"),
+      taxiDogShortUnitCents: moneyField("taxiDogShortUnit"),
+      taxiDogLongUnitCents: moneyField("taxiDogLongUnit"),
+    };
     next.hotel = nextLodgingPricing.standardDailyRateCents;
-    for (const serviceType of creditServiceTypes) {
+    for (const serviceType of ["daycare", "bath", "grooming"] as const) {
       const cents = Math.round(Number(form.get(serviceType) ?? 0) * 100);
       if (!Number.isFinite(cents) || cents < 1) {
         setToast({ message: "Revise todos os valores antes de salvar." });
@@ -3157,6 +3218,7 @@ export function ManagementApp() {
       }
       next[serviceType] = cents;
     }
+    next.transport = nextCreditPricing.taxiDogShortUnitCents;
     if (
       Object.values(nextLodgingPricing)
         .slice(0, 4)
@@ -3166,6 +3228,16 @@ export function ManagementApp() {
       nextLodgingPricing.longStayDiscountPercent > 99
     ) {
       setToast({ message: "Revise os valores e o desconto da hospedagem." });
+      return;
+    }
+    if (
+      Object.entries(nextCreditPricing).some(([field, value]) =>
+        field === "daycareMultiDogDiscountPercent"
+          ? !Number.isInteger(value) || value < 0 || value > 99
+          : !Number.isSafeInteger(value) || value < 1,
+      )
+    ) {
+      setToast({ message: "Revise os valores dos pacotes de créditos." });
       return;
     }
     if (
@@ -3197,6 +3269,7 @@ export function ManagementApp() {
               daycareStartTime: nextDaycareStartTime,
               daycareEndTime: nextDaycareEndTime,
               lodgingPricing: nextLodgingPricing,
+              creditPricing: nextCreditPricing,
             }),
           }),
         {
@@ -3210,6 +3283,7 @@ export function ManagementApp() {
         setDaycareStartTime(nextDaycareStartTime);
         setDaycareEndTime(nextDaycareEndTime);
         setLodgingPricing(nextLodgingPricing);
+        setCreditPricing(nextCreditPricing);
       }
       return;
     }
@@ -3218,6 +3292,7 @@ export function ManagementApp() {
     setDaycareStartTime(nextDaycareStartTime);
     setDaycareEndTime(nextDaycareEndTime);
     setLodgingPricing(nextLodgingPricing);
+    setCreditPricing(nextCreditPricing);
     setToast({
       message:
         "Preços padrão salvos. Novos serviços já usarão os valores atualizados.",
@@ -3353,6 +3428,9 @@ export function ManagementApp() {
             units: creditPurchase.units,
             amountCents: creditPurchase.amountCents,
             standardValueCents: creditPurchase.standardValueCents,
+            pricingProfile: creditPurchase.pricingProfile,
+            suggestedUnitPriceCents: creditPurchase.suggestedUnitPriceCents,
+            suggestedAmountCents: creditPurchase.suggestedAmountCents,
             invoiceId: creditPurchase.invoiceId,
           }
         : undefined,
@@ -3636,9 +3714,12 @@ export function ManagementApp() {
                 serviceCode: toWorkspaceServiceCode(purchase.serviceType),
                 creditUnits: purchase.units,
                 amountCents: purchase.amountCents,
-                packageName: `${purchase.units} créditos de ${
-                  serviceLabels[purchase.serviceType]
-                }`,
+                packageName: `${purchase.units} créditos · ${creditPricingProfileLabel(
+                  purchase.pricingProfile,
+                )}`,
+                multiDog: purchase.pricingContext?.multiDog,
+                daycareCustomer: purchase.pricingContext?.daycareCustomer,
+                taxiDistance: purchase.pricingContext?.taxiDistance,
                 dueDate: operationalToday,
                 applyLongStayDiscount,
               }),
@@ -3661,9 +3742,9 @@ export function ManagementApp() {
               lines: [
                 {
                   dogName: "Não se aplica",
-                  service: `${purchase.units} créditos de ${
-                    serviceLabels[purchase.serviceType]
-                  }`,
+                  service: `${purchase.units} créditos · ${creditPricingProfileLabel(
+                    purchase.pricingProfile,
+                  )}`,
                   date: operationalToday,
                   amountCents: response.invoice.totalCents,
                 },
@@ -4855,6 +4936,7 @@ export function ManagementApp() {
             <SettingsView
               prices={servicePrices}
               lodgingPricing={lodgingPricing}
+              creditPricing={creditPricing}
               daycareStartTime={daycareStartTime}
               daycareEndTime={daycareEndTime}
               onSave={saveDefaultPrices}
@@ -6123,7 +6205,7 @@ export function ManagementApp() {
           key={creditCustomerId}
           customers={customers}
           initialCustomerId={creditCustomerId}
-          prices={servicePrices}
+          creditPricing={creditPricing}
           onClose={() => setDialog(null)}
           onSubmit={submitCreditPackage}
         />
@@ -6169,10 +6251,11 @@ export function ManagementApp() {
       {regularBillingService && (
         <RegularBillingDialog
           service={regularBillingService}
+          creditPricing={creditPricing}
           busy={busyAction === `regular-billing:${regularBillingService.appointmentItemId}`}
           onClose={() => setRegularBillingService(null)}
-          onSubmit={(amountCents) =>
-            saveRegularBilling(regularBillingService, amountCents)
+          onSubmit={(amountCents, pricingProfile) =>
+            saveRegularBilling(regularBillingService, amountCents, pricingProfile)
           }
         />
       )}
@@ -7956,10 +8039,6 @@ function DogProfile({
                   <strong>{balances.bath}</strong>
                 </div>
                 <div>
-                  <span>Banho e tosa</span>
-                  <strong>{balances.grooming}</strong>
-                </div>
-                <div>
                   <span>Taxi-dog</span>
                   <strong>{balances.transport}</strong>
                 </div>
@@ -8387,10 +8466,6 @@ function CustomerProfile({
               <div>
                 <span>Banho</span>
                 <strong>{balances.bath}</strong>
-              </div>
-              <div>
-                <span>Banho e tosa</span>
-                <strong>{balances.grooming}</strong>
               </div>
               <div>
                 <span>Taxi-dog</span>
@@ -9494,10 +9569,6 @@ function BillingView({
                         <strong>{balance.bath}</strong>
                       </div>
                       <div>
-                        <span>Banho e tosa</span>
-                        <strong>{balance.grooming}</strong>
-                      </div>
-                      <div>
                         <span>Taxi-dog</span>
                         <strong>{balance.transport}</strong>
                       </div>
@@ -9527,7 +9598,7 @@ function BillingView({
                   <tr>
                     <th>Cliente</th>
                     <th>Pacote</th>
-                    <th>Valor padrão</th>
+                    <th>Sugestão da tabela</th>
                     <th>Valor cobrado</th>
                     <th>Situação</th>
                   </tr>
@@ -9725,47 +9796,32 @@ function BillingView({
 function SettingsView({
   prices,
   lodgingPricing,
+  creditPricing,
   daycareStartTime,
   daycareEndTime,
   onSave,
 }: {
   prices: Record<ServiceType, number>;
   lodgingPricing: LodgingPricing;
+  creditPricing: CreditPricingSettings;
   daycareStartTime: string;
   daycareEndTime: string;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
 }) {
-  const settings: {
-    serviceType: CreditServiceType;
-    title: string;
-    description: string;
-    unit: string;
-  }[] = [
-    {
-      serviceType: "daycare",
-      title: "Creche",
-      description: "Valor sugerido para uma diária de creche.",
-      unit: "por diária",
-    },
-    {
-      serviceType: "bath",
-      title: "Banho",
-      description: "Valor sugerido ao criar um novo banho.",
-      unit: "por serviço",
-    },
-    {
-      serviceType: "grooming",
-      title: "Banho e tosa",
-      description: "Valor sugerido ao criar um novo banho e tosa.",
-      unit: "por serviço",
-    },
-    {
-      serviceType: "transport",
-      title: "Taxi-dog · ida",
-      description: "Valor padrão para uma ida; ida e volta usa o dobro.",
-      unit: "por ida",
-    },
-  ];
+  const moneyInput = (
+    name: string,
+    title: string,
+    cents: number,
+    note: string,
+  ) => (
+    <label className="price-setting-card" key={name}>
+      <span><strong>{title}</strong><small>{note}</small></span>
+      <span className="currency-input">
+        <span>R$</span>
+        <input name={name} type="number" min="0.01" step="0.01" defaultValue={(cents / 100).toFixed(2)} required />
+      </span>
+    </label>
+  );
 
   return (
     <div className="settings-page">
@@ -9775,48 +9831,23 @@ function SettingsView({
         </span>
         <div>
           <p className="section-kicker">Acesso de administrador</p>
-          <h2>Preços padrão</h2>
+          <h2>Tabela de preços</h2>
           <p>
-            Estes valores preenchem automaticamente novos serviços. A equipe
-            ainda pode aplicar um valor diferente em um atendimento específico
-            sem mudar o padrão.
-          </p>
-          <p>
-            <strong>Creche:</strong> configure abaixo o horário que será
-            preenchido nos novos agendamentos.
+            Valores avulsos, hospedagem e pacotes estão separados por assunto.
+            As sugestões podem ser ajustadas no momento da cobrança sem alterar esta tabela.
           </p>
         </div>
       </section>
 
       <form className="panel settings-form" onSubmit={onSave}>
         <div className="panel-heading">
-          <div>
-            <p className="section-kicker">Tabela principal</p>
-            <h2>Valores sugeridos</h2>
-          </div>
+          <div><p className="section-kicker">Serviços</p><h2>Valores avulsos</h2></div>
           <span className="invoice-only-badge">Valores em reais</span>
         </div>
         <div className="price-settings-grid">
-          {settings.map((setting) => (
-            <label className="price-setting-card" key={setting.serviceType}>
-              <span>
-                <strong>{setting.title}</strong>
-                <small>{setting.description}</small>
-              </span>
-              <span className="currency-input">
-                <span>R$</span>
-                <input
-                  name={setting.serviceType}
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  defaultValue={(prices[setting.serviceType] / 100).toFixed(2)}
-                  required
-                />
-              </span>
-              <small className="price-unit">{setting.unit}</small>
-            </label>
-          ))}
+          {moneyInput("daycare", "Creche avulsa", prices.daycare, "por diária")}
+          {moneyInput("bath", "Banho avulso", prices.bath, "por serviço")}
+          {moneyInput("grooming", "Banho e tosa", prices.grooming, "por serviço; sem créditos")}
         </div>
         <section className="lodging-pricing-settings">
           <div>
@@ -9843,6 +9874,45 @@ function SettingsView({
               <span className="currency-input"><input name="hotelLongStayDiscountPercent" type="number" min="0" max="99" step="1" defaultValue={lodgingPricing.longStayDiscountPercent} required /><span>%</span></span>
             </label>
           </div>
+        </section>
+        <section className="settings-group">
+          <div className="settings-group-heading">
+            <div><p className="section-kicker">Pacotes</p><h3>Créditos de creche</h3></div>
+            <span>Valor por crédito conforme a quantidade</span>
+          </div>
+          <div className="price-settings-grid">
+            {moneyInput("daycareUnder4Unit", "1 a 3 créditos", creditPricing.daycareUnder4UnitCents, "por crédito")}
+            {moneyInput("daycare4To7Unit", "4 a 7 créditos", creditPricing.daycare4To7UnitCents, "por crédito")}
+            {moneyInput("daycare8To11Unit", "8 a 11 créditos", creditPricing.daycare8To11UnitCents, "por crédito")}
+            {moneyInput("daycare12PlusUnit", "12 créditos ou mais", creditPricing.daycare12PlusUnitCents, "por crédito")}
+            <label className="price-setting-card">
+              <span><strong>Dois ou mais cães</strong><small>desconto em todas as faixas</small></span>
+              <span className="currency-input"><input name="daycareMultiDogDiscountPercent" type="number" min="0" max="99" step="1" defaultValue={creditPricing.daycareMultiDogDiscountPercent} required /><span>%</span></span>
+            </label>
+          </div>
+        </section>
+        <section className="settings-group">
+          <div className="settings-group-heading">
+            <div><p className="section-kicker">Pacotes</p><h3>Créditos de banho</h3></div>
+            <span>Banho e tosa não utiliza créditos</span>
+          </div>
+          <div className="price-settings-grid">
+            {moneyInput("bathUnder4RegularUnit", "1 a 3 · cliente regular", creditPricing.bathUnder4RegularUnitCents, "por crédito")}
+            {moneyInput("bathUnder4DaycareUnit", "1 a 3 · cliente de creche", creditPricing.bathUnder4DaycareUnitCents, "por crédito")}
+            {moneyInput("bath4PlusRegularUnit", "4 ou mais · cliente regular", creditPricing.bath4PlusRegularUnitCents, "por crédito")}
+            {moneyInput("bath4PlusDaycareUnit", "4 ou mais · cliente de creche", creditPricing.bath4PlusDaycareUnitCents, "por crédito")}
+          </div>
+        </section>
+        <section className="settings-group">
+          <div className="settings-group-heading">
+            <div><p className="section-kicker">Taxi-dog</p><h3>Distância curta e longa</h3></div>
+            <span>Uma ida consome 1 crédito; ida e volta consome 2</span>
+          </div>
+          <div className="price-settings-grid">
+            {moneyInput("taxiDogShortUnit", "Distância curta", creditPricing.taxiDogShortUnitCents, "por ida ou crédito")}
+            {moneyInput("taxiDogLongUnit", "Distância longa", creditPricing.taxiDogLongUnitCents, "por ida ou crédito")}
+          </div>
+          <p className="compact-help">Na cobrança regular, ida e volta usa automaticamente o dobro do valor de uma ida.</p>
         </section>
         <div className="daycare-hours-settings">
           <div>
@@ -9886,8 +9956,7 @@ function SettingsView({
         </div>
         <div className="settings-actions">
           <span>
-            A alteração vale para novos lançamentos. Serviços já salvos mantêm
-            o valor original.
+            A alteração vale para novas sugestões. Lançamentos já salvos mantêm o valor original.
           </span>
           <button className="primary-button" type="submit">
             Salvar configurações
@@ -10626,17 +10695,37 @@ function AccessView({ customers }: { customers: Customer[] }) {
 
 function RegularBillingDialog({
   service,
+  creditPricing,
   busy,
   onClose,
   onSubmit,
 }: {
   service: BillableService;
+  creditPricing: CreditPricingSettings;
   busy: boolean;
   onClose: () => void;
-  onSubmit: (amountCents: number) => boolean | Promise<boolean>;
+  onSubmit: (
+    amountCents: number,
+    pricingProfile?: string,
+  ) => boolean | Promise<boolean>;
 }) {
+  const [taxiDistance, setTaxiDistance] = useState<TaxiDogDistance>(
+    service.billingPricingProfile === "taxi_long" ? "long" : "short",
+  );
+  const taxiDirection = service.transportDirection ?? "one_way";
+  const taxiSuggestedCents = taxiDogRegularCents(
+    creditPricing,
+    taxiDistance,
+    taxiDirection,
+  );
   const [amount, setAmount] = useState(
-    (regularBillingAmountCents(service) / 100).toFixed(2),
+    ((service.serviceType === "transport"
+      ? taxiDogRegularCents(
+          creditPricing,
+          service.billingPricingProfile === "taxi_long" ? "long" : "short",
+          taxiDirection,
+        )
+      : regularBillingAmountCents(service)) / 100).toFixed(2),
   );
   const [error, setError] = useState("");
 
@@ -10648,7 +10737,10 @@ function RegularBillingDialog({
       return;
     }
     setError("");
-    await onSubmit(amountCents);
+    await onSubmit(
+      amountCents,
+      service.serviceType === "transport" ? `taxi_${taxiDistance}` : undefined,
+    );
   }
 
   return (
@@ -10668,6 +10760,40 @@ function RegularBillingDialog({
             </small>
           )}
         </div>
+        {service.serviceType === "transport" && (
+          <fieldset className="choice-fieldset full">
+            <legend>Distância *</legend>
+            <div className="compact-choice-grid">
+              {(["short", "long"] as const).map((distance) => {
+                const suggested = taxiDogRegularCents(
+                  creditPricing,
+                  distance,
+                  taxiDirection,
+                );
+                return (
+                  <label className="radio-option" key={distance}>
+                    <input
+                      type="radio"
+                      name="taxiDistance"
+                      value={distance}
+                      checked={taxiDistance === distance}
+                      onChange={() => {
+                        setTaxiDistance(distance);
+                        setAmount((suggested / 100).toFixed(2));
+                      }}
+                    />
+                    <span>
+                      <strong>
+                        {distance === "short" ? "Distância curta" : "Distância longa"}
+                      </strong>
+                      <small>{formatCurrency(suggested)} · {taxiDirection === "round_trip" ? "ida e volta" : "ida"}</small>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+        )}
         <label className="field full">
           <span>{service.lodging ? "Valor total da hospedagem (R$)" : "Valor do serviço (R$)"}</span>
           <input
@@ -10681,6 +10807,9 @@ function RegularBillingDialog({
             onChange={(event) => setAmount(event.target.value)}
             required
           />
+          {service.serviceType === "transport" && (
+            <small>Sugestão pela tabela: {formatCurrency(taxiSuggestedCents)}</small>
+          )}
         </label>
         {error && <p className="form-error full">{error}</p>}
         <p className="compact-help full">
@@ -10702,23 +10831,57 @@ function RegularBillingDialog({
 function CreditPackageDialog({
   customers,
   initialCustomerId,
-  prices,
+  creditPricing,
   onClose,
   onSubmit,
 }: {
   customers: Customer[];
   initialCustomerId: string;
-  prices: Record<ServiceType, number>;
+  creditPricing: CreditPricingSettings;
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const firstCustomerId = initialCustomerId || customers[0]?.id || "";
+  const initialCustomer = customers.find((item) => item.id === firstCustomerId);
+  const [customerId, setCustomerId] = useState(firstCustomerId);
   const [serviceType, setServiceType] =
-    useState<CreditServiceType>("daycare");
-  const [units, setUnits] = useState(5);
-  const [packagePrice, setPackagePrice] = useState(
-    ((prices.daycare * 5 * 0.9) / 100).toFixed(2),
+    useState<ActiveCreditServiceType>("daycare");
+  const [units, setUnits] = useState(4);
+  const [multiDog, setMultiDog] = useState(
+    (initialCustomer?.dogIds.length ?? 0) >= 2,
   );
-  const standardValueCents = prices[serviceType] * units;
+  const [daycareCustomer, setDaycareCustomer] = useState(true);
+  const [taxiDistance, setTaxiDistance] = useState<TaxiDogDistance>("short");
+  const initialContext: CreditPricingContext = {
+    multiDog: (initialCustomer?.dogIds.length ?? 0) >= 2,
+    daycareCustomer: true,
+    taxiDistance: "short",
+  };
+  const [packagePrice, setPackagePrice] = useState(
+    (suggestedCreditTotalCents(
+      creditPricing,
+      "daycare",
+      4,
+      initialContext,
+    ) / 100).toFixed(2),
+  );
+  const context: CreditPricingContext = {
+    multiDog,
+    daycareCustomer,
+    taxiDistance,
+  };
+  const suggestedUnitPriceCents = suggestedCreditUnitCents(
+    creditPricing,
+    serviceType,
+    units,
+    context,
+  );
+  const standardValueCents = suggestedCreditTotalCents(
+    creditPricing,
+    serviceType,
+    units,
+    context,
+  );
   const packageValueCents = Math.max(
     0,
     Math.round(Number(packagePrice || 0) * 100),
@@ -10726,11 +10889,17 @@ function CreditPackageDialog({
   const differenceCents = standardValueCents - packageValueCents;
 
   function updateSuggestedPrice(
-    nextServiceType: CreditServiceType,
+    nextServiceType: ActiveCreditServiceType,
     nextUnits: number,
+    nextContext: CreditPricingContext = context,
   ) {
     setPackagePrice(
-      ((prices[nextServiceType] * nextUnits * 0.9) / 100).toFixed(2),
+      (suggestedCreditTotalCents(
+        creditPricing,
+        nextServiceType,
+        nextUnits,
+        nextContext,
+      ) / 100).toFixed(2),
     );
   }
 
@@ -10745,7 +10914,18 @@ function CreditPackageDialog({
           <span>Cliente *</span>
           <select
             name="customerId"
-            defaultValue={initialCustomerId}
+            value={customerId}
+            onChange={(event) => {
+              const nextId = event.target.value;
+              const nextMultiDog =
+                (customers.find((item) => item.id === nextId)?.dogIds.length ?? 0) >= 2;
+              setCustomerId(nextId);
+              setMultiDog(nextMultiDog);
+              updateSuggestedPrice(serviceType, units, {
+                ...context,
+                multiDog: nextMultiDog,
+              });
+            }}
             autoFocus
             required
           >
@@ -10762,9 +10942,11 @@ function CreditPackageDialog({
             name="serviceType"
             value={serviceType}
             onChange={(event) => {
-              const next = event.target.value as CreditServiceType;
+              const next = event.target.value as ActiveCreditServiceType;
               setServiceType(next);
-              updateSuggestedPrice(next, units);
+              const nextUnits = next === "bath" ? 4 : units;
+              if (next === "bath") setUnits(4);
+              updateSuggestedPrice(next, nextUnits);
             }}
           >
             {creditServiceTypes.map((type) => (
@@ -10774,7 +10956,27 @@ function CreditPackageDialog({
             ))}
           </select>
         </label>
-        <label className="field">
+        {serviceType === "daycare" && (
+          <div className="field full">
+            <span>Atalhos de quantidade</span>
+            <div className="package-quick-options">
+              {[4, 8, 12].map((quantity) => (
+                <button
+                  type="button"
+                  key={quantity}
+                  className={units === quantity ? "active" : ""}
+                  onClick={() => {
+                    setUnits(quantity);
+                    updateSuggestedPrice(serviceType, quantity);
+                  }}
+                >
+                  {quantity} créditos
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <label className="field full">
           <span>Quantidade de créditos *</span>
           <input
             name="units"
@@ -10790,7 +10992,78 @@ function CreditPackageDialog({
             }}
             required
           />
+          <small>Digite qualquer quantidade; os atalhos acima são apenas para os pacotes mais usados.</small>
         </label>
+        {serviceType === "daycare" && (
+          <label className="compact-check full">
+            <input
+              name="multiDog"
+              type="checkbox"
+              checked={multiDog}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                setMultiDog(checked);
+                updateSuggestedPrice(serviceType, units, {
+                  ...context,
+                  multiDog: checked,
+                });
+              }}
+            />
+            <span>
+              <strong>Dois ou mais cães</strong>
+              <small>Aplica {creditPricing.daycareMultiDogDiscountPercent}% de desconto ao valor de cada crédito.</small>
+            </span>
+          </label>
+        )}
+        {serviceType === "bath" && (
+          <label className="compact-check full">
+            <input
+              name="daycareCustomer"
+              type="checkbox"
+              checked={daycareCustomer}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                setDaycareCustomer(checked);
+                updateSuggestedPrice(serviceType, units, {
+                  ...context,
+                  daycareCustomer: checked,
+                });
+              }}
+            />
+            <span>
+              <strong>Cliente de creche</strong>
+              <small>Marcado por padrão; desmarque para aplicar a tarifa de cliente regular.</small>
+            </span>
+          </label>
+        )}
+        {serviceType === "transport" && (
+          <fieldset className="choice-fieldset full">
+            <legend>Distância *</legend>
+            <div className="compact-choice-grid">
+              {(["short", "long"] as const).map((distance) => (
+                <label className="radio-option" key={distance}>
+                  <input
+                    type="radio"
+                    name="taxiDistance"
+                    value={distance}
+                    checked={taxiDistance === distance}
+                    onChange={() => {
+                      setTaxiDistance(distance);
+                      updateSuggestedPrice(serviceType, units, {
+                        ...context,
+                        taxiDistance: distance,
+                      });
+                    }}
+                  />
+                  <span>
+                    <strong>{distance === "short" ? "Distância curta" : "Distância longa"}</strong>
+                    <small>{formatCurrency(distance === "short" ? creditPricing.taxiDogShortUnitCents : creditPricing.taxiDogLongUnitCents)} por crédito</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
         <label className="field full">
           <span>Valor especial do pacote (R$) *</span>
           <input
@@ -10809,7 +11082,11 @@ function CreditPackageDialog({
         </label>
         <div className="package-summary full">
           <div>
-            <span>Valor padrão equivalente</span>
+            <span>Valor sugerido por crédito</span>
+            <strong>{formatCurrency(suggestedUnitPriceCents)}</strong>
+          </div>
+          <div>
+            <span>Total sugerido pela tabela</span>
             <strong>{formatCurrency(standardValueCents)}</strong>
           </div>
           <div>
@@ -11324,8 +11601,11 @@ function InvoiceDialog({
                     {serviceLabels[state.creditPurchase.serviceType]}
                   </strong>
                   <small>
-                    Valor padrão:{" "}
+                    Sugestão da tabela:{" "}
                     {formatCurrency(state.creditPurchase.standardValueCents)}
+                    {state.creditPurchase.pricingProfile && (
+                      <> · {creditPricingProfileLabel(state.creditPurchase.pricingProfile)}</>
+                    )}
                   </small>
                 </span>
                 <strong>{formatCurrency(state.amountCents)}</strong>

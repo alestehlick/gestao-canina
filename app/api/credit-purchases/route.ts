@@ -5,6 +5,7 @@ import {
   creditPackages,
   creditPurchases,
   customerAccounts,
+  establishments,
   invoices,
   serviceCatalog,
   tutors,
@@ -20,11 +21,18 @@ import {
   requiredInteger,
   requiredString,
 } from "@/lib/server/http";
+import {
+  creditPricingFromEstablishment,
+  creditPricingProfile,
+  suggestedCreditTotalCents,
+  suggestedCreditUnitCents,
+  type ActiveCreditServiceType,
+  type CreditPricingContext,
+} from "@/lib/credit-pricing";
 
 const creditServiceCodes = [
   "daycare",
   "bath",
-  "bath_grooming",
   "taxi_dog",
 ] as const;
 
@@ -83,6 +91,9 @@ export async function GET(request: Request) {
         creditUnits: creditPurchases.creditUnits,
         standardValueCents: creditPurchases.standardValueCents,
         amountCents: creditPurchases.amountCents,
+        pricingProfile: creditPurchases.pricingProfileSnapshot,
+        suggestedUnitPriceCents: creditPurchases.suggestedUnitPriceCents,
+        suggestedAmountCents: creditPurchases.suggestedAmountCents,
         status: creditPurchases.status,
         invoiceId: creditPurchases.invoiceId,
         invoiceNumber: invoices.invoiceNumber,
@@ -218,7 +229,7 @@ export async function POST(request: Request) {
         throw new HttpError(
           400,
           "service_not_credit_eligible",
-          "Créditos podem ser vendidos somente para creche, banho e tosa ou Taxi-dog.",
+          "Créditos podem ser vendidos somente para creche, banho ou Taxi-dog.",
         );
       }
       serviceCode = rawServiceCode;
@@ -257,9 +268,50 @@ export async function POST(request: Request) {
       throw new HttpError(
         409,
         "default_price_required",
-        "Defina um preço padrão maior que zero para este serviço antes de vender créditos.",
+        "Defina um preço avulso maior que zero para este serviço antes de vender créditos.",
       );
     }
+    const [establishment] = await db
+      .select()
+      .from(establishments)
+      .where(eq(establishments.id, establishmentId))
+      .limit(1);
+    if (!establishment) {
+      throw new HttpError(404, "establishment_not_found", "A unidade não foi encontrada.");
+    }
+    const pricing = creditPricingFromEstablishment(establishment);
+    const serviceType: ActiveCreditServiceType =
+      serviceCode === "taxi_dog" ? "transport" : serviceCode;
+    const multiDog = body.multiDog === true;
+    const daycareCustomer = body.daycareCustomer !== false;
+    const taxiDistance = body.taxiDistance === "long" ? "long" : "short";
+    if (body.multiDog !== undefined && typeof body.multiDog !== "boolean") {
+      throw new HttpError(400, "invalid_multi_dog", "Revise a condição de dois ou mais cães.");
+    }
+    if (body.daycareCustomer !== undefined && typeof body.daycareCustomer !== "boolean") {
+      throw new HttpError(400, "invalid_daycare_customer", "Revise a condição de cliente de creche.");
+    }
+    if (body.taxiDistance !== undefined && !["short", "long"].includes(String(body.taxiDistance))) {
+      throw new HttpError(400, "invalid_taxi_distance", "Escolha distância curta ou longa.");
+    }
+    const pricingContext: CreditPricingContext = {
+      multiDog,
+      daycareCustomer,
+      taxiDistance,
+    };
+    const pricingProfile = creditPricingProfile(serviceType, pricingContext);
+    const suggestedUnitPriceCents = suggestedCreditUnitCents(
+      pricing,
+      serviceType,
+      creditUnits,
+      pricingContext,
+    );
+    const suggestedAmountCents = suggestedCreditTotalCents(
+      pricing,
+      serviceType,
+      creditUnits,
+      pricingContext,
+    );
 
     const [financialContact] = await db
       .select({ email: tutors.email })
@@ -279,7 +331,7 @@ export async function POST(request: Request) {
     const number = invoiceNumber();
     const dueDate =
       dueDateInput ?? todayInTimeZone("America/Sao_Paulo");
-    const standardValueCents = service.basePriceCents * creditUnits;
+    const standardValueCents = suggestedAmountCents;
     await db.batch([
       db.insert(invoices).values({
         id: invoiceId,
@@ -307,6 +359,9 @@ export async function POST(request: Request) {
         creditUnits,
         standardValueCents,
         amountCents,
+        pricingProfileSnapshot: pricingProfile,
+        suggestedUnitPriceCents,
+        suggestedAmountCents,
         createdByUserId: identity.userId,
       }),
       db.insert(auditEvents).values({
@@ -325,6 +380,9 @@ export async function POST(request: Request) {
           creditUnits,
           standardValueCents,
           amountCents,
+          pricingProfile,
+          suggestedUnitPriceCents,
+          suggestedAmountCents,
           invoiceId,
         }),
       }),
@@ -344,6 +402,9 @@ export async function POST(request: Request) {
           creditUnits,
           standardValueCents,
           amountCents,
+          pricingProfile,
+          suggestedUnitPriceCents,
+          suggestedAmountCents,
           savingsCents: Math.max(0, standardValueCents - amountCents),
           status: "awaiting_payment",
         },

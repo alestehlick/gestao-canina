@@ -9,6 +9,10 @@ import {
   json,
   readJsonObject,
 } from "@/lib/server/http";
+import {
+  creditPricingFromEstablishment,
+  type CreditPricingSettings,
+} from "@/lib/credit-pricing";
 
 const editableServiceCodes = [
   "hotel",
@@ -60,6 +64,18 @@ export async function GET(request: Request) {
           establishments.hotelDaycareAdditionalDogDailyRateCents,
         hotelLongStayDiscountPercent:
           establishments.hotelLongStayDiscountPercent,
+        daycareUnder4UnitCents: establishments.daycareUnder4UnitCents,
+        daycare4To7UnitCents: establishments.daycare4To7UnitCents,
+        daycare8To11UnitCents: establishments.daycare8To11UnitCents,
+        daycare12PlusUnitCents: establishments.daycare12PlusUnitCents,
+        daycareMultiDogDiscountPercent:
+          establishments.daycareMultiDogDiscountPercent,
+        bathUnder4RegularUnitCents: establishments.bathUnder4RegularUnitCents,
+        bathUnder4DaycareUnitCents: establishments.bathUnder4DaycareUnitCents,
+        bath4PlusRegularUnitCents: establishments.bath4PlusRegularUnitCents,
+        bath4PlusDaycareUnitCents: establishments.bath4PlusDaycareUnitCents,
+        taxiDogShortUnitCents: establishments.taxiDogShortUnitCents,
+        taxiDogLongUnitCents: establishments.taxiDogLongUnitCents,
       })
       .from(establishments)
       .where(eq(establishments.id, identity.establishmentId!))
@@ -89,6 +105,7 @@ export async function GET(request: Request) {
             daycareAdditionalDogDailyRateCents: 9_000,
             longStayDiscountPercent: 5,
           },
+      creditPricing: creditPricingFromEstablishment(establishment ?? {}),
     });
   } catch (error) {
     return errorResponse(error, requestId);
@@ -180,6 +197,60 @@ export async function PATCH(request: Request) {
         "Informe um desconto de longa estadia entre 0% e 99%.",
       );
     }
+    const rawCreditPricing = body.creditPricing;
+    if (
+      !rawCreditPricing ||
+      typeof rawCreditPricing !== "object" ||
+      Array.isArray(rawCreditPricing)
+    ) {
+      throw new HttpError(
+        400,
+        "invalid_credit_pricing",
+        "Informe todos os valores dos pacotes de créditos.",
+      );
+    }
+    const creditPricing = rawCreditPricing as Record<string, unknown>;
+    const creditMoneyFields: (keyof CreditPricingSettings)[] = [
+      "daycareUnder4UnitCents",
+      "daycare4To7UnitCents",
+      "daycare8To11UnitCents",
+      "daycare12PlusUnitCents",
+      "bathUnder4RegularUnitCents",
+      "bathUnder4DaycareUnitCents",
+      "bath4PlusRegularUnitCents",
+      "bath4PlusDaycareUnitCents",
+      "taxiDogShortUnitCents",
+      "taxiDogLongUnitCents",
+    ];
+    for (const field of creditMoneyFields) {
+      const value = creditPricing[field];
+      if (
+        typeof value !== "number" ||
+        !Number.isSafeInteger(value) ||
+        value < 1 ||
+        value > 100_000_000
+      ) {
+        throw new HttpError(
+          400,
+          "invalid_credit_price",
+          "Um dos valores da tabela de créditos é inválido.",
+        );
+      }
+    }
+    const daycareMultiDogDiscountPercent =
+      creditPricing.daycareMultiDogDiscountPercent;
+    if (
+      typeof daycareMultiDogDiscountPercent !== "number" ||
+      !Number.isInteger(daycareMultiDogDiscountPercent) ||
+      daycareMultiDogDiscountPercent < 0 ||
+      daycareMultiDogDiscountPercent > 99
+    ) {
+      throw new HttpError(
+        400,
+        "invalid_credit_discount",
+        "Informe um desconto para dois ou mais cães entre 0% e 99%.",
+      );
+    }
     const daycareStartTime =
       typeof body.daycareStartTime === "string"
         ? body.daycareStartTime
@@ -201,6 +272,13 @@ export async function PATCH(request: Request) {
     }
 
     const establishmentId = identity.establishmentId!;
+    const normalizedCreditPricing = creditPricingFromEstablishment(
+      creditPricing as Partial<Record<keyof CreditPricingSettings, number>>,
+    );
+    const taxiUpdate = updates.find((update) => update.code === "taxi_dog");
+    if (taxiUpdate) {
+      taxiUpdate.priceCents = normalizedCreditPricing.taxiDogShortUnitCents;
+    }
     const db = getDb();
     const existing = await db
       .select({ code: serviceCatalog.code })
@@ -251,6 +329,7 @@ export async function PATCH(request: Request) {
           hotelDaycareAdditionalDogDailyRateCents:
             lodgingPricing.daycareAdditionalDogDailyRateCents as number,
           hotelLongStayDiscountPercent: longStayDiscountPercent,
+          ...normalizedCreditPricing,
           updatedAt: sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
         })
         .where(eq(establishments.id, establishmentId)),
@@ -268,6 +347,7 @@ export async function PATCH(request: Request) {
           daycareStartTime,
           daycareEndTime,
           lodgingPricing,
+          creditPricing: normalizedCreditPricing,
         }),
       }),
     ]);
@@ -278,6 +358,7 @@ export async function PATCH(request: Request) {
       ),
       daycareHours: { daycareStartTime, daycareEndTime },
       lodgingPricing,
+      creditPricing: normalizedCreditPricing,
     });
   } catch (error) {
     return errorResponse(error, requestId);

@@ -3325,6 +3325,27 @@ h3 {
   padding: 24px;
 }
 
+.settings-group {
+  display: grid;
+  gap: 13px;
+  margin-top: 24px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 22px;
+}
+
+.settings-group-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-group-heading > span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-align: right;
+}
+
 .price-settings-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4201,6 +4222,92 @@ h3 {
 .radio-option strong,
 .radio-option small {
   display: block;
+}
+
+.choice-fieldset {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.choice-fieldset > legend {
+  margin-bottom: 7px;
+  color: #4e544f;
+  font-size: 0.72rem;
+  font-weight: 710;
+}
+
+.compact-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.compact-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  background: var(--surface-muted);
+  padding: 11px 12px;
+}
+
+.compact-check input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  margin-top: 2px;
+  accent-color: var(--forest);
+}
+
+.compact-check span,
+.compact-check strong,
+.compact-check small {
+  display: block;
+}
+
+.compact-check small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.package-quick-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.package-quick-options button {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fffefa;
+  color: var(--ink);
+  padding: 7px 13px;
+  font-weight: 720;
+}
+
+.package-quick-options button.active {
+  border-color: var(--forest);
+  background: var(--forest-soft);
+  color: var(--forest);
+}
+
+@media (max-width: 620px) {
+  .settings-group-heading {
+    display: grid;
+    align-items: start;
+  }
+
+  .settings-group-heading > span {
+    text-align: left;
+  }
+
+  .compact-choice-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .form-grid fieldset.field {

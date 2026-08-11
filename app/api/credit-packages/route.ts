@@ -19,7 +19,6 @@ import {
 const creditServiceCodes = [
   "daycare",
   "bath",
-  "bath_grooming",
   "taxi_dog",
 ] as const;
 
@@ -105,7 +104,7 @@ export async function POST(request: Request) {
       throw new HttpError(
         400,
         "service_not_credit_eligible",
-        "Créditos podem ser criados somente para creche, banho e tosa ou Taxi-dog.",
+        "Créditos podem ser criados somente para creche, banho ou Taxi-dog.",
       );
     }
 

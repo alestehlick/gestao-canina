@@ -406,7 +406,7 @@ test("mantém o primeiro acesso e o login protegidos sem bloqueio global da cont
 });
 
 test("preserva as regras de faturas, sinais e créditos", async () => {
-  const [invoices, payments, reversePayment, settlement, consume, purchases, prices, workspaceData, managementApp, invoiceNotes, invoiceNotesMigration, schema, serviceRules] = await Promise.all([
+  const [invoices, payments, reversePayment, settlement, consume, purchases, prices, workspaceData, managementApp, invoiceNotes, invoiceNotesMigration, schema, serviceRules, creditPricing, creditPricingMigration] = await Promise.all([
     readFile(new URL("../app/api/invoices/route.ts", import.meta.url), "utf8"),
     readFile(
       new URL("../app/api/invoices/[id]/payments/route.ts", import.meta.url),
@@ -441,6 +441,8 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
     ),
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/service-rules.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/credit-pricing.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0017_credit_pricing.sql", import.meta.url), "utf8"),
   ]);
 
   assert.match(invoices, /active_invoice_id = \?/);
@@ -466,6 +468,14 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
   assert.match(consume, /taxi_dog/);
   assert.match(consume, /creditUnitsForServiceCode/);
   assert.match(serviceRules, /direction === "round_trip" \? 2 : 1/);
+  assert.match(creditPricing, /daycareUnder4UnitCents: 6_500/);
+  assert.match(creditPricing, /daycare12PlusUnitCents: 5_600/);
+  assert.match(creditPricing, /bath4PlusDaycareUnitCents: 5_000/);
+  assert.match(creditPricing, /daycareMultiDogDiscountPercent: 15/);
+  assert.match(creditPricing, /direction === "round_trip" \? oneWay \* 2 : oneWay/);
+  assert.match(creditPricingMigration, /billing_pricing_profile/);
+  assert.doesNotMatch(consume, /bath_grooming/);
+  assert.doesNotMatch(purchases, /bath_grooming/);
   assert.match(consume, /\) >= \?/);
   assert.match(purchases, /default_price_required/);
   assert.match(prices, /value < 1/);

@@ -264,7 +264,7 @@ export async function GET(request: Request) {
               COALESCE(SUM(total_cents), 0) AS total_cents
             FROM invoices i
             WHERE i.establishment_id = ? AND i.status = 'issued'
-              AND i.due_on < ?
+              AND i.due_date < ?
               AND NOT EXISTS (
                 SELECT 1 FROM invoice_settlements s
                 WHERE s.invoice_id = i.id AND s.status = 'scheduled'

@@ -135,6 +135,8 @@ test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () =
   assert.match(cashRoute, /requireIdentity\(request, \["owner", "finance"\]\)/);
   assert.match(cashRoute, /financialAccountId/);
   assert.match(cashRoute, /ce\.occurred_on BETWEEN \? AND \?/);
+  assert.match(cashRoute, /i\.due_date < \?/);
+  assert.doesNotMatch(cashRoute, /i\.due_on/);
   assert.match(cashEntryRoute, /automatic_cash_entry_locked/);
   assert.match(cashEntryRoute, /cash\.entry_excluded/);
   assert.match(cashEntryRoute, /cash\.entry_restored/);

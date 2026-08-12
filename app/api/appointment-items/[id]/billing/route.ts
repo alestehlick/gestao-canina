@@ -19,6 +19,24 @@ import {
 
 const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
 
+const lodgingRateProfiles = [
+  "standard",
+  "daycare",
+  "additional_dog",
+  "daycare_additional_dog",
+] as const;
+type LodgingRateProfile = (typeof lodgingRateProfiles)[number];
+
+function parseLodgingRateProfile(value: unknown): LodgingRateProfile | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.startsWith("lodging_")
+    ? value.slice("lodging_".length)
+    : value;
+  return lodgingRateProfiles.includes(normalized as LodgingRateProfile)
+    ? (normalized as LodgingRateProfile)
+    : null;
+}
+
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
@@ -54,6 +72,7 @@ export async function PATCH(
         appointmentId: appointments.id,
         appointmentStatus: appointments.status,
         depositPercent: appointments.depositPercent,
+        lodgingRateProfile: appointments.lodgingRateProfile,
         itemStatus: appointmentItems.status,
         activeInvoiceId: appointmentItems.activeInvoiceId,
         settlementMethod: appointmentItems.settlementMethod,
@@ -75,7 +94,7 @@ export async function PATCH(
     if (!item) {
       throw new HttpError(404, "appointment_item_not_found", "O serviço concluído não foi encontrado.");
     }
-    const pricingProfile =
+    const taxiPricingProfile =
       item.serviceCode === "taxi_dog"
         ? rawPricingProfile === "taxi_long"
           ? "taxi_long"
@@ -83,13 +102,27 @@ export async function PATCH(
             ? "taxi_short"
             : null
         : null;
-    if (item.serviceCode === "taxi_dog" && !pricingProfile) {
+    if (item.serviceCode === "taxi_dog" && !taxiPricingProfile) {
       throw new HttpError(
         400,
         "taxi_distance_required",
         "Escolha distância curta ou longa para o Taxi-dog.",
       );
     }
+    const deferredLodgingRate =
+      item.serviceCode === "hotel" && item.depositPercent === null;
+    const lodgingPricingProfile = deferredLodgingRate
+      ? parseLodgingRateProfile(rawPricingProfile)
+      : null;
+    if (deferredLodgingRate && !lodgingPricingProfile) {
+      throw new HttpError(
+        400,
+        "lodging_rate_required",
+        "Escolha a condição da diária para a hospedagem.",
+      );
+    }
+    const pricingProfile = taxiPricingProfile ??
+      (lodgingPricingProfile ? `lodging_${lodgingPricingProfile}` : null);
     const isLodgingDeposit = body.billingKind === "lodging_deposit";
     const operationallyReady = isLodgingDeposit
       ? item.serviceCode === "hotel" &&
@@ -141,6 +174,27 @@ export async function PATCH(
         isLodgingDeposit ? 1 : 0,
       ),
       d1.prepare(
+        `UPDATE appointments
+         SET lodging_rate_profile = ?, updated_at = ${nowExpression}
+         WHERE id = ? AND establishment_id = ?
+           AND ? = 1 AND deposit_percent IS NULL
+           AND EXISTS (
+             SELECT 1 FROM appointment_items ai
+             INNER JOIN service_catalog sc ON sc.id = ai.service_catalog_id
+             WHERE ai.id = ? AND ai.appointment_id = appointments.id
+               AND ai.active_invoice_id IS NULL
+               AND ai.settlement_method = 'unsettled'
+               AND ai.payment_preference = 'invoice'
+               AND sc.code = 'hotel'
+           )`,
+      ).bind(
+        lodgingPricingProfile,
+        item.appointmentId,
+        establishmentId,
+        deferredLodgingRate ? 1 : 0,
+        id,
+      ),
+      d1.prepare(
         `INSERT INTO audit_events (
           id, establishment_id, actor_user_id, actor_role, action, entity_type,
           entity_id, request_id, result, metadata_json, occurred_at
@@ -177,6 +231,7 @@ export async function PATCH(
           previousPricingProfile: item.previousPricingProfile,
           amountCents,
           pricingProfile,
+          lodgingRateProfile: lodgingPricingProfile ?? item.lodgingRateProfile,
         }),
         id,
         amountCents,
@@ -190,6 +245,13 @@ export async function PATCH(
         409,
         "billing_item_changed",
         "O serviço foi alterado. Atualize a página e tente novamente.",
+      );
+    }
+    if (deferredLodgingRate && (results[1].meta.changes ?? 0) !== 1) {
+      throw new HttpError(
+        409,
+        "lodging_rate_changed",
+        "A condição da hospedagem mudou. Atualize a página e tente novamente.",
       );
     }
     return json({

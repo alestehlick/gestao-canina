@@ -217,7 +217,7 @@ export async function POST(request: Request) {
     const lodgingNights = typeof body.lodgingNights === "number" ? body.lodgingNights : null;
     const depositPercent = typeof body.depositPercent === "number" ? body.depositPercent : null;
     const lodgingRateProfile: LodgingRateProfile | null =
-      service.code === "hotel"
+      service.code === "hotel" && depositPercent !== null
         ? body.lodgingRateProfile === undefined
           ? "standard"
           : isLodgingRateProfile(body.lodgingRateProfile)
@@ -243,7 +243,7 @@ export async function POST(request: Request) {
       if (depositPercent !== null && (!Number.isInteger(depositPercent) || depositPercent < 1 || depositPercent > 99)) {
         throw new HttpError(400, "invalid_deposit_percent", "Informe um sinal entre 1% e 99%.");
       }
-      if (!lodgingRateProfile) {
+      if (depositPercent !== null && !lodgingRateProfile) {
         throw new HttpError(
           400,
           "invalid_lodging_rate_profile",
@@ -257,7 +257,7 @@ export async function POST(request: Request) {
         ? taxiDogPriceCents(service.basePriceCents, direction)
         : service.code === "hotel"
           ? Math.round(
-              lodgingDailyRateCents(establishment, lodgingRateProfile!) *
+              lodgingDailyRateCents(establishment, lodgingRateProfile ?? "standard") *
                 (lodgingNights ?? 1),
             )
           : service.basePriceCents +

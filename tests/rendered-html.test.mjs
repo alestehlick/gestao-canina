@@ -635,11 +635,12 @@ test("mantém histórico descritivo, indicadores recentes e horários flexíveis
 });
 
 test("mantém a política de hospedagem clara e auditável", async () => {
-  const [app, createAppointment, editAppointment, invoices, payments, settings, schema, migration] =
+  const [app, createAppointment, editAppointment, regularBilling, invoices, payments, settings, schema, migration] =
     await Promise.all([
       readFile(new URL("../app/components/management-app.tsx", import.meta.url), "utf8"),
       readFile(new URL("../app/api/appointments/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/appointments/[id]/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/appointment-items/[id]/billing/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/invoices/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/invoices/[id]/payments/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/settings/prices/route.ts", import.meta.url), "utf8"),
@@ -649,9 +650,18 @@ test("mantém a política de hospedagem clara e auditável", async () => {
 
   assert.match(app, /cliente de creche regular/);
   assert.match(app, /segundo cão ou mais/);
+  assert.match(app, /Condição da diária para calcular o sinal/);
+  assert.match(app, /A condição da diária será definida em Cobranças/);
+  assert.match(app, /Defina a condição da diária em Regular/);
+  assert.match(app, /lodging_\$\{currentLodgingProfile\}/);
   assert.doesNotMatch(app, /name="price"/);
   assert.doesNotMatch(createAppointment, /body\.priceCents/);
   assert.doesNotMatch(editAppointment, /requestedPriceCents/);
+  assert.match(createAppointment, /service\.code === "hotel" && depositPercent !== null/);
+  assert.match(editAppointment, /service\.code === "hotel" && depositPercent !== null/);
+  assert.match(regularBilling, /parseLodgingRateProfile/);
+  assert.match(regularBilling, /SET lodging_rate_profile = \?/);
+  assert.match(regularBilling, /lodging_rate_required/);
   assert.match(app, /Não aplicar desconto por longa estadia/);
   assert.match(createAppointment, /lodging_rate_profile/);
   assert.match(editAppointment, /lodgingRateProfile/);

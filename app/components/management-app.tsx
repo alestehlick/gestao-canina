@@ -245,6 +245,41 @@ function lodgingRateLabel(profile: LodgingRateProfile) {
   return "Diária padrão";
 }
 
+function suggestedLodgingRateProfile(
+  service: BillableService,
+  bookings: Booking[],
+  creditBalances: CreditBalances,
+): LodgingRateProfile {
+  const existingProfile = service.lodging?.rateProfile;
+  if (existingProfile) return existingProfile;
+
+  const daycareCustomer =
+    (creditBalances[service.customerId]?.daycare ?? 0) > 0 ||
+    bookings.some(
+      (booking) =>
+        booking.customerId === service.customerId &&
+        booking.serviceType === "daycare" &&
+        booking.status !== "cancelled",
+    );
+  const checkIn = service.lodging?.checkInDate;
+  const checkOut = service.lodging?.checkOutDate;
+  const additionalDog = Boolean(
+    checkIn &&
+      checkOut &&
+      bookings.some(
+        (booking) =>
+          booking.customerId === service.customerId &&
+          booking.serviceType === "hotel" &&
+          booking.status !== "cancelled" &&
+          booking.dogName !== service.dogName &&
+          booking.date <= checkOut &&
+          (booking.endDate ?? booking.date) >= checkIn,
+      ),
+  );
+
+  return lodgingRateProfile(daycareCustomer, additionalDog);
+}
+
 function creditUnitsForService(
   serviceType: ServiceType,
   transportDirection?: Booking["transportDirection"],
@@ -1901,10 +1936,12 @@ export function ManagementApp() {
       form.get("hasDeposit") === "on"
         ? Number(form.get("depositPercent") ?? 50)
         : null;
-    const nextLodgingRateProfile = lodgingRateProfile(
-      editDraftDaycareCustomer,
-      editDraftAdditionalDog,
-    );
+    const nextLodgingRateProfile = editDraftHasDeposit
+      ? lodgingRateProfile(
+          editDraftDaycareCustomer,
+          editDraftAdditionalDog,
+        )
+      : undefined;
     if (
       !date ||
       !serviceType ||
@@ -1974,7 +2011,7 @@ export function ManagementApp() {
                 depositPercent:
                   serviceType === "hotel" ? depositPercent : null,
                 lodgingRateProfile:
-                  serviceType === "hotel" ? nextLodgingRateProfile : null,
+                  serviceType === "hotel" ? nextLodgingRateProfile ?? null : null,
               }),
             },
           ),
@@ -2031,7 +2068,10 @@ export function ManagementApp() {
                     : undefined,
                 priceCents:
                   serviceType === "hotel"
-                    ? lodgingDailyRate(lodgingPricing, nextLodgingRateProfile) * lodgingNights
+                    ? lodgingDailyRate(
+                        lodgingPricing,
+                        nextLodgingRateProfile ?? "standard",
+                      ) * lodgingNights
                     : (servicePrices[serviceType] +
                         (serviceType === "bath" && groomingAddon
                           ? groomingAddonPriceCents
@@ -2525,10 +2565,12 @@ export function ManagementApp() {
       recurrence,
       recurrenceCount,
     );
-    const nextLodgingRateProfile = lodgingRateProfile(
-      serviceDraftDaycareCustomer,
-      serviceDraftAdditionalDog,
-    );
+    const nextLodgingRateProfile = serviceDraftHasDeposit
+      ? lodgingRateProfile(
+          serviceDraftDaycareCustomer,
+          serviceDraftAdditionalDog,
+        )
+      : undefined;
     const note = String(form.get("note") ?? "").trim() || undefined;
 
     if (runtimeMode === "ready") {
@@ -2628,7 +2670,10 @@ export function ManagementApp() {
         status: "scheduled",
         priceCents:
           serviceType === "hotel"
-            ? lodgingDailyRate(lodgingPricing, nextLodgingRateProfile) * lodgingNights
+            ? lodgingDailyRate(
+                lodgingPricing,
+                nextLodgingRateProfile ?? "standard",
+              ) * lodgingNights
             : (servicePrices[serviceType] +
                 (serviceType === "bath" && groomingAddon
                   ? groomingAddonPriceCents
@@ -3092,6 +3137,18 @@ export function ManagementApp() {
             ? {
                 ...item,
                 billingPricingProfile: pricingProfile,
+                lodging:
+                  item.lodging && pricingProfile?.startsWith("lodging_")
+                    ? {
+                        ...item.lodging,
+                        rateProfile: pricingProfile.slice(
+                          "lodging_".length,
+                        ) as LodgingRateProfile,
+                        dailyRateCents: Math.round(
+                          amountCents / item.lodging.nights,
+                        ),
+                      }
+                    : item.lodging,
                 amountCents:
                   item.billingKind === "lodging_deposit"
                     ? Math.round(amountCents * ((item.lodging?.depositPercent ?? 0) / 100))
@@ -5324,7 +5381,11 @@ export function ManagementApp() {
                   const next = event.target.value as ServiceType;
                   setServiceDraftType(next);
                   if (next !== "bath") setServiceDraftGroomingAddon(false);
-                  if (next !== "hotel") setServiceDraftHasDeposit(false);
+                  if (next !== "hotel") {
+                    setServiceDraftHasDeposit(false);
+                    setServiceDraftDaycareCustomer(false);
+                    setServiceDraftAdditionalDog(false);
+                  }
                   if (next === "hotel") {
                     const nextEndDate =
                       serviceDraftEndDate > serviceDraftDate
@@ -5450,70 +5511,80 @@ export function ManagementApp() {
                     Opções compatíveis com o período de entrada e saída.
                   </small>
                 </label>
-                <fieldset className="lodging-rate-options">
-                  <legend>Condição da diária</legend>
-                <label className="check-field">
-                  <input
-                    type="checkbox"
-                    checked={serviceDraftDaycareCustomer}
-                    onChange={(event) => {
-                      const checked = event.target.checked;
-                      setServiceDraftDaycareCustomer(checked);
-                    }}
-                  />
-                  <span>Aplicar diária para cliente de creche regular</span>
-                </label>
-                <label className="check-field">
-                  <input
-                    type="checkbox"
-                    checked={serviceDraftAdditionalDog}
-                    onChange={(event) => {
-                      const checked = event.target.checked;
-                      setServiceDraftAdditionalDog(checked);
-                    }}
-                  />
-                  <span>Aplicar diária para segundo cão ou mais nesta reserva</span>
-                </label>
-                <small className="field-help">
-                  {lodgingRateLabel(
-                    lodgingRateProfile(
-                      serviceDraftDaycareCustomer,
-                      serviceDraftAdditionalDog,
-                    ),
-                  )}: {formatCurrency(
-                    lodgingDailyRate(
-                      lodgingPricing,
-                      lodgingRateProfile(
-                        serviceDraftDaycareCustomer,
-                        serviceDraftAdditionalDog,
-                      ),
-                    ),
-                  )} por diária.
-                </small>
-                </fieldset>
                 <label className="check-field">
                   <input
                     name="hasDeposit"
                     type="checkbox"
                     checked={serviceDraftHasDeposit}
-                    onChange={(event) =>
-                      setServiceDraftHasDeposit(event.target.checked)
-                    }
+                    onChange={(event) => {
+                      const checked = event.target.checked;
+                      setServiceDraftHasDeposit(checked);
+                      if (!checked) {
+                        setServiceDraftDaycareCustomer(false);
+                        setServiceDraftAdditionalDog(false);
+                      }
+                    }}
                   />
                   <span>Cobrar sinal no check-in</span>
                 </label>
                 {serviceDraftHasDeposit && (
-                  <label className="field">
-                    <span>Sinal no check-in (%)</span>
-                    <input
-                      name="depositPercent"
-                      type="number"
-                      min="1"
-                      max="99"
-                      defaultValue="50"
-                      required
-                    />
-                  </label>
+                  <>
+                    <label className="field">
+                      <span>Sinal no check-in (%)</span>
+                      <input
+                        name="depositPercent"
+                        type="number"
+                        min="1"
+                        max="99"
+                        defaultValue="50"
+                        required
+                      />
+                    </label>
+                    <fieldset className="lodging-rate-options">
+                      <legend>Condição da diária para calcular o sinal</legend>
+                      <label className="check-field">
+                        <input
+                          type="checkbox"
+                          checked={serviceDraftDaycareCustomer}
+                          onChange={(event) =>
+                            setServiceDraftDaycareCustomer(event.target.checked)
+                          }
+                        />
+                        <span>Aplicar diária para cliente de creche regular</span>
+                      </label>
+                      <label className="check-field">
+                        <input
+                          type="checkbox"
+                          checked={serviceDraftAdditionalDog}
+                          onChange={(event) =>
+                            setServiceDraftAdditionalDog(event.target.checked)
+                          }
+                        />
+                        <span>Aplicar diária para segundo cão ou mais nesta reserva</span>
+                      </label>
+                      <small className="field-help">
+                        {lodgingRateLabel(
+                          lodgingRateProfile(
+                            serviceDraftDaycareCustomer,
+                            serviceDraftAdditionalDog,
+                          ),
+                        )}: {formatCurrency(
+                          lodgingDailyRate(
+                            lodgingPricing,
+                            lodgingRateProfile(
+                              serviceDraftDaycareCustomer,
+                              serviceDraftAdditionalDog,
+                            ),
+                          ),
+                        )} por diária.
+                      </small>
+                    </fieldset>
+                  </>
+                )}
+                {!serviceDraftHasDeposit && (
+                  <small className="field-help full">
+                    A condição da diária será definida em Cobranças, ao escolher Regular.
+                  </small>
                 )}
               </>
             )}
@@ -5652,7 +5723,11 @@ export function ManagementApp() {
                   const next = event.target.value as ServiceType;
                   setEditDraftType(next);
                   if (next !== "bath") setEditDraftGroomingAddon(false);
-                  if (next !== "hotel") setEditDraftHasDeposit(false);
+                  if (next !== "hotel") {
+                    setEditDraftHasDeposit(false);
+                    setEditDraftDaycareCustomer(false);
+                    setEditDraftAdditionalDog(false);
+                  }
                   if (next === "hotel") {
                     const nextEndDate =
                       editDraftEndDate > editDraftDate
@@ -5789,70 +5864,80 @@ export function ManagementApp() {
                     Opções compatíveis com o período de entrada e saída.
                   </small>
                 </label>
-                <fieldset className="lodging-rate-options">
-                  <legend>Condição da diária</legend>
-                <label className="check-field">
-                  <input
-                    type="checkbox"
-                    checked={editDraftDaycareCustomer}
-                    onChange={(event) => {
-                      const checked = event.target.checked;
-                      setEditDraftDaycareCustomer(checked);
-                    }}
-                  />
-                  <span>Aplicar diária para cliente de creche regular</span>
-                </label>
-                <label className="check-field">
-                  <input
-                    type="checkbox"
-                    checked={editDraftAdditionalDog}
-                    onChange={(event) => {
-                      const checked = event.target.checked;
-                      setEditDraftAdditionalDog(checked);
-                    }}
-                  />
-                  <span>Aplicar diária para segundo cão ou mais nesta reserva</span>
-                </label>
-                <small className="field-help">
-                  {lodgingRateLabel(
-                    lodgingRateProfile(
-                      editDraftDaycareCustomer,
-                      editDraftAdditionalDog,
-                    ),
-                  )}: {formatCurrency(
-                    lodgingDailyRate(
-                      lodgingPricing,
-                      lodgingRateProfile(
-                        editDraftDaycareCustomer,
-                        editDraftAdditionalDog,
-                      ),
-                    ),
-                  )} por diária.
-                </small>
-                </fieldset>
                 <label className="check-field">
                   <input
                     name="hasDeposit"
                     type="checkbox"
                     checked={editDraftHasDeposit}
-                    onChange={(event) =>
-                      setEditDraftHasDeposit(event.target.checked)
-                    }
+                    onChange={(event) => {
+                      const checked = event.target.checked;
+                      setEditDraftHasDeposit(checked);
+                      if (!checked) {
+                        setEditDraftDaycareCustomer(false);
+                        setEditDraftAdditionalDog(false);
+                      }
+                    }}
                   />
                   <span>Cobrar sinal no check-in</span>
                 </label>
                 {editDraftHasDeposit && (
-                  <label className="field">
-                    <span>Sinal no check-in (%)</span>
-                    <input
-                      name="depositPercent"
-                      type="number"
-                      min="1"
-                      max="99"
-                      defaultValue={bookingToEdit.depositPercent ?? 50}
-                      required
-                    />
-                  </label>
+                  <>
+                    <label className="field">
+                      <span>Sinal no check-in (%)</span>
+                      <input
+                        name="depositPercent"
+                        type="number"
+                        min="1"
+                        max="99"
+                        defaultValue={bookingToEdit.depositPercent ?? 50}
+                        required
+                      />
+                    </label>
+                    <fieldset className="lodging-rate-options">
+                      <legend>Condição da diária para calcular o sinal</legend>
+                      <label className="check-field">
+                        <input
+                          type="checkbox"
+                          checked={editDraftDaycareCustomer}
+                          onChange={(event) =>
+                            setEditDraftDaycareCustomer(event.target.checked)
+                          }
+                        />
+                        <span>Aplicar diária para cliente de creche regular</span>
+                      </label>
+                      <label className="check-field">
+                        <input
+                          type="checkbox"
+                          checked={editDraftAdditionalDog}
+                          onChange={(event) =>
+                            setEditDraftAdditionalDog(event.target.checked)
+                          }
+                        />
+                        <span>Aplicar diária para segundo cão ou mais nesta reserva</span>
+                      </label>
+                      <small className="field-help">
+                        {lodgingRateLabel(
+                          lodgingRateProfile(
+                            editDraftDaycareCustomer,
+                            editDraftAdditionalDog,
+                          ),
+                        )}: {formatCurrency(
+                          lodgingDailyRate(
+                            lodgingPricing,
+                            lodgingRateProfile(
+                              editDraftDaycareCustomer,
+                              editDraftAdditionalDog,
+                            ),
+                          ),
+                        )} por diária.
+                      </small>
+                    </fieldset>
+                  </>
+                )}
+                {!editDraftHasDeposit && (
+                  <small className="field-help full">
+                    A condição da diária será definida em Cobranças, ao escolher Regular.
+                  </small>
                 )}
               </>
             )}
@@ -6462,6 +6547,12 @@ export function ManagementApp() {
         <RegularBillingDialog
           service={regularBillingService}
           creditPricing={creditPricing}
+          lodgingPricing={lodgingPricing}
+          suggestedLodgingProfile={suggestedLodgingRateProfile(
+            regularBillingService,
+            bookings,
+            creditBalances,
+          )}
           busy={busyAction === `regular-billing:${regularBillingService.appointmentItemId}`}
           onClose={() => setRegularBillingService(null)}
           onSubmit={(amountCents, pricingProfile) =>
@@ -9357,6 +9448,10 @@ function BillingView({
                     Boolean(creditType) &&
                     creditServiceTypes.includes(creditType!) &&
                     creditUnits > 0;
+                  const lodgingValuePending =
+                    service.serviceType === "hotel" &&
+                    !service.lodging?.depositPercent &&
+                    !service.billingPricingProfile;
                   return (
                     <div
                       className={`billable-row service-${billableVisualType(service)}${
@@ -9383,9 +9478,16 @@ function BillingView({
                             {service.billingNote}
                           </small>
                         )}
+                        {lodgingValuePending && (
+                          <small className="billable-note">
+                            Defina a condição da diária em Regular
+                          </small>
+                        )}
                       </span>
                       <strong className="billable-amount">
-                        {formatCurrency(service.amountCents)}
+                        {lodgingValuePending
+                          ? "Valor a definir"
+                          : formatCurrency(service.amountCents)}
                       </strong>
                       <span className="billable-payment-actions">
                         <button
@@ -11119,12 +11221,16 @@ function AccessView({ customers }: { customers: Customer[] }) {
 function RegularBillingDialog({
   service,
   creditPricing,
+  lodgingPricing,
+  suggestedLodgingProfile,
   busy,
   onClose,
   onSubmit,
 }: {
   service: BillableService;
   creditPricing: CreditPricingSettings;
+  lodgingPricing: LodgingPricing;
+  suggestedLodgingProfile: LodgingRateProfile;
   busy: boolean;
   onClose: () => void;
   onSubmit: (
@@ -11141,6 +11247,28 @@ function RegularBillingDialog({
     taxiDistance,
     taxiDirection,
   );
+  const isDeferredLodging =
+    service.serviceType === "hotel" && !service.lodging?.depositPercent;
+  const initialLodgingProfile =
+    service.lodging?.rateProfile ?? suggestedLodgingProfile;
+  const [lodgingDaycareCustomer, setLodgingDaycareCustomer] = useState(
+    initialLodgingProfile === "daycare" ||
+      initialLodgingProfile === "daycare_additional_dog",
+  );
+  const [lodgingAdditionalDog, setLodgingAdditionalDog] = useState(
+    initialLodgingProfile === "additional_dog" ||
+      initialLodgingProfile === "daycare_additional_dog",
+  );
+  const currentLodgingProfile = lodgingRateProfile(
+    lodgingDaycareCustomer,
+    lodgingAdditionalDog,
+  );
+  const lodgingSuggestedCents = service.lodging
+    ? Math.round(
+        lodgingDailyRate(lodgingPricing, currentLodgingProfile) *
+          service.lodging.nights,
+      )
+    : 0;
   const [amount, setAmount] = useState(
     ((service.serviceType === "transport"
       ? taxiDogRegularCents(
@@ -11148,7 +11276,12 @@ function RegularBillingDialog({
           service.billingPricingProfile === "taxi_long" ? "long" : "short",
           taxiDirection,
         )
-      : regularBillingAmountCents(service)) / 100).toFixed(2),
+      : isDeferredLodging
+        ? Math.round(
+            lodgingDailyRate(lodgingPricing, initialLodgingProfile) *
+              (service.lodging?.nights ?? 1),
+          )
+        : regularBillingAmountCents(service)) / 100).toFixed(2),
   );
   const [error, setError] = useState("");
 
@@ -11162,7 +11295,11 @@ function RegularBillingDialog({
     setError("");
     await onSubmit(
       amountCents,
-      service.serviceType === "transport" ? `taxi_${taxiDistance}` : undefined,
+      service.serviceType === "transport"
+        ? `taxi_${taxiDistance}`
+        : isDeferredLodging
+          ? `lodging_${currentLodgingProfile}`
+          : undefined,
     );
   }
 
@@ -11217,6 +11354,56 @@ function RegularBillingDialog({
             </div>
           </fieldset>
         )}
+        {isDeferredLodging && (
+          <fieldset className="lodging-rate-options full">
+            <legend>Condição da diária *</legend>
+            <label className="check-field">
+              <input
+                type="checkbox"
+                checked={lodgingDaycareCustomer}
+                onChange={(event) => {
+                  const checked = event.target.checked;
+                  setLodgingDaycareCustomer(checked);
+                  const profile = lodgingRateProfile(
+                    checked,
+                    lodgingAdditionalDog,
+                  );
+                  setAmount(
+                    ((lodgingDailyRate(lodgingPricing, profile) *
+                      (service.lodging?.nights ?? 1)) /
+                      100).toFixed(2),
+                  );
+                }}
+              />
+              <span>Cliente de creche regular</span>
+            </label>
+            <label className="check-field">
+              <input
+                type="checkbox"
+                checked={lodgingAdditionalDog}
+                onChange={(event) => {
+                  const checked = event.target.checked;
+                  setLodgingAdditionalDog(checked);
+                  const profile = lodgingRateProfile(
+                    lodgingDaycareCustomer,
+                    checked,
+                  );
+                  setAmount(
+                    ((lodgingDailyRate(lodgingPricing, profile) *
+                      (service.lodging?.nights ?? 1)) /
+                      100).toFixed(2),
+                  );
+                }}
+              />
+              <span>Segundo cão ou mais nesta reserva</span>
+            </label>
+            <small className="field-help">
+              {lodgingRateLabel(currentLodgingProfile)}: {formatCurrency(
+                lodgingDailyRate(lodgingPricing, currentLodgingProfile),
+              )} por diária · total sugerido {formatCurrency(lodgingSuggestedCents)}.
+            </small>
+          </fieldset>
+        )}
         <label className="field full">
           <span>{service.lodging ? "Valor total da hospedagem (R$)" : "Valor do serviço (R$)"}</span>
           <input
@@ -11232,6 +11419,12 @@ function RegularBillingDialog({
           />
           {service.serviceType === "transport" && (
             <small>Sugestão pela tabela: {formatCurrency(taxiSuggestedCents)}</small>
+          )}
+          {isDeferredLodging && (
+            <small>
+              Sugestão pela condição escolhida: {formatCurrency(lodgingSuggestedCents)}.
+              O valor pode ser ajustado antes de confirmar.
+            </small>
           )}
         </label>
         {error && <p className="form-error full">{error}</p>}

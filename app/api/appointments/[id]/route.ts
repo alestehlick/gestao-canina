@@ -894,7 +894,7 @@ export async function PATCH(
                 : Number.NaN
           : null;
       const lodgingRateProfile: LodgingRateProfile | null =
-        service.code === "hotel"
+        service.code === "hotel" && depositPercent !== null
           ? body.lodgingRateProfile === undefined
             ? (appointment.lodgingRateProfile ?? "standard") as LodgingRateProfile
             : isLodgingRateProfile(body.lodgingRateProfile)
@@ -936,7 +936,7 @@ export async function PATCH(
             "Informe um sinal entre 1% e 99%.",
           );
         }
-        if (!lodgingRateProfile) {
+        if (depositPercent !== null && !lodgingRateProfile) {
           throw new HttpError(
             400,
             "invalid_lodging_rate_profile",
@@ -955,7 +955,7 @@ export async function PATCH(
       const catalogPriceCents =
         service.code === "hotel"
           ? Math.round(
-              lodgingDailyRateCents(establishment, lodgingRateProfile!) *
+              lodgingDailyRateCents(establishment, lodgingRateProfile ?? "standard") *
                 (lodgingNights ?? 1),
             )
           : service.code === "taxi_dog"

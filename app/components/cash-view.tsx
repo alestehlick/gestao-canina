@@ -3,7 +3,6 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useState,
   type FormEvent,
 } from "react";
@@ -11,6 +10,11 @@ import {
   BrazilianDateInput,
   formatBrazilianDate,
 } from "@/app/components/brazilian-date-input";
+import {
+  cashReportFilename,
+  generateCashReportPdf,
+  type CashReportData,
+} from "@/lib/cash-report-pdf";
 
 type CashDirection = "inflow" | "outflow";
 type CashStatus = "included" | "excluded";
@@ -18,8 +22,9 @@ type CashStatus = "included" | "excluded";
 type CashEntry = {
   id: string;
   direction: CashDirection;
-  origin: "invoice_payment" | "manual";
+  origin: "invoice_payment" | "manual" | "transfer";
   sourcePaymentId: string | null;
+  transferId: string | null;
   financialAccountId: string | null;
   financialAccountName: string | null;
   occurredOn: string;
@@ -34,19 +39,38 @@ type CashEntry = {
   customerName: string | null;
   createdAt: string;
   updatedAt: string;
+  version: number;
+  transferVersion: number | null;
+  createdByName: string | null;
+  updatedByName: string | null;
+  excludedByName: string | null;
+  receiptName: string | null;
+  receiptUrl: string | null;
 };
 
 type CashPayload = {
   anchorMonth: string;
   monthStartDay: number;
   period: { start: string; end: string };
+  periodState: {
+    id?: string;
+    status: "open" | "closed";
+    closeNote?: string | null;
+    closedAt?: string | null;
+    reopenedAt?: string | null;
+    reopenReason?: string | null;
+    version: number;
+  };
   totals: {
-    inflowCents: number;
-    outflowCents: number;
-    balanceCents: number;
-    receivableCents: number;
-    receivableCount: number;
+    receivedCents: number;
+    paidCents: number;
+    resultCents: number;
+    accountMovementCents: number;
+    overdueReceivableCents: number;
+    overdueReceivableCount: number;
     excludedCount: number;
+    transferInflowCents: number;
+    transferOutflowCents: number;
   };
   analytics: {
     serviceStats: Array<{
@@ -60,12 +84,18 @@ type CashPayload = {
     }>;
     previousTotals: { inflowCents: number; outflowCents: number };
     automaticInflowCents: number;
-    otherInflowCents: number;
+    manualInflowCents: number;
+    unallocatedAutomaticCents: number;
     credits: {
       soldUnits: number;
       soldCents: number;
-      usedUnits: number;
-      availableUnits: number;
+      byService: Array<{
+        code: string;
+        label: string;
+        soldUnits: number;
+        usedUnits: number;
+        availableUnits: number;
+      }>;
     };
     dailyCash: Array<{
       date: string;
@@ -75,7 +105,14 @@ type CashPayload = {
     }>;
     expenseCategories: Array<{ category: string; amountCents: number }>;
   };
+  categories: string[];
   entries: CashEntry[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    hasMore: boolean;
+  };
 };
 
 type CashDraft = {
@@ -94,7 +131,17 @@ type FinancialAccount = {
   institution: string | null;
   kind: "checking" | "savings" | "cash" | "other";
   active: boolean;
+  openingBalanceCents: number | null;
+  openingBalanceOn: string | null;
+  reconciledBalanceCents: number | null;
+  reconciledOn: string | null;
+  reconciledAt: string | null;
+  lastReconciliationDifferenceCents: number | null;
+  calculatedBalanceCents: number | null;
+  scheduledSettlementCount: number;
 };
+
+type CashTab = "summary" | "entries" | "accounts";
 
 const inflowCategories = [
   "Serviços fora do sistema",
@@ -118,6 +165,29 @@ function formatCurrency(value: number) {
     style: "currency",
     currency: "BRL",
   }).format(value / 100);
+}
+
+function currencyCents(value: FormDataEntryValue | null) {
+  const normalized = String(value ?? "")
+    .trim()
+    .replace(/\s/g, "")
+    .replace(/\./g, "")
+    .replace(",", ".");
+  const cents = Math.round(Number(normalized) * 100);
+  return Number.isSafeInteger(cents) ? cents : Number.NaN;
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+}
+
+function csvCell(value: string | number) {
+  return `"${String(value).replace(/"/g, '""')}"`;
 }
 
 function monthLabel(value: string) {
@@ -193,18 +263,25 @@ function draftFor(
 export function CashView({
   referenceDate,
   onChanged,
+  onOpenBilling,
   canEditSettings = false,
 }: {
   referenceDate: string;
   onChanged: () => void;
+  onOpenBilling?: () => void;
   canEditSettings?: boolean;
 }) {
   const currentMonth = referenceDate.slice(0, 7);
   const [anchorMonth, setAnchorMonth] = useState(currentMonth);
   const [payload, setPayload] = useState<CashPayload | null>(null);
-  const [filter, setFilter] = useState<
-    "all" | "inflow" | "outflow" | "excluded"
-  >("all");
+  const [tab, setTab] = useState<CashTab>("summary");
+  const [directionFilter, setDirectionFilter] = useState<"all" | CashDirection>("all");
+  const [statusFilter, setStatusFilter] = useState<"included" | "excluded" | "all">("included");
+  const [originFilter, setOriginFilter] = useState<"all" | "automatic" | "manual" | "transfer">("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [searchDraft, setSearchDraft] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [page, setPage] = useState(1);
   const [draft, setDraft] = useState<CashDraft>(() =>
     draftFor(referenceDate),
   );
@@ -215,15 +292,31 @@ export function CashView({
   const [financialAccounts, setFinancialAccounts] = useState<FinancialAccount[]>([]);
   const [accountFilter, setAccountFilter] = useState("all");
   const [newAccountOpen, setNewAccountOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [reconcileAccountId, setReconcileAccountId] = useState<string | null>(null);
+  const [configureAccountId, setConfigureAccountId] = useState<string | null>(null);
+  const [entryAction, setEntryAction] = useState<{ entry: CashEntry; action: "exclude" | "restore" } | null>(null);
+  const [detailsEntryId, setDetailsEntryId] = useState<string | null>(null);
+  const [entryIdempotencyKey, setEntryIdempotencyKey] = useState(() => crypto.randomUUID());
+  const [transferIdempotencyKey, setTransferIdempotencyKey] = useState(() => crypto.randomUUID());
+  const [periodAction, setPeriodAction] = useState<"close" | "reopen" | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [result, accountResult] = await Promise.all([
-        cashRequest<CashPayload>(`/api/cash?month=${encodeURIComponent(anchorMonth)}`),
-        cashRequest<{ accounts: FinancialAccount[] }>(
-          `/api/financial-accounts${canEditSettings ? "?includeInactive=true" : ""}`,
-        ),
-      ]);
+      const params = new URLSearchParams({
+        month: anchorMonth,
+        page: String(page),
+        direction: directionFilter,
+        status: statusFilter,
+        origin: originFilter,
+      });
+      if (accountFilter !== "all") params.set("accountId", accountFilter);
+      if (categoryFilter !== "all") params.set("category", categoryFilter);
+      if (appliedSearch) params.set("q", appliedSearch);
+      const result = await cashRequest<CashPayload>(`/api/cash?${params.toString()}`);
+      const accountResult = await cashRequest<{ accounts: FinancialAccount[] }>(
+        `/api/financial-accounts?through=${encodeURIComponent(result.period.end)}${canEditSettings ? "&includeInactive=true" : ""}`,
+      );
       setPayload(result);
       setFinancialAccounts(accountResult.accounts);
       setError("");
@@ -234,43 +327,35 @@ export function CashView({
           : "Não foi possível carregar o Caixa.",
       );
     }
-  }, [anchorMonth, canEditSettings]);
+  }, [accountFilter, anchorMonth, appliedSearch, canEditSettings, categoryFilter, directionFilter, originFilter, page, statusFilter]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
   }, [load]);
 
-  const entries = useMemo(() => {
-    let all = payload?.entries ?? [];
-    if (accountFilter !== "all") {
-      all = all.filter((entry) => entry.financialAccountId === accountFilter);
-    }
-    if (filter === "excluded") {
-      return all.filter((entry) => entry.status === "excluded");
-    }
-    if (filter === "inflow" || filter === "outflow") {
-      return all.filter(
-        (entry) =>
-          entry.direction === filter && entry.status === "included",
-      );
-    }
-    return all;
-  }, [accountFilter, filter, payload]);
+  const entries = payload?.entries ?? [];
 
   const categories =
     draft.direction === "inflow" ? inflowCategories : outflowCategories;
 
   function openNew(direction: CashDirection) {
+    if (payload?.periodState.status === "closed") {
+      setError("Este período está fechado. Reabra-o antes de registrar movimentações.");
+      return;
+    }
+    const activeAccounts = financialAccounts.filter((account) => account.active);
     setEditingId(null);
     setDraft(
       draftFor(
         referenceDate,
         direction,
-        financialAccounts.find((account) => account.active)?.id ?? "",
+        activeAccounts.length === 1 ? activeAccounts[0].id : "",
       ),
     );
+    setEntryIdempotencyKey(crypto.randomUUID());
     setFormOpen(true);
+    setTab("entries");
   }
 
   function openEdit(entry: CashEntry) {
@@ -291,6 +376,7 @@ export function CashView({
     setFormOpen(false);
     setEditingId(null);
     setDraft(draftFor(referenceDate));
+    setEntryIdempotencyKey(crypto.randomUUID());
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -301,6 +387,10 @@ export function CashView({
     );
     if (!Number.isSafeInteger(amountCents) || amountCents < 1) {
       setError("Informe um valor maior que zero.");
+      return;
+    }
+    if (!draft.financialAccountId) {
+      setError("Escolha a conta desta movimentação.");
       return;
     }
     setBusy("save");
@@ -314,6 +404,12 @@ export function CashView({
         description: draft.description,
         note: draft.note || undefined,
         financialAccountId: draft.financialAccountId,
+        ...(editingId
+          ? {
+              expectedVersion:
+                entries.find((entry) => entry.id === editingId)?.version ?? 0,
+            }
+          : { idempotencyKey: entryIdempotencyKey }),
       };
       await cashRequest(
         editingId ? `/api/cash/${editingId}` : "/api/cash",
@@ -336,27 +432,36 @@ export function CashView({
     }
   }
 
-  async function changeStatus(entry: CashEntry) {
+  function requestStatusChange(entry: CashEntry) {
+    setEntryAction({
+      entry,
+      action: entry.status === "included" ? "exclude" : "restore",
+    });
+  }
+
+  async function changeStatus(entry: CashEntry, reason = "") {
     if (busy) return;
     const action = entry.status === "included" ? "exclude" : "restore";
-    let reason: string | undefined;
-    if (action === "exclude") {
-      const answer = window.prompt(
-        "Por que este lançamento deve ser desconsiderado?",
-      );
-      if (answer === null) return;
-      reason = answer.trim();
-      if (!reason) {
-        setError("Informe o motivo para manter o histórico claro.");
-        return;
-      }
+    if (action === "exclude" && !reason.trim()) {
+      setError("Informe o motivo para manter o histórico claro.");
+      return;
     }
     setBusy(`status:${entry.id}`);
     try {
-      await cashRequest(`/api/cash/${entry.id}`, {
+      const endpoint = entry.transferId
+        ? `/api/cash/transfers/${entry.transferId}`
+        : `/api/cash/${entry.id}`;
+      await cashRequest(endpoint, {
         method: "PATCH",
-        body: JSON.stringify({ action, reason }),
+        body: JSON.stringify({
+          action,
+          reason: reason.trim() || undefined,
+          expectedVersion: entry.transferId
+            ? entry.transferVersion
+            : entry.version,
+        }),
       });
+      setEntryAction(null);
       await load();
       onChanged();
     } catch (reasonValue) {
@@ -398,6 +503,18 @@ export function CashView({
     event.preventDefault();
     if (busy) return;
     const form = new FormData(event.currentTarget);
+    const openingBalanceValue = String(form.get("openingBalance") ?? "").trim();
+    const openingBalanceOn = String(form.get("openingBalanceOn") ?? "").trim();
+    const openingBalanceCents = openingBalanceValue
+      ? currencyCents(openingBalanceValue)
+      : null;
+    if (
+      (openingBalanceCents === null) !== !openingBalanceOn ||
+      (openingBalanceCents !== null && !Number.isSafeInteger(openingBalanceCents))
+    ) {
+      setError("Informe o saldo inicial e a data de referência juntos.");
+      return;
+    }
     setBusy("financial-account");
     try {
       await cashRequest("/api/financial-accounts", {
@@ -406,6 +523,8 @@ export function CashView({
           name: String(form.get("name") ?? "").trim(),
           institution: String(form.get("institution") ?? "").trim() || null,
           kind: String(form.get("kind") ?? "checking"),
+          openingBalanceCents,
+          openingBalanceOn: openingBalanceOn || null,
         }),
       });
       setNewAccountOpen(false);
@@ -443,6 +562,196 @@ export function CashView({
     }
   }
 
+  async function configureFinancialAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!configureAccountId || busy) return;
+    const form = new FormData(event.currentTarget);
+    const openingBalanceCents = currencyCents(form.get("openingBalance"));
+    const openingBalanceOn = String(form.get("openingBalanceOn") ?? "");
+    if (!Number.isSafeInteger(openingBalanceCents) || !openingBalanceOn) {
+      setError("Informe o saldo inicial e a data de referência.");
+      return;
+    }
+    setBusy(`configure:${configureAccountId}`);
+    try {
+      await cashRequest(`/api/financial-accounts/${configureAccountId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          action: "configure",
+          openingBalanceCents,
+          openingBalanceOn,
+        }),
+      });
+      setConfigureAccountId(null);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível configurar o saldo inicial.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function createTransfer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    const form = new FormData(event.currentTarget);
+    const amountCents = currencyCents(form.get("amount"));
+    if (!Number.isSafeInteger(amountCents) || amountCents < 1) {
+      setError("Informe um valor maior que zero.");
+      return;
+    }
+    setBusy("transfer");
+    try {
+      await cashRequest("/api/cash/transfers", {
+        method: "POST",
+        body: JSON.stringify({
+          fromFinancialAccountId: String(form.get("fromFinancialAccountId") ?? ""),
+          toFinancialAccountId: String(form.get("toFinancialAccountId") ?? ""),
+          occurredOn: String(form.get("occurredOn") ?? ""),
+          amountCents,
+          description: String(form.get("description") ?? "").trim() || undefined,
+          note: String(form.get("note") ?? "").trim() || undefined,
+          idempotencyKey: transferIdempotencyKey,
+        }),
+      });
+      setTransferOpen(false);
+      setTransferIdempotencyKey(crypto.randomUUID());
+      await load();
+      onChanged();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível registrar a transferência.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function reconcileAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!reconcileAccountId || busy) return;
+    const form = new FormData(event.currentTarget);
+    const statementBalanceCents = currencyCents(form.get("statementBalance"));
+    if (!Number.isSafeInteger(statementBalanceCents)) {
+      setError("Informe o saldo mostrado pelo banco ou caixa físico.");
+      return;
+    }
+    setBusy(`reconcile:${reconcileAccountId}`);
+    try {
+      await cashRequest("/api/cash/reconciliations", {
+        method: "POST",
+        body: JSON.stringify({
+          financialAccountId: reconcileAccountId,
+          reconciledOn: String(form.get("reconciledOn") ?? ""),
+          statementBalanceCents,
+          note: String(form.get("note") ?? "").trim() || undefined,
+        }),
+      });
+      setReconcileAccountId(null);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível conciliar a conta.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function changePeriodState(action: "close" | "reopen", reason = "") {
+    if (!payload || busy) return false;
+    setBusy("period-state");
+    try {
+      await cashRequest("/api/cash/periods", {
+        method: "POST",
+        body: JSON.stringify({
+          action,
+          periodStart: payload.period.start,
+          periodEnd: payload.period.end,
+          expectedVersion: payload.periodState.version || undefined,
+          ...(action === "close" ? { note: reason || undefined } : { reason }),
+        }),
+      });
+      await load();
+      return true;
+    } catch (reasonValue) {
+      setError(reasonValue instanceof Error ? reasonValue.message : "Não foi possível alterar o período.");
+      return false;
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function uploadReceipt(entry: CashEntry, file: File) {
+    if (busy) return;
+    setBusy(`receipt:${entry.id}`);
+    try {
+      const form = new FormData();
+      form.set("receipt", file);
+      const response = await fetch(`/api/cash/${entry.id}/receipt`, {
+        method: "POST",
+        body: form,
+        credentials: "same-origin",
+      });
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as
+          | { error?: { message?: string } }
+          | null;
+        throw new Error(result?.error?.message || "Não foi possível anexar o comprovante.");
+      }
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível anexar o comprovante.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function reportData() {
+    const params = new URLSearchParams({
+      month: anchorMonth,
+      status: "included",
+      export: "1",
+    });
+    if (accountFilter !== "all") params.set("accountId", accountFilter);
+    return cashRequest<CashPayload>(`/api/cash?${params.toString()}`);
+  }
+
+  async function exportReport(kind: "pdf" | "csv") {
+    if (busy) return;
+    setBusy(`report:${kind}`);
+    try {
+      const data = await reportData();
+      const accountName = financialAccounts.find((account) => account.id === accountFilter)?.name;
+      const report: CashReportData = {
+        period: data.period,
+        accountName,
+        totals: data.totals,
+        serviceStats: data.analytics.serviceStats,
+        expenseCategories: data.analytics.expenseCategories,
+        entries: data.entries,
+      };
+      if (kind === "pdf") {
+        downloadBlob(generateCashReportPdf(report), cashReportFilename(report, "pdf"));
+      } else {
+        const header = ["Data", "Tipo", "Descrição", "Categoria", "Conta", "Valor (R$)"];
+        const rows = report.entries.map((entry) => [
+          formatBrazilianDate(entry.occurredOn),
+          entry.direction === "inflow" ? "Entrada" : "Saída",
+          entry.description,
+          entry.category,
+          entry.financialAccountName ?? "",
+          `${entry.direction === "outflow" ? "-" : ""}${(entry.amountCents / 100).toFixed(2).replace(".", ",")}`,
+        ]);
+        const csv = [header, ...rows].map((row) => row.map(csvCell).join(";")).join("\r\n");
+        downloadBlob(
+          new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }),
+          cashReportFilename(report, "csv"),
+        );
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível gerar o relatório.");
+    } finally {
+      setBusy("");
+    }
+  }
+
   return (
     <div className="cash-page">
       <section className="panel cash-period-panel">
@@ -454,8 +763,30 @@ export function CashView({
               ? `${formatBrazilianDate(payload.period.start)} a ${formatBrazilianDate(payload.period.end)}`
               : "Carregando período…"}
           </p>
+          {payload && (
+            <span className={`cash-period-state ${payload.periodState.status}`}>
+              {payload.periodState.status === "closed" ? "Período fechado" : "Período aberto"}
+            </span>
+          )}
         </div>
         <div className="cash-period-actions" aria-label="Navegar entre períodos">
+          <label className="cash-account-scope">
+            <span>Conta</span>
+            <select
+              value={accountFilter}
+              onChange={(event) => {
+                setAccountFilter(event.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="all">Todas</option>
+              {financialAccounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             className="secondary-button"
             onClick={() => setAnchorMonth(shiftMonth(anchorMonth, -1))}
@@ -486,32 +817,51 @@ export function CashView({
         </div>
       )}
 
+      <nav className="cash-tabs" aria-label="Seções do Caixa">
+        {[
+          ["summary", "Resumo"],
+          ["entries", "Movimentações"],
+          ["accounts", "Contas"],
+        ].map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            className={tab === id ? "active" : ""}
+            aria-current={tab === id ? "page" : undefined}
+            onClick={() => setTab(id as CashTab)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {tab === "summary" && <>
       <section className="finance-summary cash-summary">
         <div>
-          <span>Entradas consideradas</span>
-          <strong>{formatCurrency(payload?.totals.inflowCents ?? 0)}</strong>
+          <span>Recebido no período</span>
+          <strong>{formatCurrency(payload?.totals.receivedCents ?? 0)}</strong>
         </div>
         <div>
-          <span>Saídas consideradas</span>
-          <strong>{formatCurrency(payload?.totals.outflowCents ?? 0)}</strong>
+          <span>Pago no período</span>
+          <strong>{formatCurrency(payload?.totals.paidCents ?? 0)}</strong>
         </div>
         <div>
-          <span>Saldo do período</span>
+          <span>Resultado do período</span>
           <strong
             className={
-              (payload?.totals.balanceCents ?? 0) < 0 ? "negative-value" : ""
+              (payload?.totals.resultCents ?? 0) < 0 ? "negative-value" : ""
             }
           >
-            {formatCurrency(payload?.totals.balanceCents ?? 0)}
+            {formatCurrency(payload?.totals.resultCents ?? 0)}
           </strong>
         </div>
-        <div>
-          <span>Em aberto hoje</span>
-          <strong>{formatCurrency(payload?.totals.receivableCents ?? 0)}</strong>
+        <button type="button" onClick={onOpenBilling} disabled={!onOpenBilling}>
+          <span>Vencido a receber</span>
+          <strong>{formatCurrency(payload?.totals.overdueReceivableCents ?? 0)}</strong>
           <small>
-            {payload?.totals.receivableCount ?? 0} faturas em aberto
+            {payload?.totals.overdueReceivableCount ?? 0} faturas vencidas · ver Cobranças
           </small>
-        </div>
+        </button>
       </section>
 
       <section className="panel cash-service-overview">
@@ -520,7 +870,10 @@ export function CashView({
             <p className="section-kicker">Receita recebida no período</p>
             <h2>Por serviço</h2>
           </div>
-          <small>Somente valores incluídos no Caixa</small>
+          <div className="heading-actions cash-report-actions">
+            <button className="secondary-button" type="button" onClick={() => void exportReport("pdf")} disabled={busy.startsWith("report:")}>PDF</button>
+            <button className="secondary-button" type="button" onClick={() => void exportReport("csv")} disabled={busy.startsWith("report:")}>CSV</button>
+          </div>
         </div>
         <div className="cash-service-grid">
           {(payload?.analytics.serviceStats ?? []).map((service) => (
@@ -561,9 +914,15 @@ export function CashView({
                 <strong>{formatCurrency(payload.analytics.automaticInflowCents)}</strong>
               </article>
               <article>
-                <span>Outras entradas e ajustes</span>
-                <strong>{formatCurrency(payload.analytics.otherInflowCents)}</strong>
+                <span>Entradas manuais operacionais</span>
+                <strong>{formatCurrency(payload.analytics.manualInflowCents)}</strong>
               </article>
+              {payload.analytics.unallocatedAutomaticCents !== 0 && (
+                <article className="attention">
+                  <span>Diferença a revisar</span>
+                  <strong>{formatCurrency(payload.analytics.unallocatedAutomaticCents)}</strong>
+                </article>
+              )}
             </div>
 
             <div className="cash-chart-grid">
@@ -574,8 +933,8 @@ export function CashView({
                 </div>
                 {(() => {
                   const values = [
-                    payload.totals.inflowCents,
-                    payload.totals.outflowCents,
+                    payload.totals.receivedCents,
+                    payload.totals.paidCents,
                     payload.analytics.previousTotals.inflowCents,
                     payload.analytics.previousTotals.outflowCents,
                   ];
@@ -585,8 +944,8 @@ export function CashView({
                       {[
                         [
                           "Período atual",
-                          payload.totals.inflowCents,
-                          payload.totals.outflowCents,
+                          payload.totals.receivedCents,
+                          payload.totals.paidCents,
                         ],
                         [
                           "Período anterior",
@@ -683,8 +1042,12 @@ export function CashView({
                 <dl>
                   <div><dt>Vendidos no período</dt><dd>{payload.analytics.credits.soldUnits}</dd></div>
                   <div><dt>Receita de vendas</dt><dd>{formatCurrency(payload.analytics.credits.soldCents)}</dd></div>
-                  <div><dt>Utilizados</dt><dd>{payload.analytics.credits.usedUnits}</dd></div>
-                  <div><dt>Disponíveis</dt><dd>{payload.analytics.credits.availableUnits}</dd></div>
+                  {payload.analytics.credits.byService.map((service) => (
+                    <div key={service.code}>
+                      <dt>{service.label}</dt>
+                      <dd>{service.usedUnits} usados · {service.availableUnits} disponíveis</dd>
+                    </div>
+                  ))}
                 </dl>
               </article>
               <article>
@@ -707,14 +1070,25 @@ export function CashView({
           </div>
         )}
       </details>
+      </>}
 
-      <section className="panel full-panel">
+      {tab === "entries" && <section className="panel full-panel">
         <div className="panel-heading cash-heading">
           <div>
             <p className="section-kicker">Movimentações</p>
             <h2>Entradas e saídas</h2>
           </div>
           <div className="heading-actions">
+            {financialAccounts.filter((account) => account.active).length > 1 && (
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setTransferOpen(true)}
+                disabled={payload?.periodState.status === "closed"}
+              >
+                Transferir
+              </button>
+            )}
             <button
               className="secondary-button"
               onClick={() => openNew("inflow")}
@@ -796,7 +1170,8 @@ export function CashView({
             </label>
             <label className="field">
               <span>Categoria</span>
-              <select
+              <input
+                list="cash-entry-categories"
                 value={draft.category}
                 onChange={(event) =>
                   setDraft((current) => ({
@@ -804,11 +1179,14 @@ export function CashView({
                     category: event.target.value,
                   }))
                 }
-              >
-                {categories.map((category) => (
-                  <option key={category}>{category}</option>
+                maxLength={60}
+                required
+              />
+              <datalist id="cash-entry-categories">
+                {[...new Set([...categories, ...(payload?.categories ?? [])])].map((category) => (
+                  <option key={category} value={category} />
                 ))}
-              </select>
+              </datalist>
             </label>
             <label className="field">
               <span>Conta</span>
@@ -822,6 +1200,7 @@ export function CashView({
                 }
                 required
               >
+                {!draft.financialAccountId && <option value="">Escolha a conta</option>}
                 {financialAccounts
                   .filter(
                     (account) =>
@@ -882,41 +1261,81 @@ export function CashView({
           </form>
         )}
 
-        <div className="filter-chips cash-filters" aria-label="Filtrar Caixa">
-          {[
-            ["all", "Todos"],
-            ["inflow", "Entradas"],
-            ["outflow", "Saídas"],
-            ["excluded", "Desconsiderados"],
-          ].map(([id, label]) => (
+        <form
+          className="cash-search"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setPage(1);
+            setAppliedSearch(searchDraft.trim());
+          }}
+        >
+          <input
+            type="search"
+            value={searchDraft}
+            onChange={(event) => setSearchDraft(event.target.value)}
+            placeholder="Buscar descrição, cliente ou fatura"
+            aria-label="Buscar movimentações"
+          />
+          <button className="secondary-button" type="submit">Buscar</button>
+          {appliedSearch && (
             <button
-              key={id}
-              className={filter === id ? "active" : ""}
-              onClick={() =>
-                setFilter(
-                  id as "all" | "inflow" | "outflow" | "excluded",
-                )
-              }
-              aria-pressed={filter === id}
+              className="text-button"
+              type="button"
+              onClick={() => {
+                setSearchDraft("");
+                setAppliedSearch("");
+                setPage(1);
+              }}
             >
-              {label}
+              Limpar
             </button>
-          ))}
+          )}
+        </form>
+        <div className="cash-filter-grid">
+          <label className="field">
+            <span>Tipo</span>
+            <select value={directionFilter} onChange={(event) => { setDirectionFilter(event.target.value as "all" | CashDirection); setPage(1); }}>
+              <option value="all">Entradas e saídas</option>
+              <option value="inflow">Entradas</option>
+              <option value="outflow">Saídas</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Situação</span>
+            <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as "included" | "excluded" | "all"); setPage(1); }}>
+              <option value="included">Considerados</option>
+              <option value="excluded">Desconsiderados</option>
+              <option value="all">Todos</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Origem</span>
+            <select value={originFilter} onChange={(event) => { setOriginFilter(event.target.value as "all" | "automatic" | "manual" | "transfer"); setPage(1); }}>
+              <option value="all">Todas as origens</option>
+              <option value="automatic">Faturas</option>
+              <option value="manual">Manuais</option>
+              <option value="transfer">Transferências</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Categoria</span>
+            <select value={categoryFilter} onChange={(event) => { setCategoryFilter(event.target.value); setPage(1); }}>
+              <option value="all">Todas as categorias</option>
+              {(payload?.categories ?? []).map((category) => <option key={category}>{category}</option>)}
+            </select>
+          </label>
+          <label className="field">
+            <span>Conta</span>
+            <select value={accountFilter} onChange={(event) => { setAccountFilter(event.target.value); setPage(1); }}>
+              <option value="all">Todas as contas</option>
+              {financialAccounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}{account.active ? "" : " · inativa"}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
-        <label className="cash-account-filter">
-          <span>Conta</span>
-          <select
-            value={accountFilter}
-            onChange={(event) => setAccountFilter(event.target.value)}
-          >
-            <option value="all">Todas as contas</option>
-            {financialAccounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.name}{account.active ? "" : " · inativa"}
-              </option>
-            ))}
-          </select>
-        </label>
         {!!payload?.totals.excludedCount && (
           <p className="cash-excluded-note">
             {payload.totals.excludedCount} lançamento(s) desconsiderado(s), preservado(s) no histórico.
@@ -953,8 +1372,10 @@ export function CashView({
                           <strong>{entry.description}</strong>
                           <small>
                             {entry.origin === "invoice_payment"
-                              ? `${entry.customerName ?? "Cliente"} · lançamento automático`
-                              : entry.note || "Lançamento manual"}
+                              ? `${entry.customerName ?? "Cliente"}${entry.invoiceNumber ? ` · ${entry.invoiceNumber}` : ""}`
+                              : entry.origin === "transfer"
+                                ? "Transferência entre contas"
+                                : entry.note || "Lançamento manual"}
                             {entry.financialAccountName
                               ? ` · ${entry.financialAccountName}`
                               : ""}
@@ -998,7 +1419,13 @@ export function CashView({
                             )}
                           <button
                             className="row-link"
-                            onClick={() => void changeStatus(entry)}
+                            onClick={() => setDetailsEntryId(entry.id)}
+                          >
+                            Detalhes
+                          </button>
+                          <button
+                            className="row-link"
+                            onClick={() => requestStatusChange(entry)}
                             disabled={busy === `status:${entry.id}`}
                           >
                             {entry.status === "included"
@@ -1051,7 +1478,13 @@ export function CashView({
                       )}
                     <button
                       className="text-button"
-                      onClick={() => void changeStatus(entry)}
+                      onClick={() => setDetailsEntryId(entry.id)}
+                    >
+                      Detalhes
+                    </button>
+                    <button
+                      className="text-button"
+                      onClick={() => requestStatusChange(entry)}
                     >
                       {entry.status === "included"
                         ? "Desconsiderar"
@@ -1061,6 +1494,29 @@ export function CashView({
                 </article>
               ))}
             </div>
+            {payload && payload.pagination.total > payload.pagination.pageSize && (
+              <nav className="cash-pagination" aria-label="Paginação das movimentações">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={page <= 1}
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                >
+                  Anteriores
+                </button>
+                <span>
+                  {Math.min((page - 1) * payload.pagination.pageSize + 1, payload.pagination.total)}–{Math.min(page * payload.pagination.pageSize, payload.pagination.total)} de {payload.pagination.total}
+                </span>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={!payload.pagination.hasMore}
+                  onClick={() => setPage((current) => current + 1)}
+                >
+                  Próximas
+                </button>
+              </nav>
+            )}
           </>
         ) : (
           <div className="empty-state cash-empty">
@@ -1071,100 +1527,135 @@ export function CashView({
             </p>
           </div>
         )}
-      </section>
+      </section>}
 
-      {canEditSettings && (
-        <details className="panel cash-settings">
-          <summary>Contas de recebimento</summary>
-          <div className="financial-account-list">
-            {financialAccounts.map((account) => (
-              <div key={account.id}>
-                <span>
-                  <strong>{account.name}</strong>
-                  <small>
-                    {account.institution || "Sem instituição informada"}
-                    {account.active ? "" : " · inativa"}
-                  </small>
-                </span>
-                <button
-                  type="button"
-                  className="text-button muted"
-                  disabled={busy === `financial-account:${account.id}`}
-                  onClick={() => void toggleFinancialAccount(account)}
-                >
-                  {account.active ? "Inativar" : "Reativar"}
-                </button>
-              </div>
-            ))}
+      {tab === "accounts" && (
+        <section className="panel full-panel cash-accounts-panel">
+          <div className="panel-heading cash-heading">
+            <div>
+              <p className="section-kicker">Conferência</p>
+              <h2>Contas e saldos</h2>
+            </div>
+            {canEditSettings && (
+              <button type="button" className="secondary-button" onClick={() => setNewAccountOpen((current) => !current)}>
+                {newAccountOpen ? "Cancelar" : "+ Nova conta"}
+              </button>
+            )}
           </div>
-          {newAccountOpen ? (
+
+          {newAccountOpen && canEditSettings && (
             <form className="cash-account-form" onSubmit={createFinancialAccount}>
-              <label className="field">
-                <span>Nome da conta</span>
-                <input name="name" placeholder="Ex.: Conta principal" maxLength={80} required />
-              </label>
-              <label className="field">
-                <span>Instituição (opcional)</span>
-                <input name="institution" maxLength={80} />
-              </label>
-              <label className="field">
-                <span>Tipo</span>
-                <select name="kind" defaultValue="checking">
-                  <option value="checking">Conta corrente</option>
-                  <option value="savings">Poupança</option>
-                  <option value="cash">Dinheiro em caixa</option>
-                  <option value="other">Outra</option>
-                </select>
-              </label>
-              <div className="cash-form-actions">
-                <button type="button" className="secondary-button" onClick={() => setNewAccountOpen(false)}>
-                  Cancelar
-                </button>
-                <button type="submit" className="primary-button" disabled={busy === "financial-account"}>
-                  Salvar conta
-                </button>
-              </div>
+              <label className="field"><span>Nome da conta</span><input name="name" placeholder="Ex.: Conta principal" maxLength={80} required /></label>
+              <label className="field"><span>Instituição (opcional)</span><input name="institution" maxLength={80} /></label>
+              <label className="field"><span>Tipo</span><select name="kind" defaultValue="checking"><option value="checking">Conta corrente</option><option value="savings">Poupança</option><option value="cash">Dinheiro em caixa</option><option value="other">Outra</option></select></label>
+              <label className="field"><span>Saldo inicial (opcional)</span><span className="currency-input"><span>R$</span><input name="openingBalance" inputMode="decimal" placeholder="0,00" /></span></label>
+              <label className="field"><span>Data do saldo inicial</span><BrazilianDateInput name="openingBalanceOn" max={referenceDate} /></label>
+              <div className="cash-form-actions"><button type="submit" className="primary-button" disabled={busy === "financial-account"}>Salvar conta</button></div>
             </form>
-          ) : (
-            <button type="button" className="secondary-button" onClick={() => setNewAccountOpen(true)}>
-              + Nova conta
-            </button>
           )}
-        </details>
+
+          <div className="cash-account-cards">
+            {financialAccounts.map((account) => {
+              const difference = account.lastReconciliationDifferenceCents;
+              return (
+                <article key={account.id} className={!account.active ? "inactive" : ""}>
+                  <header>
+                    <span><strong>{account.name}</strong><small>{account.institution || "Sem instituição"}{account.active ? "" : " · inativa"}</small></span>
+                    <strong>{account.calculatedBalanceCents == null ? "Saldo inicial pendente" : formatCurrency(account.calculatedBalanceCents)}</strong>
+                  </header>
+                  <dl>
+                    <div><dt>Saldo calculado até {payload ? formatBrazilianDate(payload.period.end) : "o fim do período"}</dt><dd>{account.calculatedBalanceCents == null ? "Defina o saldo inicial" : formatCurrency(account.calculatedBalanceCents)}</dd></div>
+                    <div><dt>Última conferência</dt><dd>{account.reconciledOn ? `${formatBrazilianDate(account.reconciledOn)} · ${formatCurrency(account.reconciledBalanceCents ?? 0)}` : "Ainda não realizada"}</dd></div>
+                    {difference !== null && <div className={difference === 0 ? "ok" : "attention"}><dt>Diferença na última conferência</dt><dd>{formatCurrency(difference)}</dd></div>}
+                    {!!account.scheduledSettlementCount && <div><dt>Recebimentos futuros vinculados</dt><dd>{account.scheduledSettlementCount}</dd></div>}
+                  </dl>
+                  {canEditSettings && (
+                    <div className="cash-account-actions">
+                      <button type="button" className="text-button" onClick={() => setReconcileAccountId(account.id)}>Conciliar</button>
+                      <button type="button" className="text-button" onClick={() => setConfigureAccountId(account.id)}>Saldo inicial</button>
+                      <button type="button" className="text-button muted" disabled={busy === `financial-account:${account.id}`} onClick={() => void toggleFinancialAccount(account)}>{account.active ? "Inativar" : "Reativar"}</button>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+
+          {canEditSettings && (
+            <div className="cash-admin-settings">
+              <form onSubmit={saveStartDay}>
+                <div><p className="section-kicker">Períodos</p><h3>Início do mês financeiro</h3><p>Ex.: dia 5 cria períodos do dia 5 ao dia 4 seguinte.</p></div>
+                <label className="field"><span>Primeiro dia</span><select name="monthStartDay" defaultValue={payload?.monthStartDay ?? 1} key={payload?.monthStartDay ?? 1}>{Array.from({ length: 28 }, (_, index) => index + 1).map((day) => <option key={day} value={day}>Dia {day}</option>)}</select></label>
+                <button className="secondary-button" type="submit" disabled={busy === "settings"}>Salvar</button>
+              </form>
+              <div className="cash-period-control">
+                <div><p className="section-kicker">Segurança</p><h3>{payload?.periodState.status === "closed" ? "Período fechado" : "Fechar este período"}</h3><p>{payload?.periodState.status === "closed" ? "Movimentações passadas estão protegidas contra alterações." : "Use depois de conferir as contas. É possível reabrir com justificativa."}</p></div>
+                <button type="button" className={payload?.periodState.status === "closed" ? "secondary-button" : "primary-button"} onClick={() => setPeriodAction(payload?.periodState.status === "closed" ? "reopen" : "close")} disabled={!payload || busy === "period-state" || (payload.periodState.status === "open" && payload.period.end > referenceDate)}>{payload?.periodState.status === "closed" ? "Reabrir período" : payload && payload.period.end > referenceDate ? "Disponível após o período" : "Fechar período"}</button>
+              </div>
+            </div>
+          )}
+        </section>
       )}
 
-      {canEditSettings && <details className="panel cash-settings">
-        <summary>Configurar início do mês financeiro</summary>
-        <form onSubmit={saveStartDay}>
-          <label className="field">
-            <span>Primeiro dia do período</span>
-            <select
-              name="monthStartDay"
-              defaultValue={payload?.monthStartDay ?? 1}
-              key={payload?.monthStartDay ?? 1}
-            >
-              {Array.from({ length: 28 }, (_, index) => index + 1).map(
-                (day) => (
-                  <option key={day} value={day}>
-                    Dia {day}
-                  </option>
-                ),
-              )}
-            </select>
-          </label>
-          <p>
-            Se escolher dia 5, cada período vai do dia 5 ao dia 4 do mês
-            seguinte.
-          </p>
-          <button
-            className="primary-button"
-            type="submit"
-            disabled={busy === "settings"}
-          >
-            {busy === "settings" ? "Salvando…" : "Salvar configuração"}
-          </button>
-        </form>
-      </details>}
+      {transferOpen && (
+        <div className="dialog-backdrop" role="presentation">
+          <form className="dialog-card dialog-small" onSubmit={createTransfer} role="dialog" aria-modal="true" aria-labelledby="cash-transfer-title">
+            <div className="dialog-header"><div><p className="section-kicker">Entre contas</p><h2 id="cash-transfer-title">Registrar transferência</h2></div><button type="button" className="dialog-close" onClick={() => setTransferOpen(false)}>×</button></div>
+            <div className="dialog-content cash-dialog-fields">
+              <label className="field"><span>Conta de origem</span><select name="fromFinancialAccountId" required defaultValue=""><option value="" disabled>Escolha</option>{financialAccounts.filter((account) => account.active).map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
+              <label className="field"><span>Conta de destino</span><select name="toFinancialAccountId" required defaultValue=""><option value="" disabled>Escolha</option>{financialAccounts.filter((account) => account.active).map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
+              <label className="field"><span>Data</span><BrazilianDateInput name="occurredOn" defaultValue={referenceDate} required /></label>
+              <label className="field"><span>Valor</span><span className="currency-input"><span>R$</span><input name="amount" inputMode="decimal" required /></span></label>
+              <label className="field"><span>Descrição (opcional)</span><input name="description" maxLength={160} placeholder="Transferência entre contas" /></label>
+              <label className="field"><span>Observação (opcional)</span><textarea name="note" maxLength={500} /></label>
+            </div>
+            <div className="dialog-actions full"><button type="button" className="secondary-button" onClick={() => setTransferOpen(false)}>Cancelar</button><button type="submit" className="primary-button" disabled={busy === "transfer"}>Registrar</button></div>
+          </form>
+        </div>
+      )}
+
+      {entryAction && (
+        <div className="dialog-backdrop" role="presentation">
+          <form className="dialog-card dialog-small" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void changeStatus(entryAction.entry, String(form.get("reason") ?? "")); }} role="dialog" aria-modal="true" aria-labelledby="cash-action-title">
+            <div className="dialog-header"><div><p className="section-kicker">Histórico preservado</p><h2 id="cash-action-title">{entryAction.action === "exclude" ? "Desconsiderar lançamento" : "Restaurar lançamento"}</h2></div><button type="button" className="dialog-close" onClick={() => setEntryAction(null)}>×</button></div>
+            <div className="dialog-content"><p><strong>{entryAction.entry.description}</strong> · {formatCurrency(entryAction.entry.amountCents)}</p>{entryAction.action === "exclude" ? <label className="field"><span>Motivo</span><textarea name="reason" required maxLength={300} autoFocus /></label> : <p>O lançamento voltará a fazer parte dos totais.</p>}</div>
+            <div className="dialog-actions full"><button type="button" className="secondary-button" onClick={() => setEntryAction(null)}>Cancelar</button><button type="submit" className="primary-button" disabled={busy.startsWith("status:")}>{entryAction.action === "exclude" ? "Desconsiderar" : "Restaurar"}</button></div>
+          </form>
+        </div>
+      )}
+
+      {detailsEntryId && (() => {
+        const entry = entries.find((item) => item.id === detailsEntryId);
+        if (!entry) return null;
+        return (
+          <div className="dialog-backdrop" role="presentation">
+            <div className="dialog-card dialog-small" role="dialog" aria-modal="true" aria-labelledby="cash-details-title">
+              <div className="dialog-header"><div><p className="section-kicker">Movimentação</p><h2 id="cash-details-title">Detalhes</h2></div><button type="button" className="dialog-close" onClick={() => setDetailsEntryId(null)}>×</button></div>
+              <div className="dialog-content cash-entry-details">
+                <dl><div><dt>Descrição</dt><dd>{entry.description}</dd></div><div><dt>Data</dt><dd>{formatBrazilianDate(entry.occurredOn)}</dd></div><div><dt>Valor</dt><dd>{formatCurrency(entry.amountCents)}</dd></div><div><dt>Categoria</dt><dd>{entry.category}</dd></div><div><dt>Conta</dt><dd>{entry.financialAccountName || "Não informada"}</dd></div><div><dt>Origem</dt><dd>{entry.origin === "invoice_payment" ? `Fatura ${entry.invoiceNumber ?? ""}` : entry.origin === "transfer" ? "Transferência interna" : "Lançamento manual"}</dd></div>{entry.note && <div><dt>Observação</dt><dd>{entry.note}</dd></div>}{entry.exclusionReason && <div><dt>Motivo da exclusão</dt><dd>{entry.exclusionReason}</dd></div>}<div><dt>Registrado por</dt><dd>{entry.createdByName || "Sistema"}</dd></div></dl>
+                <div className="cash-receipt-row"><span><strong>Comprovante</strong><small>{entry.receiptName || "Nenhum arquivo anexado"}</small></span>{entry.receiptUrl ? <a className="secondary-button" href={entry.receiptUrl} target="_blank" rel="noreferrer">Abrir</a> : <label className="secondary-button cash-file-button">Anexar<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadReceipt(entry, file); }} /></label>}</div>
+              </div>
+              <div className="dialog-actions full"><button type="button" className="secondary-button" onClick={() => setDetailsEntryId(null)}>Fechar</button></div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {reconcileAccountId && (() => {
+        const account = financialAccounts.find((item) => item.id === reconcileAccountId);
+        if (!account) return null;
+        return <div className="dialog-backdrop" role="presentation"><form className="dialog-card dialog-small" onSubmit={reconcileAccount} role="dialog" aria-modal="true"><div className="dialog-header"><div><p className="section-kicker">Conciliação</p><h2>Conferir {account.name}</h2></div><button type="button" className="dialog-close" onClick={() => setReconcileAccountId(null)}>×</button></div><div className="dialog-content cash-dialog-fields"><p>Saldo calculado: <strong>{account.calculatedBalanceCents == null ? "defina primeiro o saldo inicial" : formatCurrency(account.calculatedBalanceCents)}</strong></p><label className="field"><span>Data da conferência</span><BrazilianDateInput name="reconciledOn" defaultValue={payload && payload.period.end < referenceDate ? payload.period.end : referenceDate} required /></label><label className="field"><span>Saldo no banco ou caixa físico</span><span className="currency-input"><span>R$</span><input name="statementBalance" inputMode="decimal" required autoFocus /></span></label><label className="field"><span>Observação (opcional)</span><textarea name="note" maxLength={500} /></label></div><div className="dialog-actions full"><button type="button" className="secondary-button" onClick={() => setReconcileAccountId(null)}>Cancelar</button><button type="submit" className="primary-button" disabled={busy.startsWith("reconcile:") || account.calculatedBalanceCents == null}>Salvar conferência</button></div></form></div>;
+      })()}
+
+      {configureAccountId && (() => {
+        const account = financialAccounts.find((item) => item.id === configureAccountId);
+        if (!account) return null;
+        return <div className="dialog-backdrop" role="presentation"><form className="dialog-card dialog-small" onSubmit={configureFinancialAccount} role="dialog" aria-modal="true"><div className="dialog-header"><div><p className="section-kicker">Base do cálculo</p><h2>Saldo inicial</h2></div><button type="button" className="dialog-close" onClick={() => setConfigureAccountId(null)}>×</button></div><div className="dialog-content cash-dialog-fields"><p>Informe o saldo no começo da data escolhida. As movimentações desse dia em diante serão somadas a ele.</p><label className="field"><span>Saldo inicial</span><span className="currency-input"><span>R$</span><input name="openingBalance" inputMode="decimal" defaultValue={account.openingBalanceCents == null ? "" : (account.openingBalanceCents / 100).toFixed(2).replace(".", ",")} required /></span></label><label className="field"><span>Data de referência</span><BrazilianDateInput name="openingBalanceOn" defaultValue={account.openingBalanceOn ?? referenceDate} max={referenceDate} required /></label></div><div className="dialog-actions full"><button type="button" className="secondary-button" onClick={() => setConfigureAccountId(null)}>Cancelar</button><button type="submit" className="primary-button" disabled={busy.startsWith("configure:")}>Salvar</button></div></form></div>;
+      })()}
+
+      {periodAction && payload && (
+        <div className="dialog-backdrop" role="presentation"><form className="dialog-card dialog-small" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); const reason = String(form.get("reason") ?? "").trim(); if (periodAction === "reopen" && !reason) { setError("Informe o motivo da reabertura."); return; } void changePeriodState(periodAction, reason).then((success) => { if (success) setPeriodAction(null); }); }} role="dialog" aria-modal="true"><div className="dialog-header"><div><p className="section-kicker">{formatBrazilianDate(payload.period.start)} a {formatBrazilianDate(payload.period.end)}</p><h2>{periodAction === "close" ? "Fechar período" : "Reabrir período"}</h2></div><button type="button" className="dialog-close" onClick={() => setPeriodAction(null)}>×</button></div><div className="dialog-content"><p>{periodAction === "close" ? "Depois do fechamento, lançamentos e pagamentos desse período ficam protegidos. Confira as contas antes de continuar." : "A reabertura permite alterar o período novamente e ficará registrada no histórico."}</p><label className="field"><span>{periodAction === "close" ? "Observação (opcional)" : "Motivo da reabertura"}</span><textarea name="reason" required={periodAction === "reopen"} maxLength={500} /></label></div><div className="dialog-actions full"><button type="button" className="secondary-button" onClick={() => setPeriodAction(null)}>Cancelar</button><button type="submit" className="primary-button" disabled={busy === "period-state"}>{periodAction === "close" ? "Confirmar fechamento" : "Confirmar reabertura"}</button></div></form></div>
+      )}
     </div>
   );
 }

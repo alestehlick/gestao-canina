@@ -2830,8 +2830,8 @@ h3 {
   gap: 7px;
 }
 
-.cash-period-actions .secondary-button:first-child,
-.cash-period-actions .secondary-button:last-child {
+.cash-period-actions .secondary-button:first-of-type,
+.cash-period-actions .secondary-button:last-of-type {
   width: 44px;
   padding: 0;
   font-size: 1.25rem;
@@ -7331,6 +7331,186 @@ h3 {
 
 .cash-account-form label { display: grid; gap: 5px; }
 
+.cash-tabs {
+  display: flex;
+  gap: 4px;
+  width: fit-content;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  padding: 4px;
+}
+
+.cash-tabs button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 16px;
+  font-weight: 720;
+}
+
+.cash-tabs button.active {
+  background: var(--forest);
+  color: #fff;
+}
+
+.cash-period-state {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 8px;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 0.68rem;
+  font-weight: 760;
+}
+
+.cash-period-state.open { background: #e7f1ec; color: #235f49; }
+.cash-period-state.closed { background: #eee9df; color: #625c50; }
+
+.cash-account-scope {
+  display: grid;
+  gap: 2px;
+  margin-right: 5px;
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+.cash-account-scope select {
+  min-width: 130px;
+  min-height: 36px;
+  padding: 5px 28px 5px 9px;
+}
+
+.cash-report-actions .secondary-button { min-width: 64px; }
+
+.cash-search {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.cash-search input { min-width: 0; flex: 1; }
+
+.cash-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.cash-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.cash-account-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.cash-account-cards article {
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-small);
+  background: var(--surface-muted);
+  padding: 16px;
+}
+
+.cash-account-cards article.inactive { opacity: 0.62; }
+
+.cash-account-cards header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.cash-account-cards header > span { display: grid; gap: 2px; }
+.cash-account-cards header small { color: var(--muted); font-size: 0.68rem; }
+.cash-account-cards header > strong { white-space: nowrap; font-size: 1.08rem; }
+
+.cash-account-cards dl,
+.cash-entry-details dl {
+  display: grid;
+  margin: 14px 0 0;
+}
+
+.cash-account-cards dl > div,
+.cash-entry-details dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  border-top: 1px solid var(--line-soft);
+  padding: 8px 0;
+  font-size: 0.7rem;
+}
+
+.cash-account-cards dt,
+.cash-entry-details dt { color: var(--muted); }
+.cash-account-cards dd,
+.cash-entry-details dd { margin: 0; font-weight: 700; text-align: right; overflow-wrap: anywhere; }
+.cash-account-cards .attention dd { color: var(--danger); }
+.cash-account-cards .ok dd { color: var(--success); }
+
+.cash-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  border-top: 1px solid var(--line-soft);
+  margin-top: 8px;
+  padding-top: 10px;
+}
+
+.cash-admin-settings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.cash-admin-settings > form,
+.cash-period-control {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-small);
+  padding: 16px;
+}
+
+.cash-admin-settings h3 { margin: 2px 0 4px; font-size: 0.95rem; }
+.cash-admin-settings p:not(.section-kicker) { color: var(--muted); font-size: 0.68rem; }
+.cash-admin-settings .field { grid-column: 1; }
+
+.cash-dialog-fields { display: grid; gap: 12px; }
+.cash-dialog-fields textarea { min-height: 82px; }
+
+.cash-receipt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--line-soft);
+  margin-top: 12px;
+  padding-top: 14px;
+}
+
+.cash-receipt-row > span { display: grid; gap: 2px; }
+.cash-receipt-row small { color: var(--muted); font-size: 0.68rem; }
+.cash-file-button { position: relative; overflow: hidden; cursor: pointer; }
+.cash-file-button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
 @media (max-width: 760px) {
   .billing-utility-actions,
   .day-heading {
@@ -7350,6 +7530,39 @@ h3 {
   .quick-choice-group label { border-radius: 10px; }
 
   .cash-account-form { grid-template-columns: 1fr; }
+
+  .cash-period-panel { align-items: stretch; }
+
+  .cash-period-actions {
+    display: grid;
+    grid-template-columns: 44px 1fr 44px;
+    width: 100%;
+  }
+
+  .cash-account-scope { grid-column: 1 / -1; margin: 0; }
+  .cash-account-scope select { width: 100%; }
+
+  .cash-tabs { width: 100%; }
+  .cash-tabs button { flex: 1; padding: 0 8px; }
+
+  .cash-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cash-filter-grid .field:last-child { grid-column: 1 / -1; }
+
+  .cash-search { flex-wrap: wrap; }
+  .cash-search input { flex-basis: 100%; }
+
+  .cash-account-cards,
+  .cash-admin-settings { grid-template-columns: 1fr; }
+
+  .cash-admin-settings > form,
+  .cash-period-control { grid-template-columns: 1fr; align-items: stretch; }
+
+  .cash-account-cards header { align-items: flex-start; }
+  .cash-account-cards dl > div { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .cash-account-cards dd { text-align: left; }
+
+  .cash-pagination { justify-content: space-between; }
+  .cash-pagination span { text-align: center; }
 
   .cash-account-filter { align-items: stretch; flex-direction: column; }
 

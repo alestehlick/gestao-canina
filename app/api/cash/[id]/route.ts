@@ -1,7 +1,8 @@
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
+import { getD1Database, getDb } from "@/db";
 import { auditEvents, cashEntries, financialAccounts } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
+import { assertCashDateIsOpen, isIsoDate, todayInSaoPaulo } from "@/lib/server/cash";
 import {
   assertSameOrigin,
   errorResponse,
@@ -13,17 +14,7 @@ import {
   requiredString,
 } from "@/lib/server/http";
 
-const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const directions = new Set(["inflow", "outflow"]);
-
-function validIsoDate(value: string) {
-  if (!datePattern.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  return (
-    !Number.isNaN(parsed.valueOf()) &&
-    parsed.toISOString().slice(0, 10) === value
-  );
-}
 
 export async function PATCH(
   request: Request,
@@ -36,6 +27,7 @@ export async function PATCH(
     const { id } = await context.params;
     const body = await readJsonObject(request);
     const action = requiredString(body, "action", 20);
+    const expectedVersion = requiredInteger(body, "expectedVersion", { min: 1 });
     const establishmentId = identity.establishmentId!;
     const db = getDb();
     const [entry] = await db
@@ -55,87 +47,82 @@ export async function PATCH(
         "O lançamento não foi encontrado.",
       );
     }
+    if (entry.transferId) {
+      throw new HttpError(
+        409,
+        "cash_transfer_locked",
+        "Altere esta movimentação pela transferência original para manter as duas contas consistentes.",
+      );
+    }
+    await assertCashDateIsOpen(establishmentId, entry.occurredOn);
 
     if (action === "exclude") {
       if (entry.status === "excluded") {
-        return json({ entry: { id, status: "excluded" }, idempotent: true });
+        return json({ entry: { id, status: "excluded", version: entry.version }, idempotent: true });
       }
       const reason = requiredString(body, "reason", 240);
-      await db.batch([
-        db
-          .update(cashEntries)
-          .set({
-            status: "excluded",
-            exclusionReason: reason,
-            excludedByUserId: identity.userId,
-            excludedAt: new Date().toISOString(),
-            updatedByUserId: identity.userId,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(
-            and(
-              eq(cashEntries.id, id),
-              eq(cashEntries.establishmentId, establishmentId),
-            ),
-          ),
-        db.insert(auditEvents).values({
-          id: crypto.randomUUID(),
-          establishmentId,
-          actorUserId: identity.userId,
-          actorRole: identity.role,
-          action: "cash.entry_excluded",
-          entityType: "cash_entry",
-          entityId: id,
-          requestId,
-          reason,
-          result: "success",
-          metadataJson: JSON.stringify({
-            origin: entry.origin,
-            amountCents: entry.amountCents,
-          }),
-        }),
+      const now = new Date().toISOString();
+      const results = await getD1Database().batch([
+        getD1Database().prepare(
+          `UPDATE cash_entries SET status = 'excluded', exclusion_reason = ?,
+            excluded_by_user_id = ?, excluded_at = ?, updated_by_user_id = ?,
+            updated_at = ?, version = version + 1
+           WHERE id = ? AND establishment_id = ? AND status = 'included' AND version = ?`,
+        ).bind(reason, identity.userId, now, identity.userId, now, id, establishmentId, expectedVersion),
+        getD1Database().prepare(
+          `INSERT INTO audit_events (
+            id, establishment_id, actor_user_id, actor_role, action, entity_type,
+            entity_id, request_id, reason, result, metadata_json, occurred_at
+           ) SELECT ?, ?, ?, ?, 'cash.entry_excluded', 'cash_entry', ?, ?, ?, 'success', ?, ?
+           WHERE EXISTS (
+             SELECT 1 FROM cash_entries WHERE id = ? AND establishment_id = ?
+               AND status = 'excluded' AND version = ? AND updated_at = ?
+           )`,
+        ).bind(
+          crypto.randomUUID(), establishmentId, identity.userId, identity.role,
+          id, requestId, reason,
+          JSON.stringify({ origin: entry.origin, amountCents: entry.amountCents }),
+          now, id, establishmentId, expectedVersion + 1, now,
+        ),
       ]);
-      return json({ entry: { id, status: "excluded" } });
+      if ((results[0].meta.changes ?? 0) !== 1 || (results[1].meta.changes ?? 0) !== 1) {
+        throw new HttpError(409, "cash_entry_conflict", "O lançamento foi alterado. Atualize o Caixa e tente novamente.");
+      }
+      return json({ entry: { id, status: "excluded", version: expectedVersion + 1 } });
     }
 
     if (action === "restore") {
       if (entry.status === "included") {
-        return json({ entry: { id, status: "included" }, idempotent: true });
+        return json({ entry: { id, status: "included", version: entry.version }, idempotent: true });
       }
-      await db.batch([
-        db
-          .update(cashEntries)
-          .set({
-            status: "included",
-            exclusionReason: null,
-            excludedByUserId: null,
-            excludedAt: null,
-            updatedByUserId: identity.userId,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(
-            and(
-              eq(cashEntries.id, id),
-              eq(cashEntries.establishmentId, establishmentId),
-            ),
-          ),
-        db.insert(auditEvents).values({
-          id: crypto.randomUUID(),
-          establishmentId,
-          actorUserId: identity.userId,
-          actorRole: identity.role,
-          action: "cash.entry_restored",
-          entityType: "cash_entry",
-          entityId: id,
-          requestId,
-          result: "success",
-          metadataJson: JSON.stringify({
-            origin: entry.origin,
-            amountCents: entry.amountCents,
-          }),
-        }),
+      const now = new Date().toISOString();
+      const results = await getD1Database().batch([
+        getD1Database().prepare(
+          `UPDATE cash_entries SET status = 'included', exclusion_reason = NULL,
+            excluded_by_user_id = NULL, excluded_at = NULL, updated_by_user_id = ?,
+            updated_at = ?, version = version + 1
+           WHERE id = ? AND establishment_id = ? AND status = 'excluded' AND version = ?`,
+        ).bind(identity.userId, now, id, establishmentId, expectedVersion),
+        getD1Database().prepare(
+          `INSERT INTO audit_events (
+            id, establishment_id, actor_user_id, actor_role, action, entity_type,
+            entity_id, request_id, result, metadata_json, occurred_at
+           ) SELECT ?, ?, ?, ?, 'cash.entry_restored', 'cash_entry', ?, ?, 'success', ?, ?
+           WHERE EXISTS (
+             SELECT 1 FROM cash_entries WHERE id = ? AND establishment_id = ?
+               AND status = 'included' AND version = ? AND updated_at = ?
+           )`,
+        ).bind(
+          crypto.randomUUID(), establishmentId, identity.userId, identity.role,
+          id, requestId,
+          JSON.stringify({ origin: entry.origin, amountCents: entry.amountCents }),
+          now, id, establishmentId, expectedVersion + 1, now,
+        ),
       ]);
-      return json({ entry: { id, status: "included" } });
+      if ((results[0].meta.changes ?? 0) !== 1 || (results[1].meta.changes ?? 0) !== 1) {
+        throw new HttpError(409, "cash_entry_conflict", "O lançamento foi alterado. Atualize o Caixa e tente novamente.");
+      }
+      return json({ entry: { id, status: "included", version: expectedVersion + 1 } });
     }
 
     if (action !== "update") {
@@ -162,12 +149,15 @@ export async function PATCH(
       );
     }
     const occurredOn = requiredString(body, "occurredOn", 10);
-    if (!validIsoDate(occurredOn)) {
+    if (!isIsoDate(occurredOn) || occurredOn > todayInSaoPaulo()) {
       throw new HttpError(
         400,
         "invalid_cash_date",
-        "A data do lançamento é inválida.",
+        "A data do lançamento deve ser válida e não pode estar no futuro.",
       );
+    }
+    if (occurredOn !== entry.occurredOn) {
+      await assertCashDateIsOpen(establishmentId, occurredOn);
     }
     const amountCents = requiredInteger(body, "amountCents", {
       min: 1,
@@ -195,10 +185,9 @@ export async function PATCH(
     }
     const now = new Date().toISOString();
 
-    await db.batch([
-      db
-        .update(cashEntries)
-        .set({
+    const result = await db
+      .update(cashEntries)
+      .set({
           direction: direction as "inflow" | "outflow",
           occurredOn,
           amountCents,
@@ -208,14 +197,19 @@ export async function PATCH(
           financialAccountId,
           updatedByUserId: identity.userId,
           updatedAt: now,
+          version: expectedVersion + 1,
         })
         .where(
           and(
             eq(cashEntries.id, id),
             eq(cashEntries.establishmentId, establishmentId),
+            eq(cashEntries.version, expectedVersion),
           ),
-        ),
-      db.insert(auditEvents).values({
+        );
+    if ((result.meta.changes ?? 0) !== 1) {
+      throw new HttpError(409, "cash_entry_conflict", "O lançamento foi alterado. Atualize o Caixa e tente novamente.");
+    }
+    await db.insert(auditEvents).values({
         id: crypto.randomUUID(),
         establishmentId,
         actorUserId: identity.userId,
@@ -234,10 +228,9 @@ export async function PATCH(
           },
           after: { direction, occurredOn, amountCents, category, financialAccountId, financialAccountName: financialAccount.name },
         }),
-      }),
-    ]);
+      });
 
-    return json({ entry: { id, status: entry.status } });
+    return json({ entry: { id, status: entry.status, version: expectedVersion + 1 } });
   } catch (error) {
     return errorResponse(error, requestId);
   }

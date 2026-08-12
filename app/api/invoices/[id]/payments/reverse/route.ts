@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { getD1Database, getDb } from "@/db";
 import { invoicePayments, invoices } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
+import { assertCashDateIsOpen } from "@/lib/server/cash";
 import {
   assertSameOrigin,
   errorResponse,
@@ -80,6 +81,7 @@ export async function POST(
         "A situação da fatura mudou. Atualize a página e tente novamente.",
       );
     }
+    await assertCashDateIsOpen(establishmentId, payment.paidAt.slice(0, 10));
 
     const d1 = getD1Database();
     const creditPurchaseResult = await d1

@@ -5095,6 +5095,7 @@ export function ManagementApp() {
               canEditSettings={signedInRole === "owner"}
               referenceDate={operationalToday}
               onChanged={() => void refreshWorkspace()}
+              onOpenBilling={() => setView("billing")}
             />
           )}
           {view === "activity" && (

@@ -141,3 +141,23 @@ export function requiredInteger(
   }
   return value;
 }
+
+export function optionalInteger(
+  body: Record<string, unknown>,
+  key: string,
+  options: { min?: number; max?: number } = {},
+) {
+  const value = body[key];
+  if (value === undefined || value === null || value === "") return null;
+  const min = options.min ?? Number.MIN_SAFE_INTEGER;
+  const max = options.max ?? Number.MAX_SAFE_INTEGER;
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < min ||
+    value > max
+  ) {
+    throw new HttpError(400, "invalid_field", `O campo ${key} é inválido.`);
+  }
+  return value;
+}

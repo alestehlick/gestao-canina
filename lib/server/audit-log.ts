@@ -65,6 +65,15 @@ export async function loadAuditLog(
           WHEN ae.entity_type = 'cash_entry' THEN (
             SELECT ce.description FROM cash_entries ce WHERE ce.id = ae.entity_id
           )
+          WHEN ae.entity_type = 'cash_transfer' THEN (
+            SELECT ct.description FROM cash_transfers ct WHERE ct.id = ae.entity_id
+          )
+          WHEN ae.entity_type = 'financial_account' THEN (
+            SELECT fa.name FROM financial_accounts fa WHERE fa.id = ae.entity_id
+          )
+          WHEN ae.entity_type = 'cash_period' THEN (
+            SELECT cp.period_start || ' a ' || cp.period_end FROM cash_periods cp WHERE cp.id = ae.entity_id
+          )
           WHEN ae.entity_type = 'service_catalog' THEN (
             SELECT sc.name FROM service_catalog sc WHERE sc.id = ae.entity_id
           )
@@ -114,6 +123,12 @@ export async function loadAuditLog(
           WHEN ae.entity_type = 'cash_entry' THEN (
             SELECT ce.occurred_on FROM cash_entries ce WHERE ce.id = ae.entity_id
           )
+          WHEN ae.entity_type = 'cash_transfer' THEN (
+            SELECT ct.occurred_on FROM cash_transfers ct WHERE ct.id = ae.entity_id
+          )
+          WHEN ae.entity_type = 'cash_period' THEN (
+            SELECT cp.period_end FROM cash_periods cp WHERE cp.id = ae.entity_id
+          )
           WHEN ae.entity_type = 'credit_movement' THEN (
             SELECT substr(cm.occurred_at, 1, 10) FROM credit_movements cm WHERE cm.id = ae.entity_id
           )
@@ -131,6 +146,9 @@ export async function loadAuditLog(
           )
           WHEN ae.entity_type = 'cash_entry' THEN (
             SELECT ce.amount_cents FROM cash_entries ce WHERE ce.id = ae.entity_id
+          )
+          WHEN ae.entity_type = 'cash_transfer' THEN (
+            SELECT ct.amount_cents FROM cash_transfers ct WHERE ct.id = ae.entity_id
           )
           ELSE NULL
         END AS amountCents,

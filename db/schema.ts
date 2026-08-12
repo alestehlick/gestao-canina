@@ -166,6 +166,15 @@ export const financialAccounts = sqliteTable(
       .default("checking"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     displayOrder: integer("display_order").notNull().default(0),
+    openingBalanceCents: integer("opening_balance_cents"),
+    openingBalanceOn: text("opening_balance_on"),
+    reconciledBalanceCents: integer("reconciled_balance_cents"),
+    reconciledOn: text("reconciled_on"),
+    reconciledAt: text("reconciled_at"),
+    reconciledByUserId: text("reconciled_by_user_id").references(
+      () => appUsers.id,
+      { onDelete: "set null" },
+    ),
     createdByUserId: text("created_by_user_id").references(() => appUsers.id, {
       onDelete: "set null",
     }),
@@ -1220,6 +1229,127 @@ export const invoiceMergeMembers = sqliteTable(
   ],
 );
 
+export const cashTransfers = sqliteTable(
+  "cash_transfers",
+  {
+    id: text("id").primaryKey(),
+    establishmentId: text("establishment_id")
+      .notNull()
+      .references(() => establishments.id, { onDelete: "restrict" }),
+    fromFinancialAccountId: text("from_financial_account_id")
+      .notNull()
+      .references(() => financialAccounts.id, { onDelete: "restrict" }),
+    toFinancialAccountId: text("to_financial_account_id")
+      .notNull()
+      .references(() => financialAccounts.id, { onDelete: "restrict" }),
+    occurredOn: text("occurred_on").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    description: text("description").notNull(),
+    note: text("note"),
+    status: text("status", { enum: ["included", "excluded"] })
+      .notNull()
+      .default("included"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    exclusionReason: text("exclusion_reason"),
+    createdByUserId: text("created_by_user_id").references(() => appUsers.id, {
+      onDelete: "set null",
+    }),
+    excludedByUserId: text("excluded_by_user_id").references(
+      () => appUsers.id,
+      { onDelete: "set null" },
+    ),
+    excludedAt: text("excluded_at"),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+    version: integer("version").notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex("cash_transfers_establishment_idempotency_unique").on(
+      table.establishmentId,
+      table.idempotencyKey,
+    ),
+    index("cash_transfers_establishment_date_idx").on(
+      table.establishmentId,
+      table.occurredOn,
+    ),
+    check("cash_transfers_amount_positive", sql`${table.amountCents} > 0`),
+    check(
+      "cash_transfers_accounts_distinct",
+      sql`${table.fromFinancialAccountId} <> ${table.toFinancialAccountId}`,
+    ),
+  ],
+);
+
+export const cashReconciliations = sqliteTable(
+  "cash_reconciliations",
+  {
+    id: text("id").primaryKey(),
+    establishmentId: text("establishment_id")
+      .notNull()
+      .references(() => establishments.id, { onDelete: "restrict" }),
+    financialAccountId: text("financial_account_id")
+      .notNull()
+      .references(() => financialAccounts.id, { onDelete: "restrict" }),
+    reconciledOn: text("reconciled_on").notNull(),
+    statementBalanceCents: integer("statement_balance_cents").notNull(),
+    systemBalanceCents: integer("system_balance_cents").notNull(),
+    differenceCents: integer("difference_cents").notNull(),
+    note: text("note"),
+    createdByUserId: text("created_by_user_id").references(() => appUsers.id, {
+      onDelete: "set null",
+    }),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (table) => [
+    index("cash_reconciliations_account_date_idx").on(
+      table.financialAccountId,
+      table.reconciledOn,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const cashPeriods = sqliteTable(
+  "cash_periods",
+  {
+    id: text("id").primaryKey(),
+    establishmentId: text("establishment_id")
+      .notNull()
+      .references(() => establishments.id, { onDelete: "restrict" }),
+    periodStart: text("period_start").notNull(),
+    periodEnd: text("period_end").notNull(),
+    status: text("status", { enum: ["open", "closed"] })
+      .notNull()
+      .default("closed"),
+    closeNote: text("close_note"),
+    closedByUserId: text("closed_by_user_id").references(() => appUsers.id, {
+      onDelete: "set null",
+    }),
+    closedAt: text("closed_at"),
+    reopenedByUserId: text("reopened_by_user_id").references(() => appUsers.id, {
+      onDelete: "set null",
+    }),
+    reopenedAt: text("reopened_at"),
+    reopenReason: text("reopen_reason"),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+    version: integer("version").notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex("cash_periods_establishment_range_unique").on(
+      table.establishmentId,
+      table.periodStart,
+      table.periodEnd,
+    ),
+    index("cash_periods_establishment_status_idx").on(
+      table.establishmentId,
+      table.status,
+      table.periodStart,
+      table.periodEnd,
+    ),
+  ],
+);
+
 export const cashEntries = sqliteTable(
   "cash_entries",
   {
@@ -1235,6 +1365,10 @@ export const cashEntries = sqliteTable(
       () => invoicePayments.id,
       { onDelete: "restrict" },
     ),
+    transferId: text("transfer_id").references(() => cashTransfers.id, {
+      onDelete: "restrict",
+    }),
+    idempotencyKey: text("idempotency_key"),
     financialAccountId: text("financial_account_id").references(
       () => financialAccounts.id,
       { onDelete: "restrict" },
@@ -1261,6 +1395,7 @@ export const cashEntries = sqliteTable(
     excludedAt: text("excluded_at"),
     createdAt: text("created_at").notNull().default(now),
     updatedAt: text("updated_at").notNull().default(now),
+    version: integer("version").notNull().default(1),
   },
   (table) => [
     uniqueIndex("cash_entries_source_payment_unique").on(
@@ -1279,6 +1414,11 @@ export const cashEntries = sqliteTable(
       table.financialAccountId,
       table.occurredOn,
     ),
+    uniqueIndex("cash_entries_establishment_idempotency_unique").on(
+      table.establishmentId,
+      table.idempotencyKey,
+    ),
+    index("cash_entries_transfer_idx").on(table.transferId),
     check("cash_entries_amount_positive", sql`${table.amountCents} > 0`),
     check(
       "cash_entries_source_valid",
@@ -1302,7 +1442,7 @@ export const privateFiles = sqliteTable(
       onDelete: "set null",
     }),
     ownerType: text("owner_type", {
-      enum: ["dog", "account", "appointment", "invoice"],
+      enum: ["dog", "account", "appointment", "invoice", "cash_entry"],
     }).notNull(),
     ownerId: text("owner_id").notNull(),
     objectKey: text("object_key").notNull(),

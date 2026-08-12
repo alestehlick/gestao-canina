@@ -91,6 +91,10 @@ test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () =
     cashView,
     app,
     migration,
+    integrityMigration,
+    transfers,
+    periods,
+    reconciliations,
   ] = await Promise.all([
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/cash/route.ts", import.meta.url), "utf8"),
@@ -119,6 +123,10 @@ test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () =
       new URL("../drizzle/0007_cash_ledger.sql", import.meta.url),
       "utf8",
     ),
+    readFile(new URL("../drizzle/0020_cash_integrity.sql", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/cash/transfers/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/cash/periods/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/cash/reconciliations/route.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(schema, /sqliteTable\(\s*"cash_entries"/);
@@ -126,7 +134,7 @@ test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () =
   assert.match(schema, /cash_entries_source_payment_unique/);
   assert.match(cashRoute, /requireIdentity\(request, \["owner", "finance"\]\)/);
   assert.match(cashRoute, /financialAccountId/);
-  assert.match(cashRoute, /between\(cashEntries\.occurredOn/);
+  assert.match(cashRoute, /ce\.occurred_on BETWEEN \? AND \?/);
   assert.match(cashEntryRoute, /automatic_cash_entry_locked/);
   assert.match(cashEntryRoute, /cash\.entry_excluded/);
   assert.match(cashEntryRoute, /cash\.entry_restored/);
@@ -148,7 +156,7 @@ test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () =
   assert.match(paymentQuery, /orderBy\(desc\(invoicePayments\.createdAt\)\)/);
   assert.match(workspace, /orderBy\(desc\(creditPurchases\.updatedAt\)\)/);
   assert.match(workspace, /lodgingDailyRateCents/);
-  assert.match(cashView, /Entradas consideradas/);
+  assert.match(cashView, /Recebido no período/);
   assert.match(cashRoute, /credit_sold_cents/);
   assert.match(cashRoute, /ce\.status = 'included'/);
   assert.match(cashRoute, /ce\.occurred_on BETWEEN \? AND \?/);
@@ -159,13 +167,21 @@ test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () =
   assert.match(cashView, /Avulsos recebidos:/);
   assert.match(cashView, /Resultado acumulado do período/);
   assert.match(cashView, /Desconsiderar/);
-  assert.match(cashView, /Configurar início do mês financeiro/);
+  assert.match(cashView, /Início do mês financeiro/);
   assert.match(schema, /sqliteTable\(\s*"invoice_settlements"/);
   assert.match(payments, /settlementMode/);
   assert.match(payments, /invoice\.settlement_scheduled/);
   assert.match(workspace, /compensationAvailableOn/);
   assert.match(app, /Fora do Caixa · restaurar/);
   assert.match(migration, /FROM `invoice_payments` ip/);
+  assert.match(integrityMigration, /CREATE TABLE `cash_transfers`/);
+  assert.match(integrityMigration, /CREATE TABLE `cash_reconciliations`/);
+  assert.match(integrityMigration, /CREATE TABLE `cash_periods`/);
+  assert.match(transfers, /idempotencyKey/);
+  assert.match(transfers, /Transferência interna/);
+  assert.match(periods, /cash\.period_closed/);
+  assert.match(periods, /expectedVersion/);
+  assert.match(reconciliations, /differenceCents/);
 });
 
 test("mantém perfis e navegação móveis enxutos e completos", async () => {

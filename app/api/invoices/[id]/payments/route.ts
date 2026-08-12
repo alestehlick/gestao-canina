@@ -9,6 +9,7 @@ import {
   invoiceSettlements,
 } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
+import { assertCashDateIsOpen } from "@/lib/server/cash";
 import {
   assertSameOrigin,
   errorResponse,
@@ -257,6 +258,8 @@ export async function POST(
         settlement: { id: settlementId, availableOn, status: "scheduled" },
       });
     }
+
+    await assertCashDateIsOpen(establishmentId, paidAt.slice(0, 10));
 
     if (settlementMode === "confirm_scheduled" && !scheduledSettlement) {
       throw new HttpError(

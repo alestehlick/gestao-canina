@@ -144,6 +144,14 @@ export async function GET(request: Request) {
         "Consulte um período de até 94 dias.",
       );
     }
+    const recentBillingTimestamp = `${addDays(defaultFrom, -29)}T00:00:00.000Z`;
+    const initialInvoiceScope = or(
+      inArray(invoices.status, ["draft", "issued"]),
+      and(
+        inArray(invoices.status, ["paid", "void"]),
+        gte(invoices.updatedAt, recentBillingTimestamp),
+      ),
+    );
 
     const [
       services,
@@ -304,9 +312,14 @@ export async function GET(request: Request) {
       db
         .select()
         .from(invoices)
-        .where(eq(invoices.establishmentId, establishmentId))
+        .where(
+          and(
+            eq(invoices.establishmentId, establishmentId),
+            initialInvoiceScope,
+          ),
+        )
         .orderBy(desc(invoices.updatedAt))
-        .limit(1_000),
+        .limit(500),
       db
         .select({
           id: invoiceItems.id,
@@ -347,9 +360,14 @@ export async function GET(request: Request) {
           serviceCatalog,
           eq(serviceCatalog.id, appointmentItems.serviceCatalogId),
         )
-        .where(eq(invoices.establishmentId, establishmentId))
+        .where(
+          and(
+            eq(invoices.establishmentId, establishmentId),
+            initialInvoiceScope,
+          ),
+        )
         .orderBy(desc(invoices.createdAt), asc(invoiceItems.serviceDateSnapshot))
-        .limit(5_000),
+        .limit(2_500),
       db
         .select({
           mergedInvoiceId: invoiceMerges.mergedInvoiceId,
@@ -383,10 +401,11 @@ export async function GET(request: Request) {
           and(
             eq(invoicePayments.establishmentId, establishmentId),
             eq(invoicePayments.status, "active"),
+            gte(invoicePayments.paidAt, recentBillingTimestamp),
           ),
         )
         .orderBy(desc(invoicePayments.createdAt))
-        .limit(2_000),
+        .limit(1_000),
       db
         .select({
           invoiceId: invoiceSettlements.invoiceId,

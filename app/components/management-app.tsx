@@ -53,11 +53,14 @@ import {
 import {
   isReadyWorkspacePayload,
   mapWorkspaceActivities,
+  mapWorkspaceInvoices,
   toWorkspaceServiceCode,
   transformWorkspacePayload,
   type WorkspaceOnboardingPayload,
   type WorkspacePayload,
   type WorkspaceReadyPayload,
+  type WorkspaceCreditPurchase,
+  type WorkspaceInvoice,
   type WorkspaceService,
 } from "@/lib/workspace-data";
 import {
@@ -158,13 +161,14 @@ function regularBillingAmountCents(service: BillableService) {
   return service.amountCents;
 }
 
-type BillingTab = "invoice" | "credits" | "receipts";
+type BillingTab = "pending" | "history" | "credits";
 type InvoiceListStatus =
   | "all"
   | "paid"
   | "overdue"
   | "pending"
-  | "compensation";
+  | "compensation"
+  | "void";
 type InvoiceListSort = "priority" | "customer" | "dueDate";
 type AgendaServiceFilter =
   | "all"
@@ -1036,7 +1040,7 @@ export function ManagementApp() {
   const [invoiceState, setInvoiceState] = useState<InvoiceState | null>(null);
   const [regularBillingService, setRegularBillingService] =
     useState<BillableService | null>(null);
-  const [billingTab, setBillingTab] = useState<BillingTab>("invoice");
+  const [billingTab, setBillingTab] = useState<BillingTab>("pending");
   const [creditCustomerId, setCreditCustomerId] = useState<string>("");
   const [creditAdjustmentCustomerId, setCreditAdjustmentCustomerId] =
     useState<string>("");
@@ -3537,6 +3541,56 @@ export function ManagementApp() {
     }
   }
 
+  async function loadInvoiceHistory(from: string, to: string) {
+    if (runtimeMode !== "ready" || !workspacePayload) {
+      return invoices.filter((invoice) => {
+        const date = invoice.paidAt ?? invoice.voidedAt ?? invoice.issuedAt;
+        return (
+          (invoice.status === "paid" || invoice.status === "void") &&
+          Boolean(date && date >= from && date <= to)
+        );
+      });
+    }
+    try {
+      const response = await requestJson<{
+        invoices: WorkspaceInvoice[];
+        creditPurchases: WorkspaceCreditPurchase[];
+      }>(`/api/billing/history?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+      const purchases = new Map(
+        workspacePayload.billing.creditPurchases.map((purchase) => [purchase.id, purchase]),
+      );
+      for (const purchase of response.creditPurchases) purchases.set(purchase.id, purchase);
+      const mappedInvoices = mapWorkspaceInvoices(
+        {
+          ...workspacePayload,
+          billing: {
+            ...workspacePayload.billing,
+            invoices: response.invoices,
+            creditPurchases: [...purchases.values()],
+          },
+        },
+        operationalToday,
+        { includeVoided: true },
+      );
+      setInvoices((current) => {
+        const loadedIds = new Set(mappedInvoices.map((invoice) => invoice.id));
+        return [
+          ...mappedInvoices,
+          ...current.filter((invoice) => !loadedIds.has(invoice.id)),
+        ];
+      });
+      return mappedInvoices;
+    } catch (error) {
+      setToast({
+        message:
+          error instanceof Error
+            ? error.message
+            : "Não foi possível consultar o histórico de faturas.",
+      });
+      return null;
+    }
+  }
+
   async function markInvoiceDelivered(
     invoiceId: string,
     channel: "whatsapp" | "email",
@@ -3605,33 +3659,52 @@ export function ManagementApp() {
     return true;
   }
 
-  async function saveInvoiceNote(invoiceId: string, note: string) {
+  async function saveInvoiceNote(
+    invoiceId: string,
+    note: string,
+    followUpOn?: string,
+  ) {
     const internalNote = note.trim() || undefined;
+    const savedFollowUpOn = followUpOn || undefined;
     if (runtimeMode === "ready") {
       const result = await runLiveAction(
         `invoice-note:${invoiceId}`,
         () =>
-          requestJson<{ invoice: { id: string; internalNote: string | null } }>(
+          requestJson<{ invoice: { id: string; internalNote: string | null; followUpOn: string | null } }>(
             `/api/invoices/${invoiceId}/note`,
             {
               method: "PUT",
-              body: JSON.stringify({ note: internalNote ?? "" }),
+              body: JSON.stringify({
+                note: internalNote ?? "",
+                followUpOn: savedFollowUpOn ?? "",
+              }),
             },
           ),
         { refresh: false },
       );
       if (!result) return false;
       const savedNote = result.invoice.internalNote ?? undefined;
+      const confirmedFollowUpOn = result.invoice.followUpOn ?? undefined;
       setInvoices((items) =>
         items.map((item) =>
-          item.id === invoiceId ? { ...item, internalNote: savedNote } : item,
+          item.id === invoiceId
+            ? {
+                ...item,
+                internalNote: savedNote,
+                followUpOn: confirmedFollowUpOn,
+              }
+            : item,
         ),
       );
       setInvoiceState((state) =>
         state?.invoice?.id === invoiceId
           ? {
               ...state,
-              invoice: { ...state.invoice, internalNote: savedNote },
+              invoice: {
+                ...state.invoice,
+                internalNote: savedNote,
+                followUpOn: confirmedFollowUpOn,
+              },
             }
           : state,
       );
@@ -3640,12 +3713,21 @@ export function ManagementApp() {
 
     setInvoices((items) =>
       items.map((item) =>
-        item.id === invoiceId ? { ...item, internalNote } : item,
+        item.id === invoiceId
+          ? { ...item, internalNote, followUpOn: savedFollowUpOn }
+          : item,
       ),
     );
     setInvoiceState((state) =>
       state?.invoice?.id === invoiceId
-        ? { ...state, invoice: { ...state.invoice, internalNote } }
+        ? {
+            ...state,
+            invoice: {
+              ...state.invoice,
+              internalNote,
+              followUpOn: savedFollowUpOn,
+            },
+          }
         : state,
     );
     return true;
@@ -4247,6 +4329,20 @@ export function ManagementApp() {
         },
       );
       if (!result) return false;
+      setInvoices((current) =>
+        current.map((invoice) =>
+          invoice.id === invoiceId
+            ? {
+                ...invoice,
+                status: "pending",
+                paidAt: undefined,
+                due: "Pagamento estornado",
+                cashEntryId: undefined,
+                cashIncluded: undefined,
+              }
+            : invoice,
+        ),
+      );
     } else {
       setInvoices((current) =>
         current.map((invoice) =>
@@ -4620,7 +4716,17 @@ export function ManagementApp() {
   })();
   const pendingBillingCount =
     billableServices.length +
-    invoices.filter((invoice) => invoice.status !== "paid").length;
+    invoices.filter(
+      (invoice) =>
+        invoice.status === "overdue" ||
+        Boolean(
+          invoice.compensationAvailableOn &&
+            invoice.compensationAvailableOn < operationalToday,
+        ) ||
+        Boolean(
+          invoice.followUpOn && invoice.followUpOn <= operationalToday,
+        ),
+    ).length;
   const signedInName =
     workspacePayload?.identity.displayName || "Administração";
   const signedInRole = workspacePayload?.identity.role ?? "owner";
@@ -4863,7 +4969,15 @@ export function ManagementApp() {
                   ? () => setDialog("quickService")
                   : undefined
               }
-              invoice={invoices.find((item) => item.status !== "paid")}
+              invoice={invoices.find(
+                (item) => item.status !== "paid" && item.status !== "void",
+              )}
+              billingReminders={invoices.filter(
+                (item) =>
+                  item.status !== "paid" &&
+                  item.status !== "void" &&
+                  item.followUpOn === operationalToday,
+              )}
             />
           )}
           {view === "requests" && <CustomerRequestsView />}
@@ -4972,13 +5086,8 @@ export function ManagementApp() {
               onMergeInvoices={mergeInvoices}
               onReverseInvoiceMerge={reverseInvoiceMerge}
               onStatement={() => openStatement()}
+              onLoadHistory={loadInvoiceHistory}
               mergeBusy={busyAction === "merge-invoices"}
-              receivedLast30DaysCents={
-                workspacePayload?.billing.receivedLast30DaysCents
-              }
-              receivedLast30DaysCount={
-                workspacePayload?.billing.receivedLast30DaysCount
-              }
             />
           )}
           {view === "cash" && ["owner", "finance"].includes(signedInRole) && (
@@ -6803,6 +6912,7 @@ function TodayView({
   onSaveDogFeeding,
   onQuickService,
   invoice,
+  billingReminders,
 }: {
   bookings: Booking[];
   dogs: Dog[];
@@ -6834,6 +6944,7 @@ function TodayView({
   onSaveDogFeeding: (dogId: string, feedingNotes: string) => Promise<boolean>;
   onQuickService?: () => void;
   invoice?: Invoice;
+  billingReminders: Invoice[];
 }) {
   const [feedingEditorDogId, setFeedingEditorDogId] = useState<string | null>(null);
   const [feedingDraft, setFeedingDraft] = useState("");
@@ -7087,6 +7198,31 @@ function TodayView({
               {overlookedBookings.length > 6 && (
                 <small className="compact-help">Mais {overlookedBookings.length - 6} atendimentos aguardam revisão.</small>
               )}
+            </section>
+          )}
+
+          {isToday && billingReminders.length > 0 && (
+            <section className="panel compact-panel billing-reminder-panel">
+              <div className="panel-heading">
+                <div>
+                  <p className="section-kicker">Cobrar hoje</p>
+                  <h2>Lembretes de cobrança</h2>
+                </div>
+                <span className="attention-count">{billingReminders.length}</span>
+              </div>
+              <div className="overdue-reminder-list">
+                {billingReminders.slice(0, 6).map((reminder) => (
+                  <div key={reminder.id}>
+                    <span>
+                      <strong>{reminder.customerName}</strong>
+                      <small>{reminder.internalNote || reminder.items}</small>
+                    </span>
+                    <button className="text-button" onClick={() => onOpenInvoice(reminder)}>
+                      Abrir
+                    </button>
+                  </div>
+                ))}
+              </div>
             </section>
           )}
 
@@ -8689,9 +8825,8 @@ function BillingView({
   onMergeInvoices,
   onReverseInvoiceMerge,
   onStatement,
+  onLoadHistory,
   mergeBusy,
-  receivedLast30DaysCents,
-  receivedLast30DaysCount,
 }: {
   invoices: Invoice[];
   billableServices: BillableService[];
@@ -8710,18 +8845,25 @@ function BillingView({
   onAddCredits: (customerId?: string) => void;
   onOpenReceipt: (receipt: ServiceReceipt) => void;
   onToggleCash: (invoice: Invoice) => void;
-  onSaveNote: (invoiceId: string, note: string) => Promise<boolean>;
+  onSaveNote: (
+    invoiceId: string,
+    note: string,
+    followUpOn?: string,
+  ) => Promise<boolean>;
   onMergeInvoices: (invoiceIds: string[], dueDate: string) => Promise<boolean>;
   onReverseInvoiceMerge: (invoice: Invoice) => boolean | Promise<boolean>;
   onStatement: () => void;
+  onLoadHistory: (from: string, to: string) => Promise<Invoice[] | null>;
   mergeBusy: boolean;
-  receivedLast30DaysCents?: number;
-  receivedLast30DaysCount?: number;
 }) {
   const [noteEditorInvoiceId, setNoteEditorInvoiceId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
+  const [followUpDraft, setFollowUpDraft] = useState("");
   const [noteSaving, setNoteSaving] = useState(false);
-  const defaultInvoiceFrom = shiftDate(operationalToday, -6);
+  const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [historyInvoices, setHistoryInvoices] = useState<Invoice[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const defaultInvoiceFrom = shiftDate(operationalToday, -29);
   const [invoicePeriodOpen, setInvoicePeriodOpen] = useState(false);
   const [invoicePeriodFrom, setInvoicePeriodFrom] = useState(defaultInvoiceFrom);
   const [invoicePeriodTo, setInvoicePeriodTo] = useState(operationalToday);
@@ -8739,42 +8881,37 @@ function BillingView({
   const [mergeDueDate, setMergeDueDate] = useState(operationalToday);
   const [creditSearch, setCreditSearch] = useState("");
   const [showZeroCreditAccounts, setShowZeroCreditAccounts] = useState(false);
+  const synchronizedHistoryInvoices = historyInvoices.map(
+    (historyInvoice) =>
+      invoices.find((invoice) => invoice.id === historyInvoice.id) ??
+      historyInvoice,
+  );
   const selectedTotal = billableServices
     .filter((item) => selectedBillables.includes(item.id))
     .reduce((total, item) => total + item.amountCents, 0);
-  const compensationInvoices = invoices.filter(
-    (invoice) => Boolean(invoice.compensationAvailableOn),
+  const openInvoices = invoices.filter(
+    (invoice) =>
+      invoice.status !== "paid" && invoice.status !== "void",
+  );
+  const compensationInvoices = openInvoices.filter((invoice) =>
+    Boolean(invoice.compensationAvailableOn),
   );
   const compensationTotal = compensationInvoices.reduce(
     (total, invoice) => total + invoice.amountCents,
     0,
   );
-  const pendingInvoices = invoices.filter(
-    (invoice) =>
-      invoice.status !== "paid" && !invoice.compensationAvailableOn,
+  const pendingInvoices = openInvoices.filter(
+    (invoice) => !invoice.compensationAvailableOn,
   );
-  const pendingTotal = pendingInvoices
-    .reduce((total, invoice) => total + invoice.amountCents, 0);
-  const openInvoiceCount = pendingInvoices.length;
-  const paidWindowStart = shiftDate(operationalToday, -29);
-  const paidInvoices = invoices.filter(
-    (invoice) =>
-      invoice.status === "paid" &&
-      Boolean(
-        invoice.paidAt &&
-          invoice.paidAt >= paidWindowStart &&
-          invoice.paidAt <= operationalToday,
-      ),
+  const overdueInvoices = pendingInvoices.filter(
+    (invoice) => invoice.status === "overdue",
   );
-  const recordedPaidTotal = paidInvoices.reduce(
-    (total, invoice) => total + invoice.amountCents,
-    0,
+  const awaitingInvoices = pendingInvoices.filter(
+    (invoice) => invoice.status !== "overdue",
   );
-  const receivedTotal = receivedLast30DaysCents ?? recordedPaidTotal;
-  const receivedCount = receivedLast30DaysCount ?? paidInvoices.length;
-  const customersWithCredits = customers.filter(
-    (customer) => totalCredits(creditBalances, customer.id) > 0,
-  ).length;
+  const lateCompensations = compensationInvoices.filter(
+    (invoice) => invoice.compensationAvailableOn! < operationalToday,
+  );
   const filteredCreditCustomers = customers.filter((customer) => {
     const matchesSearch = normalize(customer.name).includes(
       normalize(creditSearch),
@@ -8785,9 +8922,6 @@ function BillingView({
         totalCredits(creditBalances, customer.id) > 0)
     );
   });
-  const awaitingPackages = creditPurchases.filter(
-    (purchase) => purchase.status === "awaiting_payment",
-  ).length;
   const renewalCandidates = customers.flatMap((customer) =>
     creditServiceTypes.flatMap((serviceType) => {
       const hasBought = creditPurchases.some(
@@ -8805,25 +8939,36 @@ function BillingView({
     left.customer.name.localeCompare(right.customer.name, "pt-BR", { sensitivity: "base" }),
   );
   const invoiceStatus = (invoice: Invoice): Exclude<InvoiceListStatus, "all"> => {
+    if (invoice.status === "void") return "void";
     if (invoice.status === "paid") return "paid";
     if (invoice.compensationAvailableOn) return "compensation";
     if (invoice.status === "overdue") return "overdue";
     return "pending";
   };
-  const displayedInvoices = invoices
+  const invoiceMatchesSearch = (invoice: Invoice) => {
+    const query = normalize(invoiceSearch);
+    if (!query) return true;
+    return normalize(
+      `${invoice.customerName} ${invoice.number} ${invoice.items} ${invoice.lines
+        .map((line) => `${line.dogName} ${line.service}`)
+        .join(" ")}`,
+    ).includes(query);
+  };
+  const displayedInvoices = (tab === "history" ? synchronizedHistoryInvoices : openInvoices)
     .filter((invoice) => {
-      if (invoice.status !== "paid") return true;
+      if (tab !== "history") return true;
+      if (invoice.status !== "paid" && invoice.status !== "void") return false;
       const entryDate =
-        invoice.paidAt ??
-        invoice.issuedAt ??
-        invoice.periodEnd ??
-        invoice.periodStart;
-      return (
-        Boolean(entryDate) &&
-        entryDate! >= appliedInvoiceFrom &&
-        entryDate! <= appliedInvoiceTo
+        invoice.status === "paid"
+          ? invoice.paidAt ?? invoice.issuedAt
+          : invoice.voidedAt ?? invoice.issuedAt;
+      return Boolean(
+        entryDate &&
+          entryDate >= appliedInvoiceFrom &&
+          entryDate <= appliedInvoiceTo,
       );
     })
+    .filter(invoiceMatchesSearch)
     .filter(
       (invoice) =>
         invoiceStatusFilter === "all" ||
@@ -8850,6 +8995,22 @@ function BillingView({
           left.number.localeCompare(right.number)
         );
       }
+      const priority = (invoice: Invoice) => {
+        if (
+          invoice.compensationAvailableOn &&
+          invoice.compensationAvailableOn < operationalToday
+        ) return 0;
+        if (invoice.status === "overdue") return 1;
+        if (invoice.followUpOn && invoice.followUpOn <= operationalToday) return 2;
+        if (invoice.dueDate === operationalToday) return 3;
+        if (!invoice.sentBy?.length) return 4;
+        if (invoice.compensationAvailableOn) return 5;
+        if (invoice.status === "pending") return 6;
+        if (invoice.status === "paid") return 7;
+        return 8;
+      };
+      const priorityDifference = priority(left) - priority(right);
+      if (priorityDifference) return priorityDifference;
       const leftPaid = left.status === "paid";
       const rightPaid = right.status === "paid";
       if (leftPaid !== rightPaid) return leftPaid ? 1 : -1;
@@ -8879,20 +9040,42 @@ function BillingView({
     (total, invoice) => total + invoice.amountCents,
     0,
   );
+  const mergeHasDifferentDueDates = new Set(
+    selectedMergeInvoices.map((invoice) => invoice.dueDate),
+  ).size > 1;
+  const mergeHasLodgingMilestones = selectedMergeInvoices.some(
+    (invoice) =>
+      invoice.sourceType === "lodging_deposit" ||
+      invoice.sourceType === "lodging_balance",
+  );
   const bulkMergeGroups = Object.values(
     invoices.filter((invoice) =>
       invoice.status !== "paid" &&
+      invoice.status !== "void" &&
       !invoice.compensationAvailableOn &&
-      invoice.lines.length > 0,
+      invoice.lines.length > 0 &&
+      invoice.sourceType !== "lodging_deposit" &&
+      invoice.sourceType !== "lodging_balance",
     ).reduce<Record<string, Invoice[]>>((groups, invoice) => {
       (groups[invoice.customerId] ??= []).push(invoice);
       return groups;
     }, {}),
   ).filter((group) => group.length >= 2);
+  const billablesByCustomer = Object.values(
+    billableServices.reduce<Record<string, BillableService[]>>((groups, service) => {
+      (groups[service.customerId] ??= []).push(service);
+      return groups;
+    }, {}),
+  ).sort((left, right) =>
+    left[0].customerName.localeCompare(right[0].customerName, "pt-BR", {
+      sensitivity: "base",
+    }),
+  );
 
   function invoiceCanBeMerged(invoice: Invoice) {
     return (
       invoice.status !== "paid" &&
+      invoice.status !== "void" &&
       !invoice.compensationAvailableOn &&
       invoice.lines.length > 0
     );
@@ -8920,8 +9103,7 @@ function BillingView({
     setMergeDueDate(
       selectedMergeInvoices
         .map((invoice) => invoice.dueDate ?? operationalToday)
-        .sort()
-        .at(-1) ?? operationalToday,
+        .sort()[0] ?? operationalToday,
     );
     setMergeDialogOpen(true);
   }
@@ -8944,8 +9126,7 @@ function BillingView({
       );
       const dueDate = group
         .map((invoice) => invoice.dueDate ?? operationalToday)
-        .sort()
-        .at(-1) ?? operationalToday;
+        .sort()[0] ?? operationalToday;
       const merged = await onMergeInvoices(group.map((invoice) => invoice.id), dueDate);
       if (!merged) {
         setBulkMergeProgress("Operação interrompida com segurança; os demais clientes não foram alterados.");
@@ -8957,7 +9138,17 @@ function BillingView({
     setSelectedMergeInvoiceIds([]);
   }
 
-  function applyInvoicePeriod(event: FormEvent<HTMLFormElement>) {
+  async function loadHistoryPeriod(from: string, to: string) {
+    if (historyLoading) return false;
+    setHistoryLoading(true);
+    const loaded = await onLoadHistory(from, to);
+    setHistoryLoading(false);
+    if (!loaded) return false;
+    setHistoryInvoices(loaded);
+    return true;
+  }
+
+  async function applyInvoicePeriod(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (
       !invoicePeriodFrom ||
@@ -8966,13 +9157,14 @@ function BillingView({
     ) {
       return;
     }
+    if (!(await loadHistoryPeriod(invoicePeriodFrom, invoicePeriodTo))) return;
     setAppliedInvoiceFrom(invoicePeriodFrom);
     setAppliedInvoiceTo(invoicePeriodTo);
     setSelectedMergeInvoiceIds([]);
     setInvoicePeriodOpen(false);
   }
 
-  function resetInvoicePeriod() {
+  async function resetInvoicePeriod() {
     setInvoicePeriodFrom(defaultInvoiceFrom);
     setInvoicePeriodTo(operationalToday);
     setAppliedInvoiceFrom(defaultInvoiceFrom);
@@ -8980,60 +9172,99 @@ function BillingView({
     setSelectedMergeInvoiceIds([]);
     setMergeSelectionMode(false);
     setInvoicePeriodOpen(false);
+    await loadHistoryPeriod(defaultInvoiceFrom, operationalToday);
   }
 
   function openInvoiceNote(invoice: Invoice) {
     setNoteEditorInvoiceId(invoice.id);
     setNoteDraft(invoice.internalNote ?? "");
+    setFollowUpDraft(invoice.followUpOn ?? "");
   }
 
   async function saveInvoiceNote(invoiceId: string) {
     if (noteSaving) return;
     setNoteSaving(true);
-    const saved = await onSaveNote(invoiceId, noteDraft);
+    const saved = await onSaveNote(invoiceId, noteDraft, followUpDraft);
     setNoteSaving(false);
-    if (saved) setNoteEditorInvoiceId(null);
+    if (saved) {
+      setHistoryInvoices((current) =>
+        current.map((invoice) =>
+          invoice.id === invoiceId
+            ? {
+                ...invoice,
+                internalNote: noteDraft.trim() || undefined,
+                followUpOn: followUpDraft || undefined,
+              }
+            : invoice,
+        ),
+      );
+      setNoteEditorInvoiceId(null);
+    }
+  }
+
+  function toggleCashFromList(invoice: Invoice) {
+    setHistoryInvoices((current) =>
+      current.map((item) =>
+        item.id === invoice.id
+          ? { ...item, cashIncluded: invoice.cashIncluded === false }
+          : item,
+      ),
+    );
+    onToggleCash(invoice);
   }
 
   return (
     <div className="billing-page">
       <section className="finance-summary">
-        <div>
-          <span>A receber</span>
-          <strong>{formatCurrency(pendingTotal)}</strong>
-          <small>
-            {openInvoiceCount}{" "}
-            {openInvoiceCount === 1 ? "cobrança aberta" : "cobranças abertas"}
-            {compensationTotal > 0 &&
-              ` · ${formatCurrency(compensationTotal)} em compensação`}
-          </small>
-        </div>
-        <div>
-          <span>Recebido · últimos 30 dias</span>
-          <strong>{formatCurrency(receivedTotal)}</strong>
-          <small>
-            {receivedCount}{" "}
-            {receivedCount === 1 ? "pagamento" : "pagamentos"} no período
-          </small>
-        </div>
-        <div>
-          <span>Serviços a cobrar</span>
+        <button
+          type="button"
+          onClick={() => {
+            onTabChange("pending");
+            setInvoiceStatusFilter("all");
+          }}
+        >
+          <span>A faturar</span>
           <strong>{billableServices.length}</strong>
+          <small>serviços concluídos aguardando decisão</small>
+        </button>
+        <button
+          type="button"
+          className={overdueInvoices.length ? "attention" : ""}
+          onClick={() => {
+            onTabChange("pending");
+            setInvoiceStatusFilter("overdue");
+          }}
+        >
+          <span>Vencidas</span>
+          <strong>{overdueInvoices.length}</strong>
+          <small>{formatCurrency(overdueInvoices.reduce((sum, invoice) => sum + invoice.amountCents, 0))}</small>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            onTabChange("pending");
+            setInvoiceStatusFilter("pending");
+          }}
+        >
+          <span>Aguardando pagamento</span>
+          <strong>{awaitingInvoices.length}</strong>
+          <small>{formatCurrency(awaitingInvoices.reduce((sum, invoice) => sum + invoice.amountCents, 0))}</small>
+        </button>
+        <button
+          type="button"
+          className={lateCompensations.length ? "attention" : ""}
+          onClick={() => {
+            onTabChange("pending");
+            setInvoiceStatusFilter("compensation");
+          }}
+        >
+          <span>Em compensação</span>
+          <strong>{compensationInvoices.length}</strong>
           <small>
-            {formatCurrency(
-              billableServices.reduce(
-                (total, service) => total + service.amountCents,
-                0,
-              ),
-            )}{" "}
-            disponíveis
+            {formatCurrency(compensationTotal)}
+            {lateCompensations.length ? ` · ${lateCompensations.length} atrasada(s)` : ""}
           </small>
-        </div>
-        <div>
-          <span>Clientes com créditos</span>
-          <strong>{customersWithCredits}</strong>
-          <small>{awaitingPackages} pacotes com fatura pendente</small>
-        </div>
+        </button>
       </section>
 
       <div className="billing-utility-actions">
@@ -9049,14 +9280,22 @@ function BillingView({
 
       <div className="tabs billing-tabs" role="tablist" aria-label="Financeiro">
         {[
-          ["invoice", "Faturas"],
-          ["credits", "Pacotes e créditos"],
-          ["receipts", "Recibos"],
+          ["pending", "Pendências"],
+          ["history", "Histórico"],
+          ["credits", "Créditos"],
         ].map(([id, label]) => (
           <button
             key={id}
             className={tab === id ? "active" : ""}
-            onClick={() => onTabChange(id as BillingTab)}
+            onClick={() => {
+              onTabChange(id as BillingTab);
+              setInvoiceStatusFilter("all");
+              setSelectedMergeInvoiceIds([]);
+              setMergeSelectionMode(false);
+              if (id === "history") {
+                void loadHistoryPeriod(appliedInvoiceFrom, appliedInvoiceTo);
+              }
+            }}
             role="tab"
             aria-selected={tab === id}
           >
@@ -9065,8 +9304,9 @@ function BillingView({
         ))}
       </div>
 
-      {tab === "invoice" && (
+      {(tab === "pending" || tab === "history") && (
         <>
+          {tab === "pending" && (
           <section className="panel full-panel">
             <div className="panel-heading">
               <div>
@@ -9082,8 +9322,21 @@ function BillingView({
               </span>
             </div>
             {billableServices.length ? (
-              <div className="billable-list">
-                {billableServices.map((service) => {
+              <div className="billable-customer-list">
+                {billablesByCustomer.map((customerServices) => (
+                  <section
+                    className="billable-customer-group"
+                    key={customerServices[0].customerId}
+                  >
+                    <header>
+                      <strong>{customerServices[0].customerName}</strong>
+                      <small>
+                        {customerServices.length}{" "}
+                        {customerServices.length === 1 ? "serviço" : "serviços"}
+                      </small>
+                    </header>
+                    <div className="billable-list">
+                {customerServices.map((service) => {
                   const checked = selectedBillables.includes(service.id);
                   const first = billableServices.find(
                     (item) => item.id === selectedBillables[0],
@@ -9167,6 +9420,9 @@ function BillingView({
                     </div>
                   );
                 })}
+                    </div>
+                  </section>
+                ))}
               </div>
             ) : (
               <EmptyState
@@ -9175,31 +9431,39 @@ function BillingView({
               />
             )}
           </section>
+          )}
 
           <section className="panel full-panel">
             <div className="panel-heading">
               <div>
                 <p className="section-kicker">
-                  {isDefaultInvoicePeriod
-                    ? "Pendentes + pagos nos últimos 7 dias"
-                    : "Pendentes + pagos no período"}
+                  {tab === "pending" ? "Trabalho financeiro" : "Consulta"}
                 </p>
-                <h2>Cobranças recentes</h2>
+                <h2>{tab === "pending" ? "Faturas abertas" : "Histórico de faturas"}</h2>
                 <small className="audit-period-label">
-                  {formatShortDate(appliedInvoiceFrom)} a {formatShortDate(appliedInvoiceTo)}
-                  {` · ${displayedInvoices.length} ${
-                    displayedInvoices.length === 1 ? "cobrança" : "cobranças"
-                  }`}
+                  {tab === "history" &&
+                    `${formatShortDate(appliedInvoiceFrom)} a ${formatShortDate(appliedInvoiceTo)} · `}
+                  {displayedInvoices.length}{" "}
+                  {displayedInvoices.length === 1 ? "fatura" : "faturas"}
                 </small>
               </div>
               <div className="billing-period-actions">
+                <input
+                  className="billing-search"
+                  type="search"
+                  value={invoiceSearch}
+                  onChange={(event) => setInvoiceSearch(event.target.value)}
+                  placeholder="Cliente, cão ou fatura"
+                  aria-label="Buscar por cliente, cão ou número da fatura"
+                />
+                {tab === "history" && <>
                 {!isDefaultInvoicePeriod && (
                   <button
                     type="button"
                     className="text-button muted"
-                    onClick={resetInvoicePeriod}
+                    onClick={() => void resetInvoicePeriod()}
                   >
-                    Voltar aos últimos 7 dias
+                    Voltar aos últimos 30 dias
                   </button>
                 )}
                 <button
@@ -9210,9 +9474,10 @@ function BillingView({
                 >
                   {invoicePeriodOpen ? "Fechar período" : "Escolher período"}
                 </button>
+                </>}
               </div>
             </div>
-            {invoicePeriodOpen && (
+            {tab === "history" && invoicePeriodOpen && (
               <form className="audit-period-form billing-period-form" onSubmit={applyInvoicePeriod}>
                 <label className="field">
                   <span>Data inicial</span>
@@ -9233,8 +9498,8 @@ function BillingView({
                     onChange={setInvoicePeriodTo}
                   />
                 </label>
-                <button className="primary-button" type="submit">
-                  Mostrar cobranças
+                <button className="primary-button" type="submit" disabled={historyLoading}>
+                  {historyLoading ? "Consultando…" : "Mostrar faturas"}
                 </button>
               </form>
             )}
@@ -9242,13 +9507,20 @@ function BillingView({
               <div className="billing-status-control">
                 <span className="compact-control-label">Situação</span>
                 <div className="filter-chips billing-status-filters" aria-label="Filtrar cobranças por situação">
-                  {([
-                    ["all", "Todas"],
-                    ["paid", "Pago"],
-                    ["overdue", "Vencido"],
-                    ["pending", "Fatura pendente"],
-                    ["compensation", "Em compensação"],
-                  ] as const).map(([value, label]) => (
+                  {(
+                    tab === "history"
+                      ? ([
+                          ["all", "Todas"],
+                          ["paid", "Pagas"],
+                          ["void", "Canceladas"],
+                        ] as Array<[InvoiceListStatus, string]>)
+                      : ([
+                          ["all", "Todas"],
+                          ["overdue", "Vencidas"],
+                          ["pending", "Aguardando pagamento"],
+                          ["compensation", "Em compensação"],
+                        ] as Array<[InvoiceListStatus, string]>)
+                  ).map(([value, label]) => (
                     <button
                       key={value}
                       type="button"
@@ -9274,11 +9546,11 @@ function BillingView({
                 >
                   <option value="priority">Situação e atualização</option>
                   <option value="customer">Cliente · A–Z</option>
-                  <option value="dueDate">Vencimento · mais próximo</option>
+                  <option value="dueDate">Data · mais próxima</option>
                 </select>
               </label>
             </div>
-            <div className="invoice-merge-toolbar">
+            {tab === "pending" && <div className="invoice-merge-toolbar">
               {mergeSelectionMode ? (
                 <>
                   <span>
@@ -9316,19 +9588,16 @@ function BillingView({
                   Unificar faturas
                 </button>
               )}
-            </div>
+            </div>}
             <div className="table-wrap">
               <table className="data-table invoices-table">
                 <colgroup>
                   {mergeSelectionMode && <col className="invoice-select-column" />}
-                  <col className="invoice-number-column" />
                   <col className="invoice-customer-column" />
                   <col className="invoice-items-column" />
-                  <col className="invoice-due-column" />
                   <col className="invoice-value-column" />
                   <col className="invoice-status-column" />
                   <col className="invoice-delivery-column" />
-                  <col className="invoice-cash-column" />
                   <col className="invoice-actions-column" />
                 </colgroup>
                 <thead>
@@ -9338,14 +9607,11 @@ function BillingView({
                         <span className="sr-only">Selecionar para unificar</span>
                       </th>
                     )}
-                    <th>Número</th>
                     <th>Cliente</th>
-                    <th>Itens</th>
-                    <th>Vencimento</th>
+                    <th>Serviços</th>
                     <th>Valor</th>
-                    <th>Situação</th>
-                    <th>Envio</th>
-                    <th>No Caixa</th>
+                    <th>Situação e data</th>
+                    <th>Compartilhamento</th>
                     <th>
                       <span className="sr-only">Ação</span>
                     </th>
@@ -9372,41 +9638,27 @@ function BillingView({
                           }
                         />
                       </td>}
-                      <td>#{invoice.number}</td>
-                      <td>
+                      <td className="invoice-customer-cell">
                         <strong>{invoice.customerName}</strong>
+                        <small>#{invoice.number}</small>
                       </td>
                       <td>
                         <span>{invoice.items}</span>
                       </td>
-                      <td>{invoice.due}</td>
                       <td>
                         <strong>{formatCurrency(invoice.amountCents)}</strong>
                       </td>
-                      <td>
+                      <td className="invoice-status-date-cell">
                         <InvoiceStatus invoice={invoice} />
+                        <small>{invoice.due}</small>
+                        {invoice.followUpOn && invoice.status !== "paid" && invoice.status !== "void" && (
+                          <small className={invoice.followUpOn <= operationalToday ? "follow-up-due" : ""}>
+                            Lembrar em {formatShortDate(invoice.followUpOn)}
+                          </small>
+                        )}
                       </td>
                       <td>
                         <InvoiceDeliveryStatus invoice={invoice} compact />
-                      </td>
-                      <td className="cash-inclusion-cell">
-                        {invoice.status === "paid" ? (
-                          <label>
-                            <input
-                              type="checkbox"
-                              checked={invoice.cashIncluded !== false}
-                              disabled={!invoice.cashEntryId}
-                              onChange={() => onToggleCash(invoice)}
-                            />
-                            <span>
-                              {invoice.cashIncluded === false
-                                ? "Não"
-                                : "Sim"}
-                            </span>
-                          </label>
-                        ) : (
-                          <span aria-label="Disponível após o pagamento">—</span>
-                        )}
                       </td>
                       <td>
                         <div className="invoice-row-actions">
@@ -9414,7 +9666,13 @@ function BillingView({
                             className="row-link"
                             onClick={() => onOpenInvoice(invoice)}
                           >
-                            {invoice.status === "pending" ? "Abrir" : "Ver"}
+                            {invoice.compensationAvailableOn && invoice.compensationAvailableOn <= operationalToday
+                              ? "Confirmar compensação"
+                              : invoice.status === "overdue"
+                                ? "Revisar cobrança"
+                                : invoice.status === "pending"
+                                  ? "Abrir"
+                                  : "Ver"}
                           </button>
                           <button
                             className={`row-link subtle invoice-note-link${
@@ -9423,8 +9681,21 @@ function BillingView({
                             onClick={() => openInvoiceNote(invoice)}
                             title={invoice.internalNote ?? undefined}
                           >
-                            {invoice.internalNote ?? "Nota"}
+                            {invoice.internalNote ?? (invoice.followUpOn ? "Editar lembrete" : "Nota ou lembrete")}
                           </button>
+                          {invoice.status === "paid" && invoice.cashIncluded === false && (
+                            <button className="row-link subtle" type="button" onClick={() => toggleCashFromList(invoice)}>
+                              Fora do Caixa · restaurar
+                            </button>
+                          )}
+                          {invoice.status === "paid" && invoice.cashIncluded !== false && invoice.cashEntryId && (
+                            <details className="invoice-more-actions">
+                              <summary>Mais</summary>
+                              <button type="button" onClick={() => toggleCashFromList(invoice)}>
+                                Retirar do Caixa
+                              </button>
+                            </details>
+                          )}
                           {invoice.mergeId && invoice.status !== "paid" && !invoice.compensationAvailableOn && (
                             <button
                               className="row-link subtle"
@@ -9439,7 +9710,7 @@ function BillingView({
                     </tr>
                     {noteEditorInvoiceId === invoice.id && (
                       <tr className="invoice-note-editor-row">
-                        <td colSpan={mergeSelectionMode ? 10 : 9}>
+                        <td colSpan={mergeSelectionMode ? 7 : 6}>
                           <form
                             className="invoice-entry-note-editor"
                             onSubmit={(event) => {
@@ -9455,6 +9726,15 @@ function BillingView({
                                 onChange={(event) => setNoteDraft(event.target.value)}
                                 maxLength={1000}
                                 placeholder="Ex.: pediu para pagar em 12/08"
+                              />
+                            </label>
+                            <label className="invoice-follow-up-field">
+                              <span>Lembrar de cobrar em</span>
+                              <BrazilianDateInput
+                                value={followUpDraft}
+                                min={operationalToday}
+                                ariaLabel="Data do lembrete da cobrança"
+                                onChange={setFollowUpDraft}
                               />
                             </label>
                             <button className="text-button" type="button" onClick={() => setNoteEditorInvoiceId(null)} disabled={noteSaving}>
@@ -9503,22 +9783,31 @@ function BillingView({
                     <span className="invoice-mobile-items">
                       {invoice.items}
                     </span>
-                    <InvoiceDeliveryStatus invoice={invoice} compact />
                     <span className="invoice-mobile-footer">
-                      <small>{invoice.status === "paid" ? "Pagamento" : "Vencimento"}: {invoice.due}</small>
+                      <span>
+                        <small>{invoice.due}</small>
+                        {invoice.followUpOn && invoice.status !== "paid" && invoice.status !== "void" && (
+                          <small className={invoice.followUpOn <= operationalToday ? "follow-up-due" : ""}>
+                            Lembrar em {formatShortDate(invoice.followUpOn)}
+                          </small>
+                        )}
+                        <InvoiceDeliveryStatus invoice={invoice} compact />
+                      </span>
                       <strong>{formatCurrency(invoice.amountCents)}</strong>
                     </span>
                   </button>
-                  {invoice.status === "paid" && (
-                    <label className="cash-inclusion-mobile">
-                      <input
-                        type="checkbox"
-                        checked={invoice.cashIncluded !== false}
-                        disabled={!invoice.cashEntryId}
-                        onChange={() => onToggleCash(invoice)}
-                      />
-                      Considerar no Caixa
-                    </label>
+                  {invoice.status === "paid" && invoice.cashIncluded === false && (
+                    <button className="cash-exception-mobile" type="button" onClick={() => toggleCashFromList(invoice)}>
+                      Fora do Caixa · restaurar
+                    </button>
+                  )}
+                  {invoice.status === "paid" && invoice.cashIncluded !== false && invoice.cashEntryId && (
+                    <details className="invoice-more-actions invoice-more-mobile">
+                      <summary>Mais opções</summary>
+                      <button type="button" onClick={() => toggleCashFromList(invoice)}>
+                        Retirar do Caixa
+                      </button>
+                    </details>
                   )}
                   <button
                     className={`row-link subtle invoice-note-trigger invoice-note-link${
@@ -9528,7 +9817,7 @@ function BillingView({
                     onClick={() => openInvoiceNote(invoice)}
                     title={invoice.internalNote ?? undefined}
                   >
-                    {invoice.internalNote ?? "Adicionar nota"}
+                    {invoice.internalNote ?? (invoice.followUpOn ? "Editar lembrete" : "Adicionar nota ou lembrete")}
                   </button>
                   {noteEditorInvoiceId === invoice.id && (
                     <form
@@ -9546,6 +9835,15 @@ function BillingView({
                           onChange={(event) => setNoteDraft(event.target.value)}
                           maxLength={1000}
                           placeholder="Ex.: pediu para pagar em 12/08"
+                        />
+                      </label>
+                      <label className="invoice-follow-up-field">
+                        <span>Lembrar de cobrar em</span>
+                        <BrazilianDateInput
+                          value={followUpDraft}
+                          min={operationalToday}
+                          ariaLabel="Data do lembrete da cobrança"
+                          onChange={setFollowUpDraft}
                         />
                       </label>
                       <button className="text-button" type="button" onClick={() => setNoteEditorInvoiceId(null)} disabled={noteSaving}>
@@ -9742,7 +10040,7 @@ function BillingView({
         </>
       )}
 
-      {tab === "receipts" && (
+      {tab === "credits" && (
         <section className="panel full-panel">
           <div className="panel-heading">
             <div>
@@ -9782,7 +10080,7 @@ function BillingView({
         </section>
       )}
 
-      {tab === "invoice" && selectedBillables.length > 0 && (
+      {tab === "pending" && selectedBillables.length > 0 && (
         <div className="selection-bar">
           <span>
             <strong>
@@ -9829,8 +10127,18 @@ function BillingView({
                 ariaLabel="Vencimento da fatura unificada"
                 onChange={setMergeDueDate}
               />
-              <small>Por padrão, preservamos o vencimento mais distante.</small>
+              <small>Por segurança, sugerimos o vencimento mais próximo.</small>
             </label>
+            {(mergeHasDifferentDueDates || mergeHasLodgingMilestones) && (
+              <div className="form-warning full">
+                {mergeHasDifferentDueDates && (
+                  <p>As faturas têm vencimentos diferentes. Confira a data antes de continuar.</p>
+                )}
+                {mergeHasLodgingMilestones && (
+                  <p>Esta seleção inclui sinal ou saldo de hospedagem. Confirme se deseja reuni-los no mesmo momento de cobrança.</p>
+                )}
+              </div>
+            )}
             <div className="credit-safety-note full">
               <strong>Proteção financeira</strong>
               <span>
@@ -9876,7 +10184,7 @@ function BillingView({
           </div>
           <div className="credit-safety-note">
             <strong>Operação reversível</strong>
-            <span>Faturas pagas ou em compensação permanecem intocadas. O vencimento mais distante de cada cliente será preservado.</span>
+            <span>Faturas pagas, em compensação, sinais e saldos de hospedagem permanecem intocados. O vencimento mais próximo de cada cliente será preservado.</span>
           </div>
           {bulkMergeProgress && <p className="form-feedback">{bulkMergeProgress}</p>}
           <div className="dialog-actions">
@@ -10075,16 +10383,23 @@ function SettingsView({
 }
 
 function InvoiceStatus({ invoice }: { invoice: Invoice }) {
+  if (invoice.status === "void") {
+    return <span className="status-pill neutral">Cancelada</span>;
+  }
   if (invoice.status === "paid") {
     return <span className="status-pill success">Pago</span>;
   }
   if (invoice.compensationAvailableOn) {
-    return <span className="status-pill pending">Em compensação</span>;
+    return invoice.compensationAvailableOn < operationalToday ? (
+      <span className="status-pill overdue">Compensação atrasada</span>
+    ) : (
+      <span className="status-pill compensation">Em compensação</span>
+    );
   }
   if (invoice.status === "overdue") {
     return <span className="status-pill overdue">Vencido</span>;
   }
-  return <span className="status-pill pending">Fatura pendente</span>;
+  return <span className="status-pill pending">Aguardando pagamento</span>;
 }
 
 function InvoiceDeliveryStatus({
@@ -10107,8 +10422,8 @@ function InvoiceDeliveryStatus({
       {channels.map((channel) => {
         const detailedLabel =
           channel === "whatsapp"
-            ? "Compartilhamento por WhatsApp preparado"
-            : "Compartilhamento por e-mail preparado";
+            ? "WhatsApp aberto"
+            : "E-mail preparado";
         return (
           <span
             className={`delivery-channel ${channel}`}
@@ -11613,10 +11928,9 @@ function InvoiceDialog({
   );
   const [availableOn, setAvailableOn] = useState(shiftDate(operationalToday, 1));
   const [financialAccountId, setFinancialAccountId] = useState(
-    financialAccounts[0]?.id ?? "",
+    financialAccounts.length === 1 ? financialAccounts[0].id : "",
   );
-  const effectiveFinancialAccountId =
-    financialAccountId || financialAccounts[0]?.id || "";
+  const effectiveFinancialAccountId = financialAccountId;
   const [skipLongStayDiscount, setSkipLongStayDiscount] = useState(false);
   const [reversePaymentOpen, setReversePaymentOpen] = useState(false);
   const [reversePaymentReason, setReversePaymentReason] = useState("");
@@ -12025,6 +12339,9 @@ function InvoiceDialog({
                   onChange={(event) => setFinancialAccountId(event.target.value)}
                   required
                 >
+                  {financialAccounts.length > 1 && (
+                    <option value="">Escolha a conta</option>
+                  )}
                   {financialAccounts.map((account) => (
                     <option key={account.id} value={account.id}>
                       {account.name}{account.institution ? ` · ${account.institution}` : ""}
@@ -12052,23 +12369,32 @@ function InvoiceDialog({
               {compensationAvailableOn ? (
                 <span>Confirme somente quando o valor estiver disponível na conta.</span>
               ) : (
-                <label className="invoice-payment-mode">
+                <fieldset className="invoice-payment-mode">
                   <span>Recebimento</span>
-                  <select
-                    value={paymentMode}
-                    onChange={(event) =>
-                      setPaymentMode(event.target.value as "immediate" | "schedule")
-                    }
-                  >
-                    <option value="immediate">Disponível agora</option>
-                    <option value="schedule">Em compensação</option>
-                  </select>
+                  <div>
+                    <button
+                      type="button"
+                      className={paymentMode === "immediate" ? "active" : ""}
+                      aria-pressed={paymentMode === "immediate"}
+                      onClick={() => setPaymentMode("immediate")}
+                    >
+                      Valor já disponível
+                    </button>
+                    <button
+                      type="button"
+                      className={paymentMode === "schedule" ? "active" : ""}
+                      aria-pressed={paymentMode === "schedule"}
+                      onClick={() => setPaymentMode("schedule")}
+                    >
+                      Ainda vai compensar
+                    </button>
+                  </div>
                   <small>
                     {paymentMode === "schedule"
                       ? "A fatura permanece em aberto e o Caixa só recebe este valor após a confirmação."
                       : "Use esta opção quando o valor já estiver disponível na conta."}
                   </small>
-                </label>
+                </fieldset>
               )}
             </div>
           )}

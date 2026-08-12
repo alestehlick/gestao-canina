@@ -1453,17 +1453,38 @@ h3 {
 }
 
 .invoice-payment-mode {
+  display: grid;
   align-self: stretch;
+  gap: 6px;
+  margin: 0;
+  border: 0;
+  padding: 0;
   min-width: 220px;
+  font-weight: 700;
 }
 
-.invoice-payment-mode select {
+.invoice-payment-mode > div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+
+.invoice-payment-mode button {
   min-height: 42px;
   border: 1px solid var(--line);
   border-radius: var(--radius-small);
   background: var(--surface);
   color: var(--ink);
   padding: 8px 10px;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.invoice-payment-mode button.active {
+  border-color: var(--forest);
+  background: var(--forest-soft);
+  color: var(--forest);
 }
 
 .invoice-payment-mode small {
@@ -1772,6 +1793,12 @@ h3 {
   border-color: #e5d6b6;
   background: var(--gold-soft);
   color: #775b32;
+}
+
+.status-pill.compensation {
+  border-color: color-mix(in srgb, var(--daycare) 28%, var(--line));
+  background: color-mix(in srgb, var(--daycare) 8%, var(--surface));
+  color: #17668a;
 }
 
 .status-pill.neutral {
@@ -2538,20 +2565,12 @@ h3 {
   width: 38px;
 }
 
-.invoice-number-column {
-  width: 94px;
-}
-
 .invoice-customer-column {
-  width: 128px;
+  width: 190px;
 }
 
 .invoice-items-column {
-  width: 132px;
-}
-
-.invoice-due-column {
-  width: 108px;
+  width: auto;
 }
 
 .invoice-value-column {
@@ -2559,19 +2578,15 @@ h3 {
 }
 
 .invoice-status-column {
-  width: 126px;
+  width: 168px;
 }
 
 .invoice-delivery-column {
-  width: 100px;
-}
-
-.invoice-cash-column {
-  width: 78px;
+  width: 125px;
 }
 
 .invoice-actions-column {
-  width: 84px;
+  width: 136px;
 }
 
 .invoices-table td {
@@ -2592,6 +2607,25 @@ h3 {
   display: grid;
   justify-items: start;
   gap: 2px;
+}
+
+.invoice-customer-cell strong,
+.invoice-customer-cell small,
+.invoice-status-date-cell small {
+  display: block;
+}
+
+.invoice-customer-cell small,
+.invoice-status-date-cell small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.67rem;
+}
+
+.invoice-status-date-cell .follow-up-due,
+.follow-up-due {
+  color: var(--danger);
+  font-weight: 720;
 }
 
 .row-link.subtle {
@@ -2625,6 +2659,37 @@ h3 {
   display: grid;
   flex: 1;
   gap: 4px;
+}
+
+.invoice-entry-note-editor .invoice-follow-up-field {
+  flex: 0 1 230px;
+}
+
+.invoice-more-actions {
+  position: relative;
+  color: var(--muted);
+  font-size: 0.69rem;
+}
+
+.invoice-more-actions summary {
+  min-height: 28px;
+  cursor: pointer;
+  font-weight: 650;
+  list-style: none;
+}
+
+.invoice-more-actions summary::-webkit-details-marker {
+  display: none;
+}
+
+.invoice-more-actions button {
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+  padding: 4px 0;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
 }
 
 .invoice-entry-note-editor label > span {
@@ -2677,13 +2742,29 @@ h3 {
   margin-bottom: 14px;
 }
 
-.finance-summary > div {
+.finance-summary > button {
   display: grid;
+  width: 100%;
   gap: 3px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
+  color: inherit;
   padding: 19px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+
+.finance-summary > button:hover,
+.finance-summary > button:focus-visible {
+  border-color: var(--forest);
+  transform: translateY(-1px);
+}
+
+.finance-summary > button.attention {
+  border-color: color-mix(in srgb, var(--danger) 32%, var(--line));
 }
 
 .finance-summary span,
@@ -3437,6 +3518,35 @@ h3 {
   display: grid;
 }
 
+.billable-customer-list {
+  display: grid;
+  gap: 13px;
+}
+
+.billable-customer-group {
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-small);
+}
+
+.billable-customer-group > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--surface-muted);
+  padding: 10px 14px;
+}
+
+.billable-customer-group > header small {
+  color: var(--muted);
+  font-size: 0.69rem;
+}
+
+.billable-customer-group .billable-list {
+  padding-inline: 14px;
+}
+
 .billable-row {
   --service-color: var(--other);
   --service-soft: var(--other-soft);
@@ -3632,6 +3742,11 @@ h3 {
   gap: 10px;
 }
 
+.billing-search {
+  width: min(270px, 42vw);
+  min-height: 40px;
+}
+
 .billing-period-form {
   max-width: 820px;
 }
@@ -3734,6 +3849,24 @@ h3 {
 
 .invoice-merge-review .invoice-merge-total {
   padding-top: 13px;
+}
+
+.cash-exception-mobile {
+  width: calc(100% - 31px);
+  margin: 0 14px 0 17px;
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  background: transparent;
+  color: var(--danger);
+  padding: 10px 0;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 680;
+  text-align: left;
+}
+
+.invoice-more-mobile {
+  margin: 0 14px 8px 17px;
 }
 
 .invoice-merge-total > strong {
@@ -5471,8 +5604,13 @@ h3 {
   }
 
   .invoice-payment-register label,
+  .invoice-payment-mode,
   .daycare-hours-settings .field {
     min-width: 0;
+  }
+
+  .invoice-payment-mode > div {
+    grid-template-columns: 1fr;
   }
   .setup-screen {
     align-items: start;
@@ -5858,6 +5996,10 @@ h3 {
     background: var(--danger);
   }
 
+  .invoice-mobile-list .mobile-data-card.invoice-void::before {
+    background: var(--faint);
+  }
+
   .invoice-mobile-list .mobile-card-main {
     display: grid;
     width: 100%;
@@ -5954,8 +6096,13 @@ h3 {
   }
 
   .invoice-mobile-footer small {
+    display: block;
     color: var(--muted);
     font-size: 0.68rem;
+  }
+
+  .invoice-mobile-footer .invoice-delivery-state {
+    margin-top: 6px;
   }
 
   .invoice-mobile-footer strong {
@@ -5972,15 +6119,26 @@ h3 {
   }
 
   .finance-summary {
-    grid-auto-columns: minmax(210px, 1fr);
-    grid-template-columns: none;
-    grid-auto-flow: column;
-    overflow-x: auto;
-    scrollbar-width: none;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-flow: row;
+    overflow: visible;
   }
 
-  .finance-summary::-webkit-scrollbar {
-    display: none;
+  .finance-summary > button {
+    min-width: 0;
+    padding: 13px;
+  }
+
+  .finance-summary strong {
+    font-size: 1.42rem;
+  }
+
+  .finance-summary span {
+    font-size: 0.62rem;
+  }
+
+  .finance-summary small {
+    font-size: 0.65rem;
   }
 
   .cash-period-panel,
@@ -6146,6 +6304,24 @@ h3 {
     padding: 12px 12px 12px 15px;
   }
 
+  .billable-customer-group {
+    overflow: visible;
+    border: 0;
+  }
+
+  .billable-customer-group > header {
+    border-radius: 9px;
+    padding: 9px 11px;
+  }
+
+  .billable-customer-group .billable-list {
+    padding-inline: 0;
+  }
+
+  .invoice-mobile-list .invoice-entry-note-editor .invoice-follow-up-field {
+    flex-basis: 100%;
+  }
+
   .billable-row:first-child {
     margin-top: 0;
     border-top: 1px solid var(--line-soft);
@@ -6250,6 +6426,11 @@ h3 {
     width: 100%;
     flex-wrap: wrap;
     justify-content: flex-start;
+  }
+
+  .billing-search {
+    width: 100%;
+    font-size: 16px;
   }
 
   .billing-list-tools {

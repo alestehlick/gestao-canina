@@ -20,7 +20,12 @@ export async function PUT(
     assertSameOrigin(request);
     const identity = await requireIdentity(request, ["owner", "finance"]);
     const { id } = await context.params;
-    const internalNote = optionalString(await readJsonObject(request), "note", 1_000);
+    const body = await readJsonObject(request);
+    const internalNote = optionalString(body, "note", 1_000);
+    const followUpOn = optionalString(body, "followUpOn", 10);
+    if (followUpOn && !/^\d{4}-\d{2}-\d{2}$/.test(followUpOn)) {
+      throw new HttpError(400, "invalid_follow_up_date", "Revise a data do lembrete.");
+    }
     const establishmentId = identity.establishmentId!;
     const db = getDb();
 
@@ -43,6 +48,7 @@ export async function PUT(
         .update(invoices)
         .set({
           internalNote,
+          followUpOn,
           updatedAt: sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
         })
         .where(
@@ -60,11 +66,14 @@ export async function PUT(
         entityType: "invoice",
         entityId: id,
         requestId,
-        metadataJson: JSON.stringify({ hasNote: Boolean(internalNote) }),
+        metadataJson: JSON.stringify({
+          hasNote: Boolean(internalNote),
+          followUpOn,
+        }),
       }),
     ]);
 
-    return json({ invoice: { id, internalNote } });
+    return json({ invoice: { id, internalNote, followUpOn } });
   } catch (error) {
     return errorResponse(error, requestId);
   }

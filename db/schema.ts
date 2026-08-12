@@ -752,6 +752,7 @@ export const invoices = sqliteTable(
     deliveryChannelsJson: text("delivery_channels_json").notNull().default("[]"),
     lastSentAt: text("last_sent_at"),
     internalNote: text("internal_note"),
+    followUpOn: text("follow_up_on"),
     dueDate: text("due_date").notNull(),
     totalCents: integer("total_cents").notNull(),
     sourceType: text("source_type", {
@@ -782,6 +783,16 @@ export const invoices = sqliteTable(
       table.accountId,
       table.status,
       table.dueDate,
+    ),
+    index("invoices_establishment_follow_up_idx").on(
+      table.establishmentId,
+      table.followUpOn,
+      table.status,
+    ),
+    index("invoices_establishment_status_updated_idx").on(
+      table.establishmentId,
+      table.status,
+      table.updatedAt,
     ),
     uniqueIndex("invoices_establishment_source_unique").on(
       table.establishmentId,

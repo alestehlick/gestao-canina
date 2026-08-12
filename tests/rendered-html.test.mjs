@@ -23,7 +23,9 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.match(app, /Cloudflare/);
   assert.match(app, /Novo serviço/);
   assert.match(app, /Faturas/);
-  assert.match(app, /Pacotes e créditos/);
+  assert.match(app, /\["credits", "Créditos"\]/);
+  assert.match(app, /\["pending", "Pendências"\]/);
+  assert.match(app, /\["history", "Histórico"\]/);
   assert.match(app, /invoice-delivery-button/);
   assert.match(app, /navigator\.share/);
   assert.match(app, /Salvar/);
@@ -36,21 +38,24 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.match(app, /nameDifference = left\.dogName\.localeCompare/);
   assert.match(app, /confirmed: "completed"/);
   assert.doesNotMatch(app, /Registrar chegada/);
-  assert.match(app, /const defaultInvoiceFrom = shiftDate\(operationalToday, -6\)/);
-  assert.match(app, /const displayedInvoices = invoices/);
+  assert.match(app, /const defaultInvoiceFrom = shiftDate\(operationalToday, -29\)/);
+  assert.match(
+    app,
+    /tab === "history" \? synchronizedHistoryInvoices : openInvoices/,
+  );
   assert.match(app, /invoice\.paidAt \?\?\s*invoice\.issuedAt/s);
-  assert.match(app, /if \(leftPaid !== rightPaid\) return leftPaid \? 1 : -1/);
+  assert.match(app, /const priorityDifference = priority\(left\) - priority\(right\)/);
   assert.match(app, /\["upcoming", "Em aberto"\]/);
   assert.match(app, /cancelInvoiceOpen/);
   assert.match(app, /Motivo do cancelamento/);
   assert.match(app, /invoice-delivery-column/);
   assert.match(app, /compact \? \(channel === "whatsapp" \? "WhatsApp" : "E-mail"\)/);
   assert.match(app, /Escolher período/);
-  assert.match(app, /Mostrar cobranças/);
+  assert.match(app, /Mostrar faturas/);
   assert.match(app, /Filtrar cobranças por situação/);
   assert.match(app, /\["compensation", "Em compensação"\]/);
   assert.match(app, /Cliente · A–Z/);
-  assert.match(app, /Vencimento · mais próximo/);
+  assert.match(app, /Data · mais próxima/);
   assert.match(app, /invoiceStatus\(invoice\) === invoiceStatusFilter/);
   assert.match(app, /left\.customerName\.localeCompare\(right\.customerName, "pt-BR"/);
   assert.match(app, /left\.dueDate \?\? "9999-12-31"/);
@@ -159,7 +164,7 @@ test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () =
   assert.match(payments, /settlementMode/);
   assert.match(payments, /invoice\.settlement_scheduled/);
   assert.match(workspace, /compensationAvailableOn/);
-  assert.match(app, /Considerar no Caixa/);
+  assert.match(app, /Fora do Caixa · restaurar/);
   assert.match(migration, /FROM `invoice_payments` ip/);
 });
 
@@ -597,7 +602,7 @@ test("mantém histórico descritivo, indicadores recentes e horários flexíveis
 
   assert.match(app, /Últimos 5 dias/);
   assert.match(app, /Consultar outro período/);
-  assert.match(app, /Recebido · últimos 30 dias/);
+  assert.match(app, /Aguardando pagamento/);
   assert.match(app, /Todo o dia/);
   assert.match(app, /Manhã/);
   assert.match(app, /Tarde/);

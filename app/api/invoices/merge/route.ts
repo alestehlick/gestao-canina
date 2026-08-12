@@ -174,7 +174,7 @@ export async function POST(request: Request) {
       throw new HttpError(409, "invoice_total_mismatch", "Os totais precisam ser revisados antes da união.");
     }
 
-    const dueDate = dueDateInput ?? selectedInvoices.map((invoice) => invoice.dueDate).sort().at(-1)!;
+    const dueDate = dueDateInput ?? selectedInvoices.map((invoice) => invoice.dueDate).sort()[0];
     const mergeId = crypto.randomUUID();
     const mergedInvoiceId = crypto.randomUUID();
     const number = invoiceNumber();
@@ -183,6 +183,10 @@ export async function POST(request: Request) {
       .filter((invoice) => invoice.internalNote?.trim())
       .map((invoice) => `#${invoice.invoiceNumber} — ${invoice.internalNote!.trim()}`)
       .join(" · ").slice(0, 1000) || null;
+    const followUpOn = selectedInvoices
+      .map((invoice) => invoice.followUpOn)
+      .filter((value): value is string => Boolean(value))
+      .sort()[0] ?? null;
     const selectedPlaceholders = selectedIds.map(() => "?").join(", ");
     const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
     const d1 = getD1Database();
@@ -190,9 +194,9 @@ export async function POST(request: Request) {
     statements.push(d1.prepare(`INSERT INTO invoices (
       id, establishment_id, account_id, invoice_number, recipient_name_snapshot,
       recipient_email_snapshot, status, issued_at, delivery_channels_json,
-      internal_note, due_date, total_cents, source_type, source_id,
+      internal_note, follow_up_on, due_date, total_cents, source_type, source_id,
       created_by_user_id, created_at, updated_at
-    ) SELECT ?, ?, ?, ?, ?, ?, 'issued', ${nowExpression}, '[]', ?, ?, ?,
+    ) SELECT ?, ?, ?, ?, ?, ?, 'issued', ${nowExpression}, '[]', ?, ?, ?, ?,
       'services', ?, ?, ${nowExpression}, ${nowExpression}
     WHERE (SELECT COUNT(*) FROM invoices WHERE id IN (${selectedPlaceholders})
       AND establishment_id = ? AND account_id = ? AND status IN ('draft','issued')) = ?
@@ -201,7 +205,7 @@ export async function POST(request: Request) {
       AND NOT EXISTS (SELECT 1 FROM invoice_settlements WHERE invoice_id IN (${selectedPlaceholders}) AND status='scheduled')`).bind(
         mergedInvoiceId, establishmentId, accountId, number,
         selectedInvoices[0].recipientNameSnapshot, selectedInvoices[0].recipientEmailSnapshot,
-        internalNote, dueDate, totalCents, `invoice-merge:${mergeId}`, identity.userId,
+        internalNote, followUpOn, dueDate, totalCents, `invoice-merge:${mergeId}`, identity.userId,
         ...selectedIds, establishmentId, accountId, selectedIds.length,
         ...selectedIds, totalCents, ...selectedIds, ...selectedIds,
       ));

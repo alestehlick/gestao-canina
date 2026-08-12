@@ -226,6 +226,7 @@ export type WorkspaceInvoice = {
   deliveryChannelsJson: string;
   lastSentAt: string | null;
   internalNote: string | null;
+  followUpOn: string | null;
   dueDate: string;
   totalCents: number;
   sourceType:
@@ -708,7 +709,7 @@ export function mapWorkspaceBookings(
             number: depositInvoice.invoiceNumber,
             amountCents:
               depositInvoiceLine?.amountCents ?? depositInvoice.totalCents,
-            status: invoiceStatus(depositInvoice, payload.range.from),
+            status: activeInvoiceStatus(depositInvoice, payload.range.from),
           }
         : undefined,
       balanceInvoice: effectiveBalanceInvoice
@@ -718,7 +719,7 @@ export function mapWorkspaceBookings(
             amountCents:
               combinedInvoiceLine?.amountCents ??
               effectiveBalanceInvoice.totalCents,
-            status: invoiceStatus(effectiveBalanceInvoice, payload.range.from),
+            status: activeInvoiceStatus(effectiveBalanceInvoice, payload.range.from),
           }
         : undefined,
       receiptNumber: matchingReceipt?.receiptNumber,
@@ -902,6 +903,7 @@ export function mapWorkspaceTasks(
 export function mapWorkspaceInvoices(
   payload: WorkspaceReadyPayload,
   referenceDate = payload.range.from,
+  options: { includeVoided?: boolean } = {},
 ): Invoice[] {
   const purchasesByInvoiceId = new Map(
     payload.billing.creditPurchases.map((purchase) => [
@@ -914,7 +916,7 @@ export function mapWorkspaceInvoices(
   );
 
   return payload.billing.invoices
-    .filter((invoice) => invoice.status !== "void")
+    .filter((invoice) => options.includeVoided || invoice.status !== "void")
     .map((invoice) => {
       const status = invoiceStatus(invoice, referenceDate);
       const purchase = purchasesByInvoiceId.get(invoice.id);
@@ -998,6 +1000,7 @@ export function mapWorkspaceInvoices(
         ),
         lastSentAt: invoice.lastSentAt ?? undefined,
         internalNote: invoice.internalNote ?? undefined,
+        followUpOn: invoice.followUpOn ?? undefined,
         items: mergedItemsLabel,
         sourceType: invoice.sourceType,
         sourceId: invoice.sourceId ?? undefined,
@@ -1005,6 +1008,8 @@ export function mapWorkspaceInvoices(
         mergeId: invoice.sourceId?.startsWith("invoice-merge:")
           ? invoice.sourceId.slice("invoice-merge:".length)
           : undefined,
+        voidedAt: invoice.voidedAt?.slice(0, 10) ?? undefined,
+        voidReason: invoice.voidReason ?? undefined,
         cashEntryId: invoice.cashEntryId ?? undefined,
         cashIncluded: invoice.cashEntryId
           ? invoice.cashIncluded !== false
@@ -1519,9 +1524,18 @@ function invoiceStatus(
   invoice: WorkspaceInvoice,
   referenceDate: string,
 ): Invoice["status"] {
+  if (invoice.status === "void") return "void";
   if (invoice.status === "paid") return "paid";
   if (invoice.compensationAvailableOn) return "pending";
   return invoice.dueDate < referenceDate ? "overdue" : "pending";
+}
+
+function activeInvoiceStatus(
+  invoice: WorkspaceInvoice,
+  referenceDate: string,
+): "pending" | "paid" | "overdue" {
+  const status = invoiceStatus(invoice, referenceDate);
+  return status === "void" ? "pending" : status;
 }
 
 function invoiceDueLabel(
@@ -1529,6 +1543,11 @@ function invoiceDueLabel(
   referenceDate: string,
 ) {
   if (invoice.status === "draft") return "Em preparação";
+  if (invoice.status === "void") {
+    return invoice.voidedAt
+      ? `Cancelada em ${formatBrazilianDate(invoice.voidedAt)}`
+      : "Cancelada";
+  }
   if (invoice.status === "paid") {
     return invoice.paidAt
       ? `Pago em ${formatBrazilianDate(invoice.paidAt)}`

@@ -430,7 +430,7 @@ test("mantém o primeiro acesso e o login protegidos sem bloqueio global da cont
 });
 
 test("preserva as regras de faturas, sinais e créditos", async () => {
-  const [invoices, payments, reversePayment, settlement, consume, purchases, prices, workspaceData, managementApp, invoiceNotes, invoiceNotesMigration, schema, serviceRules, creditPricing, creditPricingMigration, appointments, groomingAddonMigration] = await Promise.all([
+  const [invoices, payments, reversePayment, settlement, consume, purchases, prices, workspaceData, managementApp, invoiceNotes, invoiceNotesMigration, schema, serviceRules, creditPricing, creditPricingMigration, appointments, groomingAddonMigration, settlementStatesMigration] = await Promise.all([
     readFile(new URL("../app/api/invoices/route.ts", import.meta.url), "utf8"),
     readFile(
       new URL("../app/api/invoices/[id]/payments/route.ts", import.meta.url),
@@ -469,6 +469,7 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
     readFile(new URL("../drizzle/0017_credit_pricing.sql", import.meta.url), "utf8"),
     readFile(new URL("../app/api/appointments/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0018_bath_grooming_addon.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0022_invoice_settlement_states.sql", import.meta.url), "utf8"),
   ]);
 
   assert.match(invoices, /active_invoice_id = \?/);
@@ -548,6 +549,16 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
   assert.match(invoiceNotesMigration, /ADD COLUMN internal_note text/);
   assert.match(schema, /invoice_payments_invoice_active_unique/);
   assert.match(schema, /invoice_settlements_invoice_scheduled_unique/);
+  assert.match(settlementStatesMigration, /`status` = 'confirmed'/);
+  assert.match(settlementStatesMigration, /`confirmed_at` IS NOT NULL/);
+  assert.match(
+    settlementStatesMigration,
+    /invoice_settlements_invoice_scheduled_unique[\s\S]*WHERE `status` = 'scheduled'/,
+  );
+  assert.doesNotMatch(
+    settlementStatesMigration,
+    /CREATE UNIQUE INDEX `invoice_settlements_invoice_unique`/,
+  );
 });
 
 test("impede serviços duplicados e hospedagens sobrepostas no banco", async () => {

@@ -478,6 +478,23 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
   assert.match(invoices, /FAT-/);
   assert.doesNotMatch(invoices, /pix/i);
   assert.match(payments, /invoice\.payment_recorded/);
+  assert.match(payments, /confirmingLinkedSettlement/);
+  assert.match(payments, /scheduledSettlement!\.financialAccountId!/);
+  assert.ok(
+    payments.indexOf("const paymentStatementIndex") <
+      payments.indexOf("settlementConfirmationIndex = statements.length"),
+  );
+  assert.match(
+    payments,
+    /WHERE id = \? AND invoice_id = invoice_settlements\.invoice_id[\s\S]*AND status = 'active'/,
+  );
+  assert.match(
+    payments,
+    /WHERE id = \? AND invoice_id = invoices\.id AND status = 'confirmed'/,
+  );
+  assert.match(managementApp, /A confirmação será registrada na mesma conta/);
+  assert.match(managementApp, /compensationFinancialAccountId/);
+  assert.match(workspaceData, /compensationFinancialAccountName/);
   assert.match(invoices, /applyLongStayDiscount/);
   assert.doesNotMatch(payments, /withoutLongStayDiscount/);
   assert.match(payments, /Créditos liberados após pagamento da fatura/);
@@ -531,6 +548,33 @@ test("preserva as regras de faturas, sinais e créditos", async () => {
   assert.match(invoiceNotesMigration, /ADD COLUMN internal_note text/);
   assert.match(schema, /invoice_payments_invoice_active_unique/);
   assert.match(schema, /invoice_settlements_invoice_scheduled_unique/);
+});
+
+test("impede serviços duplicados e hospedagens sobrepostas no banco", async () => {
+  const [createRoute, batchRoute, editRoute, schema, migration, conflicts, app] =
+    await Promise.all([
+      readFile(new URL("../app/api/appointments/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/appointments/batch/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/appointments/[id]/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+      readFile(new URL("../drizzle/0021_appointment_conflicts.sql", import.meta.url), "utf8"),
+      readFile(new URL("../lib/server/appointment-conflicts.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/components/management-app.tsx", import.meta.url), "utf8"),
+    ]);
+
+  assert.match(schema, /appointments_active_service_day_unique/);
+  assert.match(schema, /primaryServiceCatalogId/);
+  assert.match(migration, /appointments_prevent_lodging_overlap_insert/);
+  assert.match(migration, /appointments_prevent_lodging_overlap_update/);
+  assert.match(migration, /row_number\(\) OVER/);
+  for (const route of [createRoute, batchRoute, editRoute]) {
+    assert.match(route, /primaryServiceCatalogId|primary_service_catalog_id/);
+    assert.match(route, /rethrowAppointmentConflict/);
+  }
+  assert.match(conflicts, /duplicate_appointment/);
+  assert.match(conflicts, /lodging_overlap/);
+  assert.match(app, /busyActionRef\.current/);
+  assert.match(app, /disabled=\{busyAction\?\.startsWith\("new-service:"\)\}/);
 });
 
 test("mantém o manual e os detalhes das faturas disponíveis", async () => {

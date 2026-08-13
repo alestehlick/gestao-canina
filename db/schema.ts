@@ -532,6 +532,10 @@ export const appointments = sqliteTable(
     dogId: text("dog_id")
       .notNull()
       .references(() => dogs.id, { onDelete: "restrict" }),
+    primaryServiceCatalogId: text("primary_service_catalog_id").references(
+      () => serviceCatalog.id,
+      { onDelete: "restrict" },
+    ),
     financialTutorId: text("financial_tutor_id").references(() => tutors.id, {
       onDelete: "set null",
     }),
@@ -578,6 +582,16 @@ export const appointments = sqliteTable(
       table.status,
     ),
     index("appointments_dog_date_idx").on(table.dogId, table.startDate),
+    uniqueIndex("appointments_active_service_day_unique")
+      .on(
+        table.establishmentId,
+        table.dogId,
+        table.startDate,
+        table.primaryServiceCatalogId,
+      )
+      .where(
+        sql`${table.status} <> 'cancelled' and ${table.primaryServiceCatalogId} is not null`,
+      ),
     uniqueIndex("appointments_recurrence_occurrence_unique").on(
       table.recurringScheduleId,
       table.occurrenceDate,

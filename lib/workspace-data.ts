@@ -244,6 +244,8 @@ export type WorkspaceInvoice = {
   cashEntryId?: string | null;
   cashIncluded?: boolean;
   compensationAvailableOn?: string | null;
+  compensationFinancialAccountId?: string | null;
+  compensationFinancialAccountName?: string | null;
   mergedSourceInvoiceIds?: string[];
   /**
    * The current workspace endpoint does not need this field to render a useful
@@ -1016,6 +1018,10 @@ export function mapWorkspaceInvoices(
           : undefined,
         compensationAvailableOn:
           invoice.compensationAvailableOn ?? undefined,
+        compensationFinancialAccountId:
+          invoice.compensationFinancialAccountId ?? undefined,
+        compensationFinancialAccountName:
+          invoice.compensationFinancialAccountName ?? undefined,
         periodStart: invoice.items?.length
           ? invoice.items
               .map((item) => item.serviceDateSnapshot)

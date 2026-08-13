@@ -6,6 +6,7 @@ import {
   serviceCatalog,
 } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
+import { rethrowAppointmentConflict } from "@/lib/server/appointment-conflicts";
 import {
   assertSameOrigin,
   errorResponse,
@@ -369,7 +370,7 @@ export async function POST(request: Request) {
       const placeholders = appointmentChunk
         .map(
           () =>
-            `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?,
+            `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?,
               ${nowExpression}, ${nowExpression})`,
         )
         .join(", ");
@@ -377,7 +378,7 @@ export async function POST(request: Request) {
         d1
           .prepare(
             `INSERT INTO appointments (
-              id, establishment_id, account_id, dog_id, start_date, end_date,
+              id, establishment_id, account_id, dog_id, primary_service_catalog_id, start_date, end_date,
               start_time, end_time, lodging_nights, deposit_percent,
               lodging_rate_profile, lodging_table_daily_rate_cents, status,
               source, recurring_schedule_id, occurrence_date, internal_notes,
@@ -390,6 +391,7 @@ export async function POST(request: Request) {
               establishmentId,
               dog.accountId,
               dog.id,
+              service.id,
               created.startDate,
               created.endDate,
               startTime,
@@ -482,7 +484,11 @@ export async function POST(request: Request) {
           }),
         ),
     );
-    await d1.batch(statements);
+    try {
+      await d1.batch(statements);
+    } catch (error) {
+      rethrowAppointmentConflict(error);
+    }
 
     return json(
       {

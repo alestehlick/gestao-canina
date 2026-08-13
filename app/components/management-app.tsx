@@ -250,7 +250,9 @@ function suggestedLodgingRateProfile(
   bookings: Booking[],
   creditBalances: CreditBalances,
 ): LodgingRateProfile {
-  const existingProfile = service.lodging?.rateProfile;
+  const existingProfile = service.lodging?.rateProfile as
+    | LodgingRateProfile
+    | undefined;
   if (existingProfile) return existingProfile;
 
   const daycareCustomer =
@@ -1009,6 +1011,7 @@ export function ManagementApp() {
   const [loadError, setLoadError] = useState("");
   const [onboardingName, setOnboardingName] = useState("Hospet Quintal");
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const busyActionRef = useRef<string | null>(null);
   const [cashExclusionInvoice, setCashExclusionInvoice] =
     useState<Invoice | null>(null);
   const [invoiceCorrection, setInvoiceCorrection] = useState<{
@@ -1505,7 +1508,8 @@ export function ManagementApp() {
       refresh?: boolean;
     } = {},
   ): Promise<T | undefined> {
-    if (busyAction) return undefined;
+    if (busyActionRef.current) return undefined;
+    busyActionRef.current = key;
     setBusyAction(key);
     try {
       const result = await action();
@@ -1537,6 +1541,7 @@ export function ManagementApp() {
       });
       return undefined;
     } finally {
+      busyActionRef.current = null;
       setBusyAction(null);
     }
   }
@@ -4191,7 +4196,12 @@ export function ManagementApp() {
             invoice: { id: string; status: "paid"; paidAt: string };
             payment: { amountCents: number };
             creditsGranted: number;
-            settlement?: { availableOn: string; status: "scheduled" };
+            settlement?: {
+              availableOn: string;
+              status: "scheduled";
+              financialAccountId: string;
+              financialAccountName: string;
+            };
           }>(`/api/invoices/${invoiceId}/payments`, {
             method: "POST",
             body: JSON.stringify({
@@ -4219,6 +4229,10 @@ export function ManagementApp() {
                 ? {
                     ...invoice,
                     compensationAvailableOn: result.settlement!.availableOn,
+                    compensationFinancialAccountId:
+                      result.settlement!.financialAccountId,
+                    compensationFinancialAccountName:
+                      result.settlement!.financialAccountName,
                     due: `Em compensação · disponível em ${formatShortDate(result.settlement!.availableOn)}`,
                   }
                 : invoice,
@@ -4231,6 +4245,10 @@ export function ManagementApp() {
                   invoice: {
                     ...current.invoice,
                     compensationAvailableOn: result.settlement!.availableOn,
+                    compensationFinancialAccountId:
+                      result.settlement!.financialAccountId,
+                    compensationFinancialAccountName:
+                      result.settlement!.financialAccountName,
                     due: `Em compensação · disponível em ${formatShortDate(result.settlement!.availableOn)}`,
                   },
                 }
@@ -5647,8 +5665,14 @@ export function ManagementApp() {
               >
                 Cancelar
               </button>
-              <button className="primary-button" type="submit">
-                Salvar serviço
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={busyAction?.startsWith("new-service:")}
+              >
+                {busyAction?.startsWith("new-service:")
+                  ? "Salvando…"
+                  : "Salvar serviço"}
               </button>
             </div>
           </form>
@@ -5964,8 +5988,14 @@ export function ManagementApp() {
               >
                 Cancelar
               </button>
-              <button className="primary-button" type="submit">
-                Salvar alterações
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={busyAction === `edit-appointment:${bookingToEdit.id}`}
+              >
+                {busyAction === `edit-appointment:${bookingToEdit.id}`
+                  ? "Salvando…"
+                  : "Salvar alterações"}
               </button>
             </div>
           </form>
@@ -11250,7 +11280,8 @@ function RegularBillingDialog({
   const isDeferredLodging =
     service.serviceType === "hotel" && !service.lodging?.depositPercent;
   const initialLodgingProfile =
-    service.lodging?.rateProfile ?? suggestedLodgingProfile;
+    (service.lodging?.rateProfile as LodgingRateProfile | undefined) ??
+    suggestedLodgingProfile;
   const [lodgingDaycareCustomer, setLodgingDaycareCustomer] = useState(
     initialLodgingProfile === "daycare" ||
       initialLodgingProfile === "daycare_additional_dog",
@@ -12122,9 +12153,14 @@ function InvoiceDialog({
   );
   const [availableOn, setAvailableOn] = useState(shiftDate(operationalToday, 1));
   const [financialAccountId, setFinancialAccountId] = useState(
-    financialAccounts.length === 1 ? financialAccounts[0].id : "",
+    state.invoice?.compensationFinancialAccountId ??
+      (financialAccounts.length === 1 ? financialAccounts[0].id : ""),
   );
-  const effectiveFinancialAccountId = financialAccountId;
+  const effectiveFinancialAccountId =
+    state.invoice?.compensationAvailableOn &&
+    state.invoice.compensationFinancialAccountId
+      ? state.invoice.compensationFinancialAccountId
+      : financialAccountId;
   const [skipLongStayDiscount, setSkipLongStayDiscount] = useState(false);
   const [reversePaymentOpen, setReversePaymentOpen] = useState(false);
   const [reversePaymentReason, setReversePaymentReason] = useState("");
@@ -12526,26 +12562,38 @@ function InvoiceDialog({
 
           {!isPaid && (
             <div className="invoice-payment-register">
-              <label>
-                Conta de recebimento
-                <select
-                  value={effectiveFinancialAccountId}
-                  onChange={(event) => setFinancialAccountId(event.target.value)}
-                  required
-                >
-                  {financialAccounts.length > 1 && (
-                    <option value="">Escolha a conta</option>
+              {compensationAvailableOn &&
+              state.invoice?.compensationFinancialAccountId ? (
+                <div className="payment-account-summary">
+                  <span>Conta de recebimento</span>
+                  <strong>
+                    {state.invoice.compensationFinancialAccountName ??
+                      "Conta vinculada à compensação"}
+                  </strong>
+                  <small>A confirmação será registrada na mesma conta escolhida anteriormente.</small>
+                </div>
+              ) : (
+                <label>
+                  Conta de recebimento
+                  <select
+                    value={effectiveFinancialAccountId}
+                    onChange={(event) => setFinancialAccountId(event.target.value)}
+                    required
+                  >
+                    {financialAccounts.length > 1 && (
+                      <option value="">Escolha a conta</option>
+                    )}
+                    {financialAccounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.name}{account.institution ? ` · ${account.institution}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {!financialAccounts.length && (
+                    <small>Cadastre uma conta ativa no Caixa antes de registrar o recebimento.</small>
                   )}
-                  {financialAccounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.name}{account.institution ? ` · ${account.institution}` : ""}
-                    </option>
-                  ))}
-                </select>
-                {!financialAccounts.length && (
-                  <small>Cadastre uma conta ativa no Caixa antes de registrar o recebimento.</small>
-                )}
-              </label>
+                </label>
+              )}
               <label>
                 {compensationAvailableOn
                   ? "Data em que o valor ficou disponível"

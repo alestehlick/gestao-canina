@@ -9,6 +9,7 @@ import {
   serviceCatalog,
 } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
+import { rethrowAppointmentConflict } from "@/lib/server/appointment-conflicts";
 import {
   assertSameOrigin,
   errorResponse,
@@ -613,6 +614,12 @@ async function reopenCompletedAppointment({
       .prepare(
         `UPDATE appointments
         SET status = 'scheduled',
+          primary_service_catalog_id = COALESCE(
+            primary_service_catalog_id,
+            (SELECT service_catalog_id FROM appointment_items
+             WHERE appointment_id = appointments.id
+             ORDER BY created_at, id LIMIT 1)
+          ),
           cancellation_reason = NULL,
           updated_at = ${nowExpression}
         WHERE id = ?
@@ -625,7 +632,9 @@ async function reopenCompletedAppointment({
       .bind(appointmentId, establishmentId, guardAuditId),
   );
 
-  const results = await d1.batch(statements);
+  const results = await d1
+    .batch(statements)
+    .catch((error) => rethrowAppointmentConflict(error));
   if ((results[0].meta.changes ?? 0) !== 1) {
     const db = getDb();
     const [currentAppointment] = await db
@@ -1072,6 +1081,7 @@ export async function PATCH(
           .set({
             startDate,
             endDate,
+            primaryServiceCatalogId: service.id,
             startTime,
             endTime,
             lodgingNights,
@@ -1139,7 +1149,11 @@ export async function PATCH(
           }),
         }),
       ] as const;
-      await db.batch(updateStatements);
+      try {
+        await db.batch(updateStatements);
+      } catch (error) {
+        rethrowAppointmentConflict(error);
+      }
 
       return json({
         appointment: {
@@ -1268,67 +1282,98 @@ export async function PATCH(
       }
     }
 
-    const now = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
-    const appointmentUpdate = db
-      .update(appointments)
-      .set({
-        status: requestedStatus,
-        cancellationReason:
+    const transitionAuditId = crypto.randomUUID();
+    const d1 = getD1Database();
+    const transitionStatements = [
+      d1
+        .prepare(
+          `INSERT INTO audit_events (
+            id, establishment_id, actor_user_id, actor_role, action,
+            entity_type, entity_id, request_id, reason, result,
+            metadata_json, occurred_at
+          )
+          SELECT ?, ?, ?, ?, ?, 'appointment', ?, ?, ?, 'success', ?,
+            ${nowExpression}
+          FROM appointments
+          WHERE id = ? AND establishment_id = ? AND status = ?`,
+        )
+        .bind(
+          transitionAuditId,
+          establishmentId,
+          identity.userId,
+          identity.role,
+          requestedStatus === "cancelled"
+            ? "appointment.cancelled"
+            : "appointment.status_changed",
+          id,
+          requestId,
           requestedStatus === "cancelled" ? cancellationReason : null,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(appointments.id, id),
-          eq(appointments.establishmentId, establishmentId),
-          eq(appointments.status, appointment.status),
+          JSON.stringify({
+            previousStatus: appointment.status,
+            status: requestedStatus,
+          }),
+          id,
+          establishmentId,
+          appointment.status,
         ),
-      );
-    const auditInsert = db.insert(auditEvents).values({
-      id: crypto.randomUUID(),
-      establishmentId,
-      actorUserId: identity.userId,
-      actorRole: identity.role,
-      action:
-        requestedStatus === "cancelled"
-          ? "appointment.cancelled"
-          : "appointment.status_changed",
-      entityType: "appointment",
-      entityId: id,
-      requestId,
-      reason:
-        requestedStatus === "cancelled" ? cancellationReason : null,
-      metadataJson: JSON.stringify({
-        previousStatus: appointment.status,
-        status: requestedStatus,
-      }),
-    });
-
-    if (
-      requestedStatus === "completed" ||
-      requestedStatus === "cancelled"
-    ) {
-      await db.batch([
-        appointmentUpdate,
-        db
-          .update(appointmentItems)
-          .set({
-            status:
-              requestedStatus === "completed"
-                ? "completed"
-                : "cancelled",
-            updatedAt: now,
-          })
-          .where(
-            and(
-              eq(appointmentItems.appointmentId, id),
-              eq(appointmentItems.status, "scheduled"),
+      d1
+        .prepare(
+          `UPDATE appointments
+          SET status = ?,
+            primary_service_catalog_id = COALESCE(
+              primary_service_catalog_id,
+              (SELECT service_catalog_id FROM appointment_items
+               WHERE appointment_id = appointments.id
+               ORDER BY created_at, id LIMIT 1)
             ),
-          ),
-        auditInsert,
-      ]);
-    } else {
-      await db.batch([appointmentUpdate, auditInsert]);
+            cancellation_reason = ?,
+            updated_at = ${nowExpression}
+          WHERE id = ? AND establishment_id = ? AND status = ?
+            AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)`,
+        )
+        .bind(
+          requestedStatus,
+          requestedStatus === "cancelled" ? cancellationReason : null,
+          id,
+          establishmentId,
+          appointment.status,
+          transitionAuditId,
+        ),
+    ];
+    try {
+      if (
+        requestedStatus === "completed" ||
+        requestedStatus === "cancelled"
+      ) {
+        transitionStatements.push(
+          d1
+            .prepare(
+              `UPDATE appointment_items
+              SET status = ?, updated_at = ${nowExpression}
+              WHERE appointment_id = ? AND status = 'scheduled'
+                AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)`,
+            )
+            .bind(
+              requestedStatus === "completed" ? "completed" : "cancelled",
+              id,
+              transitionAuditId,
+            ),
+        );
+      }
+      const results = await d1.batch(transitionStatements);
+      if (
+        (results[0].meta.changes ?? 0) !== 1 ||
+        (results[1].meta.changes ?? 0) !== 1
+      ) {
+        throw new HttpError(
+          409,
+          "appointment_status_conflict",
+          "O agendamento foi alterado. Atualize a Agenda e tente novamente.",
+        );
+      }
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      rethrowAppointmentConflict(error);
     }
 
     const [updatedAppointment, updatedItems] = await Promise.all([

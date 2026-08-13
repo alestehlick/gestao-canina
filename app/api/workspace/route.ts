@@ -23,6 +23,7 @@ import {
   dogs,
   dogTutors,
   establishments,
+  financialAccounts,
   invoiceItems,
   invoiceMergeMembers,
   invoiceMerges,
@@ -411,8 +412,14 @@ export async function GET(request: Request) {
           invoiceId: invoiceSettlements.invoiceId,
           status: invoiceSettlements.status,
           availableOn: invoiceSettlements.availableOn,
+          financialAccountId: invoiceSettlements.financialAccountId,
+          financialAccountName: financialAccounts.name,
         })
         .from(invoiceSettlements)
+        .leftJoin(
+          financialAccounts,
+          eq(financialAccounts.id, invoiceSettlements.financialAccountId),
+        )
         .where(
           and(
             eq(invoiceSettlements.establishmentId, establishmentId),
@@ -665,6 +672,10 @@ export async function GET(request: Request) {
                   paymentByInvoice.get(invoice.id)?.cashStatus === "included",
                 compensationAvailableOn:
                   settlementByInvoice.get(invoice.id)?.availableOn ?? null,
+                compensationFinancialAccountId:
+                  settlementByInvoice.get(invoice.id)?.financialAccountId ?? null,
+                compensationFinancialAccountName:
+                  settlementByInvoice.get(invoice.id)?.financialAccountName ?? null,
                 items: itemsByInvoice.get(invoice.id) ?? [],
                 mergedSourceInvoiceIds:
                   mergedSourcesByInvoice.get(invoice.id) ?? [],

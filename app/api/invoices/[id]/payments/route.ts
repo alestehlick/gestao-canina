@@ -89,30 +89,6 @@ export async function POST(
       "financialAccountId",
       80,
     );
-    const [selectedFinancialAccount] = await db
-      .select({ id: financialAccounts.id, name: financialAccounts.name })
-      .from(financialAccounts)
-      .where(
-        requestedFinancialAccountId
-          ? and(
-              eq(financialAccounts.id, requestedFinancialAccountId),
-              eq(financialAccounts.establishmentId, establishmentId),
-              eq(financialAccounts.active, true),
-            )
-          : and(
-              eq(financialAccounts.establishmentId, establishmentId),
-              eq(financialAccounts.active, true),
-            ),
-      )
-      .limit(1);
-    if (!selectedFinancialAccount) {
-      throw new HttpError(
-        409,
-        "financial_account_required",
-        "Cadastre ou escolha uma conta de recebimento ativa.",
-      );
-    }
-
     const [invoice] = await db
       .select()
       .from(invoices)
@@ -159,18 +135,56 @@ export async function POST(
         ),
       )
       .limit(1);
-    const usedFinancialAccount =
-      scheduledSettlement?.financialAccountId &&
-      scheduledSettlement.financialAccountId !== selectedFinancialAccount.id
-        ? (await db
-            .select({ id: financialAccounts.id, name: financialAccounts.name })
-            .from(financialAccounts)
-            .where(and(
-              eq(financialAccounts.id, scheduledSettlement.financialAccountId),
+    if (settlementMode === "confirm_scheduled" && !scheduledSettlement) {
+      throw new HttpError(
+        409,
+        "settlement_not_found",
+        "Esta fatura não possui um recebimento em compensação para confirmar.",
+      );
+    }
+    if (settlementMode === "immediate" && scheduledSettlement) {
+      throw new HttpError(
+        409,
+        "settlement_pending",
+        "Confirme o valor em compensação quando ele estiver disponível.",
+      );
+    }
+    const confirmingLinkedSettlement =
+      settlementMode === "confirm_scheduled" &&
+      Boolean(scheduledSettlement?.financialAccountId);
+    const [usedFinancialAccount] = await db
+      .select({ id: financialAccounts.id, name: financialAccounts.name })
+      .from(financialAccounts)
+      .where(
+        confirmingLinkedSettlement
+          ? and(
+              eq(
+                financialAccounts.id,
+                scheduledSettlement!.financialAccountId!,
+              ),
               eq(financialAccounts.establishmentId, establishmentId),
-            ))
-            .limit(1))[0] ?? selectedFinancialAccount
-        : selectedFinancialAccount;
+            )
+          : requestedFinancialAccountId
+            ? and(
+                eq(financialAccounts.id, requestedFinancialAccountId),
+                eq(financialAccounts.establishmentId, establishmentId),
+                eq(financialAccounts.active, true),
+              )
+            : and(
+                eq(financialAccounts.establishmentId, establishmentId),
+                eq(financialAccounts.active, true),
+              ),
+      )
+      .limit(1);
+    if (!usedFinancialAccount) {
+      throw new HttpError(
+        409,
+        "financial_account_required",
+        confirmingLinkedSettlement
+          ? "A conta vinculada à compensação não foi encontrada. Revise a conta no Caixa."
+          : "Cadastre ou escolha uma conta de recebimento ativa.",
+      );
+    }
 
     if (settlementMode === "schedule") {
       const availableOn = optionalString(body, "availableOn", 10);
@@ -212,7 +226,7 @@ export async function POST(
           .bind(
             settlementId,
             establishmentId,
-            selectedFinancialAccount.id,
+            usedFinancialAccount.id,
             availableOn,
             note,
             identity.userId,
@@ -244,8 +258,8 @@ export async function POST(
               availableOn,
               amountCents: invoice.totalCents,
               note,
-              financialAccountId: selectedFinancialAccount.id,
-              financialAccountName: selectedFinancialAccount.name,
+              financialAccountId: usedFinancialAccount.id,
+              financialAccountName: usedFinancialAccount.name,
             }),
             settlementId,
           ),
@@ -255,26 +269,17 @@ export async function POST(
       }
       return json({
         invoice: { id: invoiceId, invoiceNumber: invoice.invoiceNumber, status: "issued", totalCents: invoice.totalCents },
-        settlement: { id: settlementId, availableOn, status: "scheduled" },
+        settlement: {
+          id: settlementId,
+          availableOn,
+          status: "scheduled",
+          financialAccountId: usedFinancialAccount.id,
+          financialAccountName: usedFinancialAccount.name,
+        },
       });
     }
 
     await assertCashDateIsOpen(establishmentId, paidAt.slice(0, 10));
-
-    if (settlementMode === "confirm_scheduled" && !scheduledSettlement) {
-      throw new HttpError(
-        409,
-        "settlement_not_found",
-        "Esta fatura não possui um recebimento em compensação para confirmar.",
-      );
-    }
-    if (settlementMode === "immediate" && scheduledSettlement) {
-      throw new HttpError(
-        409,
-        "settlement_pending",
-        "Confirme o valor em compensação quando ele estiver disponível.",
-      );
-    }
 
     const paymentAmountCents = invoice.totalCents;
 
@@ -393,20 +398,6 @@ export async function POST(
     const nowExpression = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
     const d1 = getD1Database();
     const statements = [] as ReturnType<typeof d1.prepare>[];
-    let settlementConfirmationIndex: number | null = null;
-    if (scheduledSettlement) {
-      settlementConfirmationIndex = statements.length;
-      statements.push(
-        d1
-          .prepare(
-            `UPDATE invoice_settlements
-            SET status = 'confirmed', confirmed_at = ${nowExpression},
-              confirmed_by_user_id = ?, updated_at = ${nowExpression}
-            WHERE id = ? AND establishment_id = ? AND status = 'scheduled'`,
-          )
-          .bind(identity.userId, scheduledSettlement.id, establishmentId),
-      );
-    }
     const paymentStatementIndex = statements.length;
     statements.push(
       d1
@@ -422,6 +413,10 @@ export async function POST(
               SELECT 1 FROM invoice_payments
               WHERE invoice_id = ? AND status = 'active'
             )
+            AND (? = 0 OR EXISTS (
+              SELECT 1 FROM invoice_settlements
+              WHERE id = ? AND invoice_id = invoices.id AND status = 'scheduled'
+            ))
             ${creditPurchaseGuard}`,
         )
         .bind(
@@ -435,10 +430,36 @@ export async function POST(
           invoiceId,
           establishmentId,
           invoiceId,
+          scheduledSettlement ? 1 : 0,
+          scheduledSettlement?.id ?? "",
           ...purchasesToGrant.map((purchase) => purchase.id),
           ...(purchasesToGrant.length ? [purchasesToGrant.length] : []),
         ),
     );
+    let settlementConfirmationIndex: number | null = null;
+    if (scheduledSettlement) {
+      settlementConfirmationIndex = statements.length;
+      statements.push(
+        d1
+          .prepare(
+            `UPDATE invoice_settlements
+            SET status = 'confirmed', confirmed_at = ${nowExpression},
+              confirmed_by_user_id = ?, updated_at = ${nowExpression}
+            WHERE id = ? AND establishment_id = ? AND status = 'scheduled'
+              AND EXISTS (
+                SELECT 1 FROM invoice_payments
+                WHERE id = ? AND invoice_id = invoice_settlements.invoice_id
+                  AND status = 'active'
+              )`,
+          )
+          .bind(
+            identity.userId,
+            scheduledSettlement.id,
+            establishmentId,
+            paymentId,
+          ),
+      );
+    }
     const paidStatementIndex = statements.length;
     statements.push(
       d1
@@ -449,9 +470,19 @@ export async function POST(
             AND EXISTS (
               SELECT 1 FROM invoice_payments
               WHERE id = ? AND invoice_id = invoices.id
-            )`,
+            )
+            AND (? = 0 OR EXISTS (
+              SELECT 1 FROM invoice_settlements
+              WHERE id = ? AND invoice_id = invoices.id AND status = 'confirmed'
+            ))`,
         )
-        .bind(invoiceId, establishmentId, paymentId),
+        .bind(
+          invoiceId,
+          establishmentId,
+          paymentId,
+          scheduledSettlement ? 1 : 0,
+          scheduledSettlement?.id ?? "",
+        ),
     );
 
     const cashEntryId = crypto.randomUUID();

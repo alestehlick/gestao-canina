@@ -131,6 +131,8 @@ export type Invoice = {
   cashEntryId?: string;
   cashIncluded?: boolean;
   compensationAvailableOn?: string;
+  compensationFinancialAccountId?: string;
+  compensationFinancialAccountName?: string;
   periodStart?: string;
   periodEnd?: string;
   lines: {

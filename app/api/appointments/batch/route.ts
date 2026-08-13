@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { getD1Database, getDb } from "@/db";
 import { dogs, serviceCatalog } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
+import { rethrowAppointmentConflict } from "@/lib/server/appointment-conflicts";
 import {
   assertSameOrigin,
   errorResponse,
@@ -120,12 +121,13 @@ export async function POST(request: Request) {
       const recordEndTime = record.service.code === "taxi_dog" ? null : endTime;
       statements.push(d1.prepare(
         `INSERT INTO appointments (
-          id, establishment_id, account_id, dog_id, start_date, end_date,
+          id, establishment_id, account_id, dog_id, primary_service_catalog_id, start_date, end_date,
           start_time, end_time, status, source, internal_notes,
           created_by_user_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', 'manual', ?, ?, ${nowExpression}, ${nowExpression})`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', 'manual', ?, ?, ${nowExpression}, ${nowExpression})`,
       ).bind(
         record.appointmentId, establishmentId, record.dog.accountId, record.dog.id,
+        record.service.id,
         date, date, recordStartTime, recordEndTime, internalNotes, identity.userId,
       ));
       statements.push(d1.prepare(
@@ -155,7 +157,11 @@ export async function POST(request: Request) {
         transportDirection: serviceRows.some((service) => service.code === "taxi_dog") ? direction : null,
       }),
     ));
-    await d1.batch(statements);
+    try {
+      await d1.batch(statements);
+    } catch (error) {
+      rethrowAppointmentConflict(error);
+    }
     return json({
       created: records.length,
       appointmentIds: records.map((record) => record.appointmentId),

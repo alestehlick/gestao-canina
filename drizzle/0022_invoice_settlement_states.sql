@@ -1,3 +1,5 @@
+DROP TABLE IF EXISTS `__new_invoice_settlements`;
+
 CREATE TABLE `__new_invoice_settlements` (
   `id` text PRIMARY KEY NOT NULL,
   `establishment_id` text NOT NULL REFERENCES establishments(id) ON DELETE restrict,
@@ -38,11 +40,7 @@ INSERT INTO `__new_invoice_settlements` (
   `id`, `establishment_id`, `invoice_id`, `financial_account_id`,
   `amount_cents`, `available_on`, `note`, `status`,
   `created_by_user_id`, `cancelled_at`, `cancelled_by_user_id`,
-  CASE
-    WHEN `status` = 'cancelled' THEN
-      COALESCE(NULLIF(trim(`cancellation_reason`), ''), 'Cancelamento registrado anteriormente')
-    ELSE `cancellation_reason`
-  END,
+  `cancellation_reason`,
   `confirmed_at`, `confirmed_by_user_id`,
   `created_at`, `updated_at`
 )
@@ -50,7 +48,12 @@ SELECT
   `id`, `establishment_id`, `invoice_id`, `financial_account_id`,
   `amount_cents`, `available_on`, `note`, `status`,
   `created_by_user_id`, `cancelled_at`, `cancelled_by_user_id`,
-  `cancellation_reason`, `confirmed_at`, `confirmed_by_user_id`,
+  CASE
+    WHEN `status` = 'cancelled' THEN
+      COALESCE(NULLIF(trim(`cancellation_reason`), ''), 'Cancelamento registrado anteriormente')
+    ELSE `cancellation_reason`
+  END,
+  `confirmed_at`, `confirmed_by_user_id`,
   `created_at`, `updated_at`
 FROM `invoice_settlements`;
 

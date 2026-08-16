@@ -1633,9 +1633,13 @@ export function ManagementApp() {
     dogIds: string[];
     serviceCatalogIds: string[];
     date: string;
+    endDate?: string;
     startTime?: string;
     endTime?: string;
     transportDirection: "one_way" | "round_trip";
+    lodgingNights?: number;
+    depositPercent?: number | null;
+    lodgingDaycareCustomer?: boolean;
     internalNotes?: string;
   }) {
     if (runtimeMode !== "ready") return false;
@@ -3995,6 +3999,7 @@ export function ManagementApp() {
                     kind: service.billingKind ?? "service",
                   })),
                 dueDate: operationalToday,
+                applyLongStayDiscount,
               }),
             });
             registeredInvoice = {
@@ -5262,8 +5267,9 @@ export function ManagementApp() {
           customers={customers}
           dogs={dogs}
           services={workspacePayload.serviceCatalog.filter(
-            (service) => service.active && service.code !== "hotel",
+            (service) => service.active,
           )}
+          lodgingPricing={lodgingPricing}
           defaultDate={selectedDate}
           busy={busyAction === "quick-services"}
           onClose={() => setDialog(null)}
@@ -7645,6 +7651,7 @@ function QuickServiceDialog({
   customers,
   dogs,
   services,
+  lodgingPricing,
   defaultDate,
   busy,
   onClose,
@@ -7653,6 +7660,7 @@ function QuickServiceDialog({
   customers: Customer[];
   dogs: Dog[];
   services: WorkspaceService[];
+  lodgingPricing: LodgingPricing;
   defaultDate: string;
   busy: boolean;
   onClose: () => void;
@@ -7660,9 +7668,13 @@ function QuickServiceDialog({
     dogIds: string[];
     serviceCatalogIds: string[];
     date: string;
+    endDate?: string;
     startTime?: string;
     endTime?: string;
     transportDirection: "one_way" | "round_trip";
+    lodgingNights?: number;
+    depositPercent?: number | null;
+    lodgingDaycareCustomer?: boolean;
     internalNotes?: string;
   }) => Promise<boolean>;
 }) {
@@ -7671,12 +7683,27 @@ function QuickServiceDialog({
   const [serviceIds, setServiceIds] = useState<string[]>([]);
   const [direction, setDirection] = useState<"one_way" | "round_trip">("one_way");
   const [date, setDate] = useState(defaultDate);
+  const [endDate, setEndDate] = useState(shiftDate(defaultDate, 1));
+  const [lodgingNights, setLodgingNights] = useState(1);
+  const [hasDeposit, setHasDeposit] = useState(false);
+  const [depositPercent, setDepositPercent] = useState(50);
+  const [lodgingDaycareCustomer, setLodgingDaycareCustomer] = useState(false);
   const selectedCustomer = customers.find((customer) => customer.id === customerId);
   const availableDogs = dogs.filter((dog) => selectedCustomer?.dogIds.includes(dog.id));
+  const lodgingService = services.find((service) => service.code === "hotel");
+  const includesLodging = Boolean(
+    lodgingService && serviceIds.includes(lodgingService.id),
+  );
   const includesTaxiDog = services.some(
     (service) => serviceIds.includes(service.id) && service.code === "taxi_dog",
   );
   const total = dogIds.length * serviceIds.length;
+  const primaryLodgingProfile: LodgingRateProfile = lodgingDaycareCustomer
+    ? "daycare"
+    : "standard";
+  const additionalDogLodgingProfile: LodgingRateProfile = lodgingDaycareCustomer
+    ? "daycare_additional_dog"
+    : "additional_dog";
 
   const toggle = (id: string, setter: (update: (current: string[]) => string[]) => void) => {
     setter((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
@@ -7685,14 +7712,34 @@ function QuickServiceDialog({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!dogIds.length || !serviceIds.length) return;
+    if (
+      includesLodging &&
+      (!endDate ||
+        !lodgingNightOptions(date, endDate).includes(lodgingNights) ||
+        (hasDeposit &&
+          (!Number.isInteger(depositPercent) ||
+            depositPercent < 1 ||
+            depositPercent > 99)))
+    ) {
+      return;
+    }
     const form = new FormData(event.currentTarget);
     await onSubmit({
       dogIds,
       serviceCatalogIds: serviceIds,
       date,
+      endDate: includesLodging ? endDate : undefined,
       startTime: String(form.get("time") ?? "") || undefined,
       endTime: String(form.get("endTime") ?? "") || undefined,
       transportDirection: direction,
+      lodgingNights: includesLodging ? lodgingNights : undefined,
+      depositPercent: includesLodging
+        ? hasDeposit
+          ? depositPercent
+          : null
+        : undefined,
+      lodgingDaycareCustomer:
+        includesLodging && hasDeposit ? lodgingDaycareCustomer : undefined,
       internalNotes: String(form.get("internalNotes") ?? "").trim() || undefined,
     });
   }
@@ -7742,20 +7789,97 @@ function QuickServiceDialog({
               <input
                 type="checkbox"
                 checked={serviceIds.includes(service.id)}
-                onChange={() => toggle(service.id, setServiceIds)}
+                onChange={() => {
+                  if (service.code === "hotel") {
+                    if (serviceIds.includes(service.id)) {
+                      setServiceIds([]);
+                    } else {
+                      const nextEndDate =
+                        endDate > date ? endDate : shiftDate(date, 1);
+                      setEndDate(nextEndDate);
+                      setLodgingNights(
+                        lodgingNightOptions(date, nextEndDate)[0] ?? 1,
+                      );
+                      setServiceIds([service.id]);
+                    }
+                    return;
+                  }
+                  setServiceIds((current) => {
+                    const withoutLodging = lodgingService
+                      ? current.filter((id) => id !== lodgingService.id)
+                      : current;
+                    return withoutLodging.includes(service.id)
+                      ? withoutLodging.filter((id) => id !== service.id)
+                      : [...withoutLodging, service.id];
+                  });
+                }}
               />
               <span>{service.name}</span>
             </label>
           ))}
-          <small>Hospedagem continua no formulário individual por envolver diárias, sinal e preços próprios.</small>
+          <small>
+            Hospedagem é criada separadamente dos serviços do dia, mas pode incluir vários cães da mesma reserva.
+          </small>
         </fieldset>
 
-        <label className="field full">
-          <span>Data *</span>
-          <BrazilianDateInput value={date} onChange={setDate} required />
+        <label className={`field${includesLodging ? "" : " full"}`}>
+          <span>{includesLodging ? "Entrada *" : "Data *"}</span>
+          <BrazilianDateInput
+            value={date}
+            onChange={(nextDate) => {
+              setDate(nextDate);
+              if (includesLodging && endDate <= nextDate) {
+                const nextEndDate = shiftDate(nextDate, 1);
+                setEndDate(nextEndDate);
+                setLodgingNights(1);
+              }
+            }}
+            required
+          />
         </label>
-        <ServiceTimeInput name="time" label="Início" />
-        <ServiceTimeInput name="endTime" label="Fim" />
+        {includesLodging && (
+          <>
+            <label className="field">
+              <span>Saída *</span>
+              <BrazilianDateInput
+                value={endDate}
+                min={shiftDate(date, 1)}
+                onChange={(nextEndDate) => {
+                  setEndDate(nextEndDate);
+                  setLodgingNights(
+                    lodgingNightOptions(date, nextEndDate)[0] ?? 1,
+                  );
+                }}
+                required
+              />
+            </label>
+            <label className="field full">
+              <span>Número de diárias *</span>
+              <select
+                value={lodgingNights}
+                onChange={(event) =>
+                  setLodgingNights(Number(event.target.value))
+                }
+                required
+              >
+                {lodgingNightOptions(date, endDate).map((nights) => (
+                  <option key={nights} value={nights}>
+                    {String(nights).replace(".", ",")} {nights === 1 ? "diária" : "diárias"}
+                  </option>
+                ))}
+              </select>
+              <small>Somente opções compatíveis com a entrada e a saída.</small>
+            </label>
+          </>
+        )}
+        <ServiceTimeInput
+          name="time"
+          label={includesLodging ? "Entrada (opcional)" : "Início"}
+        />
+        <ServiceTimeInput
+          name="endTime"
+          label={includesLodging ? "Saída (opcional)" : "Fim"}
+        />
 
         {includesTaxiDog && (
           <label className="field full">
@@ -7765,6 +7889,69 @@ function QuickServiceDialog({
               <option value="round_trip">Ida e volta · 2 créditos</option>
             </select>
           </label>
+        )}
+        {includesLodging && (
+          <>
+            <label className="check-field full">
+              <input
+                type="checkbox"
+                checked={hasDeposit}
+                onChange={(event) => {
+                  setHasDeposit(event.target.checked);
+                  if (!event.target.checked) {
+                    setLodgingDaycareCustomer(false);
+                  }
+                }}
+              />
+              <span>
+                Cobrar sinal no check-in
+                <small>O saldo permanecerá para o check-out.</small>
+              </span>
+            </label>
+            {hasDeposit ? (
+              <fieldset className="lodging-rate-options full">
+                <legend>Condição para calcular o sinal</legend>
+                <label className="field">
+                  <span>Sinal no check-in (%)</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="99"
+                    step="1"
+                    value={depositPercent}
+                    onChange={(event) =>
+                      setDepositPercent(Number(event.target.value))
+                    }
+                    required
+                  />
+                </label>
+                <label className="check-field">
+                  <input
+                    type="checkbox"
+                    checked={lodgingDaycareCustomer}
+                    onChange={(event) =>
+                      setLodgingDaycareCustomer(event.target.checked)
+                    }
+                  />
+                  <span>Cliente de creche regular</span>
+                </label>
+                <small className="field-help">
+                  {dogIds.length > 0
+                    ? `${dogs.find((dog) => dog.id === dogIds[0])?.name ?? "Primeiro cão"}: ${lodgingRateLabel(primaryLodgingProfile)} · ${formatCurrency(lodgingDailyRate(lodgingPricing, primaryLodgingProfile))} por diária.`
+                    : "Selecione ao menos um cão para visualizar a condição da diária."}
+                  {dogIds.length > 1
+                    ? dogIds.length === 2
+                      ? ` O outro cão terá a diária adicional de ${formatCurrency(lodgingDailyRate(lodgingPricing, additionalDogLodgingProfile))}.`
+                      : ` Os outros ${dogIds.length - 1} cães terão a diária adicional de ${formatCurrency(lodgingDailyRate(lodgingPricing, additionalDogLodgingProfile))}.`
+                    : ""}
+                </small>
+              </fieldset>
+            ) : (
+              <small className="field-help full">
+                A condição da diária será definida em Cobranças, ao escolher Regular.
+              </small>
+            )}
+          </>
         )}
         <label className="field full">
           <span>Observação geral</span>

@@ -723,6 +723,10 @@ test("mantém a política de hospedagem clara e auditável", async () => {
   assert.match(invoices, /hotelLongStayDiscountPercent/);
   assert.match(invoices, /lodging_long_stay_discount_cents/);
   assert.match(invoices, /applyLongStayDiscount !== false/);
+  assert.match(
+    app,
+    /billingEntries:[\s\S]*dueDate: operationalToday,[\s\S]*applyLongStayDiscount/,
+  );
   assert.doesNotMatch(payments, /withoutLongStayDiscount/);
   assert.match(app, /Desconto de longa estadia de \$\{longStayDiscountPercent\}% aplicado/);
   assert.match(app, /Desconto por longa estadia/);
@@ -796,7 +800,15 @@ test("mantém extratos, contas, agendamento rápido e alertas operacionais coere
   assert.match(app, /Próximos de renovar/);
   assert.match(app, /Emitir extrato do cliente/);
   assert.match(batchRoute, /mixed_customers/);
-  assert.match(batchRoute, /lodging_requires_individual_booking/);
+  assert.match(batchRoute, /lodging_must_be_separate/);
+  assert.match(batchRoute, /lodgingDaycareCustomer/);
+  assert.match(batchRoute, /lodging_rate_profile/);
+  assert.match(batchRoute, /lodging_table_daily_rate_cents/);
+  assert.match(batchRoute, /a\.start_date <= \? AND a\.end_date >= \?/);
+  assert.match(app, /Hospedagem é criada separadamente dos serviços do dia/);
+  assert.match(app, /Número de diárias \*/);
+  assert.match(app, /Condição para calcular o sinal/);
+  assert.match(app, /O outro cão terá a diária adicional/);
   assert.match(batchRoute, /await d1\.batch\(statements\)/);
   assert.match(statementRoute, /openingBalanceCents/);
   assert.match(statementRoute, /closingBalanceCents/);

@@ -376,7 +376,7 @@ export async function GET(request: Request) {
           and(
             eq(serviceCatalog.establishmentId, establishmentId),
             eq(serviceCatalog.active, true),
-            sql`${serviceCatalog.code} <> 'bath_grooming'`,
+            sql`${serviceCatalog.code} not in ('bath_grooming', 'other')`,
           ),
         )
         .orderBy(asc(serviceCatalog.name)),

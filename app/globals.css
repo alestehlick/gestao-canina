@@ -7150,6 +7150,59 @@ h3 {
   line-height: 1;
 }
 
+.portal-credit-summary {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  display: grid;
+  gap: 20px;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin-bottom: 20px;
+  padding: 16px 18px;
+}
+
+.portal-credit-summary h2 {
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+.portal-credit-summary-list {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.portal-credit-summary-list > span {
+  align-items: center;
+  background: #f7f3ea;
+  border-radius: 12px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 9px 12px;
+}
+
+.portal-credit-summary-list small,
+.portal-credit-summary-empty {
+  color: var(--muted);
+}
+
+.portal-credit-summary-list strong {
+  align-items: center;
+  background: var(--forest);
+  border-radius: 999px;
+  color: #fff;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  height: 28px;
+  justify-content: center;
+  min-width: 28px;
+  padding: 0 7px;
+}
+
 .portal-alert-strip {
   align-items: flex-start;
   background: #fff7e7;
@@ -7294,7 +7347,6 @@ h3 {
 }
 
 .portal-appointment-list,
-.portal-credit-list,
 .portal-invoice-items,
 .portal-vaccines {
   display: grid;
@@ -7302,7 +7354,6 @@ h3 {
 }
 
 .portal-appointment-list > article,
-.portal-credit-list > div,
 .portal-invoice-items > div,
 .portal-receipt-list > div {
   align-items: center;
@@ -7605,6 +7656,21 @@ h3 {
 
   .portal-hero > span strong {
     font-size: 1.4rem;
+  }
+
+  .portal-credit-summary {
+    align-items: stretch;
+    gap: 12px;
+    grid-template-columns: 1fr;
+    padding: 15px;
+  }
+
+  .portal-credit-summary h2 {
+    white-space: normal;
+  }
+
+  .portal-credit-summary-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .portal-alert-strip {

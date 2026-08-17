@@ -768,6 +768,13 @@ test("aprova pedidos do portal junto com a agenda e protege a experiência do cl
   assert.match(portalUi, /transportDistance/);
   assert.match(portalUi, /const formElement = event\.currentTarget/);
   assert.match(portalUi, /formElement\.reset\(\)/);
+  assert.match(portalUi, /className="portal-credit-summary"/);
+  assert.ok(
+    portalUi.indexOf('className="portal-credit-summary"') <
+      portalUi.indexOf('className="portal-dashboard-grid"'),
+  );
+  assert.match(portalApi, /not in \('bath_grooming', 'other'\)/);
+  assert.match(requests, /service\.code === "other"/);
   assert.match(requestList, /summary\?\.pendingCount/);
   assert.match(app, /nav-count nav-count-alert/);
   assert.match(app, /pendingCustomerRequestCount/);

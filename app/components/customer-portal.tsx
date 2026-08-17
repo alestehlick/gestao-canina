@@ -931,6 +931,29 @@ export default function CustomerPortal() {
                 próximos serviços
               </span>
             </section>
+            <section
+              className="portal-credit-summary"
+              aria-labelledby="portal-credit-summary-title"
+            >
+              <div>
+                <p className="section-kicker">Créditos disponíveis</p>
+                <h2 id="portal-credit-summary-title">Seus saldos</h2>
+              </div>
+              {data.credits.length ? (
+                <div className="portal-credit-summary-list">
+                  {data.credits.map((credit) => (
+                    <span key={credit.serviceCatalogId}>
+                      <small>{credit.serviceName}</small>
+                      <strong>{credit.availableUnits}</strong>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="portal-credit-summary-empty">
+                  Nenhum crédito disponível no momento.
+                </p>
+              )}
+            </section>
             {petAlerts.length > 0 && (
               <section className="portal-alert-strip" aria-label="Avisos de vacinas">
                 <strong>Vacinas que precisam de atenção</strong>
@@ -1312,26 +1335,6 @@ export default function CustomerPortal() {
 
         {view === "finance" && (
           <div className="portal-finance-grid">
-            <section className="panel">
-              <div className="panel-heading">
-                <div>
-                  <p className="section-kicker">Créditos</p>
-                  <h2>Saldos disponíveis</h2>
-                </div>
-              </div>
-              <div className="portal-credit-list">
-                {data.credits.length ? (
-                  data.credits.map((credit) => (
-                    <div key={credit.serviceCatalogId}>
-                      <span>{credit.serviceName}</span>
-                      <strong>{credit.availableUnits}</strong>
-                    </div>
-                  ))
-                ) : (
-                  <p>Nenhum crédito disponível.</p>
-                )}
-              </div>
-            </section>
             <section className="panel portal-invoice-list">
               <div className="panel-heading">
                 <div>

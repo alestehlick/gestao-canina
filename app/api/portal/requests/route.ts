@@ -214,6 +214,13 @@ export async function POST(request: Request) {
           "Solicite um banho e marque a opção de incluir tosa.",
         );
       }
+      if (service.code === "other") {
+        throw new HttpError(
+          400,
+          "service_not_requestable",
+          "Este tipo de serviço não está disponível para pedidos pelo portal.",
+        );
+      }
       selectedService = service;
     }
 

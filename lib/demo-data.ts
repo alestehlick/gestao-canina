@@ -23,8 +23,10 @@ export type Dog = {
   birthDate?: string;
   sex?: "female" | "male" | "unknown";
   neutered?: boolean | null;
+  weightGrams?: number;
   feedingNotes?: string;
   temperamentNotes?: string;
+  healthNotes?: string;
   medicationNotes?: string;
   vaccines?: { name: string; expiresOn: string }[];
   photoUrl?: string;

@@ -16,6 +16,10 @@ import {
   BrazilianDateInput,
   formatBrazilianDate,
 } from "@/app/components/brazilian-date-input";
+import {
+  VaccineFields,
+  vaccinesFromFormData,
+} from "@/app/components/vaccine-fields";
 import { CashView } from "@/app/components/cash-view";
 import {
   describeStatementBalance,
@@ -1646,6 +1650,12 @@ export function ManagementApp() {
     setSelectedCustomerId(null);
     setView(nextView);
     setOpenMenuId(null);
+    if (
+      runtimeMode === "ready" &&
+      ["billing", "requests", "dogs", "customers"].includes(nextView)
+    ) {
+      void refreshWorkspace({ force: true });
+    }
   }
 
   function selectAgendaDate(value: string) {
@@ -2147,8 +2157,21 @@ export function ManagementApp() {
     if (!dogToEdit) return;
     const form = new FormData(event.currentTarget);
     const name = String(form.get("name") ?? "").trim();
+    const vaccines = vaccinesFromFormData(form);
+    const weightInput = String(form.get("weightKg") ?? "").trim();
+    const weightKg = weightInput
+      ? Number(weightInput.replace(",", "."))
+      : null;
     if (!name) {
       setToast({ message: "Informe o nome do cão." });
+      return;
+    }
+    if (vaccines.some((vaccine) => !vaccine.name || !vaccine.expiresOn)) {
+      setToast({ message: "Informe o nome e o vencimento de cada vacina." });
+      return;
+    }
+    if (weightKg !== null && (!Number.isFinite(weightKg) || weightKg < 0 || weightKg > 200)) {
+      setToast({ message: "Informe um peso válido, em quilogramas." });
       return;
     }
     const updated: Dog = {
@@ -2168,15 +2191,14 @@ export function ManagementApp() {
           : String(form.get("neutered") ?? "") === "no"
             ? false
             : null,
+      weightGrams: weightKg === null ? undefined : Math.round(weightKg * 1_000),
       alert: String(form.get("alert") ?? "").trim() || undefined,
       vaccinesCurrent: form.get("vaccinesCurrent") === "on",
       feedingNotes: String(form.get("feedingNotes") ?? "").trim() || undefined,
       temperamentNotes: String(form.get("temperamentNotes") ?? "").trim() || undefined,
+      healthNotes: String(form.get("healthNotes") ?? "").trim() || undefined,
       medicationNotes: String(form.get("medicationNotes") ?? "").trim() || undefined,
-      vaccines: [
-        ...((dogToEdit.vaccines ?? []).filter((vaccine) => vaccine.name && vaccine.expiresOn)),
-        ...(String(form.get("vaccineName") ?? "").trim() && String(form.get("vaccineExpiresOn") ?? "") ? [{ name: String(form.get("vaccineName") ?? "").trim(), expiresOn: String(form.get("vaccineExpiresOn") ?? "") }] : []),
-      ],
+      vaccines,
     };
 
     if (runtimeMode === "ready") {
@@ -2198,8 +2220,10 @@ export function ManagementApp() {
                 birthDate: updated.birthDate ?? null,
                 sex: updated.sex,
                 neutered: updated.neutered,
+                weightGrams: updated.weightGrams ?? null,
                 feedingNotes: updated.feedingNotes ?? null,
                 temperamentNotes: updated.temperamentNotes ?? null,
+                healthNotes: updated.healthNotes ?? null,
                 medicationNotes: updated.medicationNotes ?? null,
                 vaccines: updated.vaccines,
               }),
@@ -2893,6 +2917,11 @@ export function ManagementApp() {
         : String(form.get("neutered") ?? "") === "no"
           ? false
           : null;
+    const vaccines = vaccinesFromFormData(form);
+    if (vaccines.some((vaccine) => !vaccine.name || !vaccine.expiresOn)) {
+      setToast({ message: "Informe o nome e o vencimento de cada vacina." });
+      return;
+    }
     if (runtimeMode === "ready") {
       const result = await runLiveAction(
         "new-dog",
@@ -2908,6 +2937,7 @@ export function ManagementApp() {
               neutered,
               emergencyNotes: alert || undefined,
               vaccinesCurrent: false,
+              vaccines,
             }),
           }),
         {
@@ -2937,6 +2967,7 @@ export function ManagementApp() {
       customerName: customer.name,
       color: "forest",
       vaccinesCurrent: false,
+      vaccines,
       today: "Sem serviço hoje",
       nextService: "Nenhum atendimento agendado",
       alert: alert || undefined,
@@ -6127,6 +6158,19 @@ export function ManagementApp() {
                 <option value="no">Não</option>
               </select>
             </label>
+            <label className="field">
+              <span>Peso (kg)</span>
+              <input
+                name="weightKg"
+                defaultValue={
+                  dogToEdit.weightGrams === undefined
+                    ? ""
+                    : String(dogToEdit.weightGrams / 1_000).replace(".", ",")
+                }
+                inputMode="decimal"
+                placeholder="Ex.: 12,5"
+              />
+            </label>
             <label className="field full">
               <span>Alerta essencial</span>
               <textarea
@@ -6147,18 +6191,17 @@ export function ManagementApp() {
               <span>Medicação</span>
               <textarea name="medicationNotes" rows={2} defaultValue={dogToEdit.medicationNotes} placeholder="Nome, dose e horários" />
             </label>
-            <label className="field">
-              <span>Vacina</span>
-              <input name="vaccineName" placeholder="Nome da vacina" />
+            <label className="field full">
+              <span>Saúde e cuidados</span>
+              <textarea name="healthNotes" rows={2} defaultValue={dogToEdit.healthNotes} />
             </label>
-            <label className="field">
-              <span>Vencimento da vacina</span>
-              <BrazilianDateInput
-                name="vaccineExpiresOn"
-                ariaLabel="Data de vencimento da vacina"
+            <div className="full">
+              <VaccineFields
+                key={dogToEdit.id}
+                idPrefix={`admin-dog-${dogToEdit.id}`}
+                initialVaccines={dogToEdit.vaccines ?? []}
               />
-            </label>
-            {dogToEdit.vaccines?.length ? <div className="field full"><small>Vacinas registradas: {dogToEdit.vaccines.map((vaccine) => `${vaccine.name} (${formatShortDate(vaccine.expiresOn)})`).join(" · ")}</small></div> : null}
+            </div>
             <label className="field full">
               <span>Foto do cão</span>
               <input name="photo" type="file" accept="image/jpeg,image/png,image/webp" />
@@ -6477,6 +6520,9 @@ export function ManagementApp() {
                   placeholder="Alergia, medicação ou comportamento"
                 />
               </label>
+              <div className="full">
+                <VaccineFields idPrefix="new-dog" />
+              </div>
               <div className="dialog-actions full">
                 <button
                   className="secondary-button"
@@ -8701,6 +8747,18 @@ function DogProfile({
             <div>
               <span>Medicação</span>
               <strong>{dog.medicationNotes || "Nenhuma informada"}</strong>
+            </div>
+            <div>
+              <span>Saúde e cuidados</span>
+              <strong>{dog.healthNotes || "Nenhuma observação"}</strong>
+            </div>
+            <div>
+              <span>Peso</span>
+              <strong>
+                {dog.weightGrams === undefined
+                  ? "Não informado"
+                  : `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(dog.weightGrams / 1_000)} kg`}
+              </strong>
             </div>
           </div>
         </section>

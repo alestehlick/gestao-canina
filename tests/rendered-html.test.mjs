@@ -723,6 +723,42 @@ test("aprova pedidos do portal junto com a agenda e protege a experiência do cl
   assert.match(migration, /CREATE UNIQUE INDEX `customer_requests_pending_service_unique`/);
 });
 
+test("mantém vacinas múltiplas e o cadastro do cliente sincronizado com a administração", async () => {
+  const [portalUi, portalApi, dogRoute, dogsRoute, vaccineFields, app, workspace] =
+    await Promise.all([
+      readFile(new URL("../app/components/customer-portal.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/portal/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/dogs/[id]/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/dogs/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/components/vaccine-fields.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/components/management-app.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../lib/workspace-data.ts", import.meta.url), "utf8"),
+    ]);
+
+  assert.match(vaccineFields, /V10/);
+  assert.match(vaccineFields, /Antirrábica/);
+  assert.match(vaccineFields, /\+ Adicionar vacina/);
+  assert.match(vaccineFields, /form\.getAll\("vaccineName"\)/);
+  assert.doesNotMatch(dogRoute, /vaccines\.length > 30/);
+  assert.doesNotMatch(dogsRoute, /value\.length > 30/);
+  assert.match(dogRoute, /\["owner", "staff", "customer"\]/);
+  assert.match(dogRoute, /eq\(dogTutors\.portalVisible, true\)/);
+  assert.match(dogRoute, /dog\.photo_updated/);
+  assert.match(portalUi, /saveDogProfile/);
+  assert.match(portalUi, /VaccineFields/);
+  assert.match(portalUi, /30_000/);
+  assert.match(portalUi, /invoicePortalStatus/);
+  assert.match(portalUi, /compensationAvailableOn/);
+  assert.match(portalApi, /invoicePayments/);
+  assert.match(portalApi, /invoiceSettlements/);
+  assert.match(portalApi, /paidAt: paymentByInvoice/);
+  assert.match(portalApi, /UPDATE app_users/);
+  assert.match(portalApi, /display_name = \?/);
+  assert.match(app, /VaccineFields/);
+  assert.match(workspace, /weightGrams: dog\.weightGrams/);
+  assert.match(workspace, /healthNotes: dog\.healthNotes/);
+});
+
 test("mantém histórico descritivo, indicadores recentes e horários flexíveis", async () => {
   const [app, workspace, activities, auditLog, appointments, appointmentEdit] =
     await Promise.all([

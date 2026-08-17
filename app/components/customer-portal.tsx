@@ -12,13 +12,22 @@ import {
   formatBrazilianDate,
 } from "@/app/components/brazilian-date-input";
 import {
+  VaccineFields,
+  vaccinesFromFormData,
+} from "@/app/components/vaccine-fields";
+import {
   generateStatementPdf,
   type CustomerStatement,
 } from "@/lib/statement-pdf";
 import { todayInSaoPaulo } from "@/lib/service-rules";
 
 type PortalData = {
-  identity: { email: string; displayName: string; role: "customer" };
+  identity: {
+    email: string;
+    displayName: string;
+    role: "customer";
+    tutorId: string;
+  };
   account: {
     id: string;
     displayName: string;
@@ -47,6 +56,7 @@ type PortalData = {
     photoUrl: string | null;
     feedingNotes: string | null;
     temperamentNotes: string | null;
+    healthNotes: string | null;
     medicationNotes: string | null;
     emergencyNotes: string | null;
     vaccinesCurrent: boolean | null;
@@ -77,6 +87,8 @@ type PortalData = {
     dueDate: string | null;
     totalCents: number;
     sourceType: string;
+    paidAt: string | null;
+    compensationAvailableOn: string | null;
     items: Array<{
       id: string;
       dogName: string | null;
@@ -221,9 +233,46 @@ function statusLabel(status: string) {
       rejected: "Não aprovado",
       paid: "Pago",
       issued: "Em aberto",
+      overdue: "Vencida",
+      compensation: "Em compensação",
       void: "Cancelado",
     }[status] ?? status
   );
+}
+
+function invoicePortalStatus(invoice: PortalData["invoices"][number]) {
+  if (invoice.status === "paid") {
+    return {
+      code: "paid",
+      label: "Pago",
+      dateLabel: invoice.paidAt
+        ? `Pago em ${shortDate(invoice.paidAt)}`
+        : "Pagamento confirmado",
+    };
+  }
+  if (invoice.compensationAvailableOn) {
+    return {
+      code: "compensation",
+      label: "Em compensação",
+      dateLabel: `Previsto para ${shortDate(invoice.compensationAvailableOn)}`,
+    };
+  }
+  if (
+    invoice.status === "issued" &&
+    invoice.dueDate &&
+    invoice.dueDate < today
+  ) {
+    return {
+      code: "overdue",
+      label: "Vencida",
+      dateLabel: `Venceu em ${shortDate(invoice.dueDate)}`,
+    };
+  }
+  return {
+    code: invoice.status,
+    label: statusLabel(invoice.status),
+    dateLabel: `Vence em ${shortDate(invoice.dueDate)}`,
+  };
 }
 
 function portalRequestDetails(value: string | null) {
@@ -264,6 +313,7 @@ export default function CustomerPortal() {
   const [cancelAppointmentId, setCancelAppointmentId] = useState<string | null>(
     null,
   );
+  const [editingDogId, setEditingDogId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -288,22 +338,38 @@ export default function CustomerPortal() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 30_000);
+    const refreshOnReturn = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    window.addEventListener("focus", refreshOnReturn);
+    document.addEventListener("visibilitychange", refreshOnReturn);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshOnReturn);
+      document.removeEventListener("visibilitychange", refreshOnReturn);
+    };
   }, [load]);
 
   useEffect(() => {
-    if (!cancelAppointmentId) return;
+    if (!cancelAppointmentId && !editingDogId) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setCancelAppointmentId(null);
+      if (event.key === "Escape") {
+        setCancelAppointmentId(null);
+        setEditingDogId(null);
+      }
     };
     document.addEventListener("keydown", closeOnEscape);
     return () => {
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [cancelAppointmentId]);
+  }, [cancelAppointmentId, editingDogId]);
 
   const futureAppointments = useMemo(
     () =>
@@ -467,12 +533,15 @@ export default function CustomerPortal() {
           credentials: "same-origin",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
+            displayName: String(form.get("displayName") ?? "") || null,
             phone: String(form.get("phone") ?? "") || null,
             addressLine: String(form.get("addressLine") ?? "") || null,
             addressCity: String(form.get("addressCity") ?? "") || null,
             addressRegion: String(form.get("addressRegion") ?? "") || null,
             addressPostalCode:
               String(form.get("addressPostalCode") ?? "") || null,
+            cpf: String(form.get("cpf") ?? "") || null,
+            birthDate: String(form.get("birthDate") ?? "") || null,
           }),
         }),
       );
@@ -481,6 +550,89 @@ export default function CustomerPortal() {
     } catch (reason) {
       setError(
         reason instanceof Error ? reason.message : "Não foi possível salvar.",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveDogProfile(
+    event: FormEvent<HTMLFormElement>,
+    dog: PortalData["dogs"][number],
+  ) {
+    event.preventDefault();
+    if (busy) return;
+    const form = new FormData(event.currentTarget);
+    const vaccines = vaccinesFromFormData(form);
+    if (vaccines.some((vaccine) => !vaccine.name || !vaccine.expiresOn)) {
+      setError("Informe o nome e o vencimento de cada vacina.");
+      return;
+    }
+    const weightText = String(form.get("weightKg") ?? "").trim();
+    const weightKg = weightText ? Number(weightText.replace(",", ".")) : null;
+    if (weightKg !== null && (!Number.isFinite(weightKg) || weightKg < 0 || weightKg > 200)) {
+      setError("Informe um peso válido, em quilogramas.");
+      return;
+    }
+    setBusy(`dog:${dog.id}`);
+    setMessage("");
+    setError("");
+    let detailsSaved = false;
+    try {
+      await readResponse(
+        await fetch(`/api/dogs/${dog.id}`, {
+          method: "PATCH",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name: String(form.get("name") ?? "").trim(),
+            breed: String(form.get("breed") ?? "").trim() || null,
+            birthDate: String(form.get("birthDate") ?? "") || null,
+            sex: String(form.get("sex") ?? "unknown"),
+            neutered:
+              String(form.get("neutered") ?? "") === "yes"
+                ? true
+                : String(form.get("neutered") ?? "") === "no"
+                  ? false
+                  : null,
+            weightGrams: weightKg === null ? null : Math.round(weightKg * 1_000),
+            emergencyNotes:
+              String(form.get("emergencyNotes") ?? "").trim() || null,
+            feedingNotes: String(form.get("feedingNotes") ?? "").trim() || null,
+            temperamentNotes:
+              String(form.get("temperamentNotes") ?? "").trim() || null,
+            healthNotes: String(form.get("healthNotes") ?? "").trim() || null,
+            medicationNotes:
+              String(form.get("medicationNotes") ?? "").trim() || null,
+            vaccines,
+            vaccinesCurrent: form.get("vaccinesCurrent") === "on",
+          }),
+        }),
+      );
+      detailsSaved = true;
+      const photo = form.get("photo");
+      if (photo instanceof File && photo.size) {
+        const upload = new FormData();
+        upload.set("photo", photo);
+        await readResponse(
+          await fetch(`/api/dogs/${dog.id}`, {
+            method: "POST",
+            credentials: "same-origin",
+            body: upload,
+          }),
+        );
+      }
+      await load();
+      setEditingDogId(null);
+      setMessage(`Dados de ${dog.name} atualizados.`);
+    } catch (reason) {
+      if (detailsSaved) await load();
+      setError(
+        detailsSaved
+          ? "Os dados foram salvos, mas não foi possível atualizar a foto. Tente a foto novamente."
+          : reason instanceof Error
+            ? reason.message
+            : "Não foi possível salvar os dados do cão.",
       );
     } finally {
       setBusy("");
@@ -701,7 +853,11 @@ export default function CustomerPortal() {
   }
 
   const mainTutor =
-    data.tutors.find((tutor) => tutor.isFinancialContact) ?? data.tutors[0];
+    data.tutors.find((tutor) => tutor.id === data.identity.tutorId) ??
+    data.tutors.find((tutor) => tutor.isFinancialContact) ??
+    data.tutors[0];
+  const editingDog =
+    data.dogs.find((dog) => dog.id === editingDogId) ?? null;
   const pendingRequests = data.requests.filter(
     (request) => request.status === "pending",
   );
@@ -735,7 +891,10 @@ export default function CustomerPortal() {
             <button
               key={id}
               className={view === id ? "active" : ""}
-              onClick={() => setView(id)}
+              onClick={() => {
+                setView(id);
+                void load();
+              }}
             >
               {label}
             </button>
@@ -1064,6 +1223,13 @@ export default function CustomerPortal() {
                     <h2>{dog.name}</h2>
                     <small>{dog.breed || "Raça não informada"}</small>
                   </div>
+                  <button
+                    type="button"
+                    className="text-button portal-dog-edit-button"
+                    onClick={() => setEditingDogId(dog.id)}
+                  >
+                    Editar dados
+                  </button>
                 </div>
                 <div className="portal-dog-facts">
                   <span>
@@ -1116,6 +1282,12 @@ export default function CustomerPortal() {
                     <dt>Medicação</dt>
                     <dd>{dog.medicationNotes || "Nenhuma registrada"}</dd>
                   </div>
+                  {dog.healthNotes && (
+                    <div>
+                      <dt>Saúde e cuidados</dt>
+                      <dd>{dog.healthNotes}</dd>
+                    </div>
+                  )}
                 </dl>
                 <div className="portal-vaccines">
                   <strong>Vacinas</strong>
@@ -1131,8 +1303,7 @@ export default function CustomerPortal() {
                   )}
                 </div>
                 <p className="portal-safety-note">
-                  Para alterar alimentação, medicação ou cuidados, fale com a
-                  equipe pelo WhatsApp habitual.
+                  Alterações ficam disponíveis para a equipe no mesmo cadastro.
                 </p>
               </article>
             ))}
@@ -1181,16 +1352,14 @@ export default function CustomerPortal() {
                   <article key={invoice.id}>
                     <div className="portal-invoice-heading">
                       <strong>{invoice.invoiceNumber}</strong>
-                      <small>
-                        {invoice.status === "paid"
-                          ? `Emitida em ${shortDate(invoice.issuedAt)}`
-                          : `Vence em ${shortDate(invoice.dueDate)}`}
-                      </small>
+                      <small>{invoicePortalStatus(invoice).dateLabel}</small>
                     </div>
                     <div className="portal-invoice-total">
                       <strong>{money(invoice.totalCents)}</strong>
-                      <span className={`status-pill ${invoice.status}`}>
-                        {statusLabel(invoice.status)}
+                      <span
+                        className={`status-pill ${invoicePortalStatus(invoice).code}`}
+                      >
+                        {invoicePortalStatus(invoice).label}
                       </span>
                     </div>
                     <div className="portal-invoice-items">
@@ -1266,6 +1435,16 @@ export default function CustomerPortal() {
                 </span>
               </div>
               <form className="portal-profile-form" onSubmit={saveProfile}>
+                <label className="field full">
+                  <span>Nome completo</span>
+                  <input
+                    name="displayName"
+                    defaultValue={data.account.displayName}
+                    autoComplete="name"
+                    maxLength={160}
+                    required
+                  />
+                </label>
                 <label className="field">
                   <span>WhatsApp ou telefone</span>
                   <input
@@ -1313,6 +1492,24 @@ export default function CustomerPortal() {
                     maxLength={20}
                   />
                 </label>
+                <label className="field">
+                  <span>CPF</span>
+                  <input
+                    name="cpf"
+                    defaultValue={data.account.cpf ?? ""}
+                    inputMode="numeric"
+                    maxLength={20}
+                  />
+                </label>
+                <label className="field">
+                  <span>Data de nascimento</span>
+                  <BrazilianDateInput
+                    name="birthDate"
+                    defaultValue={data.account.birthDate ?? ""}
+                    max={today}
+                    ariaLabel="Data de nascimento do cliente"
+                  />
+                </label>
                 <button
                   className="primary-button"
                   type="submit"
@@ -1336,6 +1533,176 @@ export default function CustomerPortal() {
           </div>
         )}
       </main>
+      {editingDog && (
+        <div
+          className="portal-dialog-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) setEditingDogId(null);
+          }}
+        >
+          <section
+            className="portal-dialog portal-dog-edit-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="portal-dog-edit-title"
+          >
+            <p className="section-kicker">Cadastro compartilhado com a equipe</p>
+            <h2 id="portal-dog-edit-title">Editar {editingDog.name}</h2>
+            <p>Atualize as informações usadas nos cuidados diários.</p>
+            <form
+              className="form-grid portal-dog-edit-form"
+              onSubmit={(event) => void saveDogProfile(event, editingDog)}
+            >
+              <label className="field full">
+                <span>Nome do cão</span>
+                <input
+                  name="name"
+                  defaultValue={editingDog.name}
+                  maxLength={120}
+                  required
+                  autoFocus
+                />
+              </label>
+              <label className="field">
+                <span>Raça</span>
+                <input name="breed" defaultValue={editingDog.breed ?? ""} maxLength={120} />
+              </label>
+              <label className="field">
+                <span>Data de nascimento</span>
+                <BrazilianDateInput
+                  name="birthDate"
+                  defaultValue={editingDog.birthDate ?? ""}
+                  max={today}
+                  ariaLabel={`Data de nascimento de ${editingDog.name}`}
+                />
+              </label>
+              <label className="field">
+                <span>Sexo</span>
+                <select name="sex" defaultValue={editingDog.sex}>
+                  <option value="unknown">Não informado</option>
+                  <option value="female">Fêmea</option>
+                  <option value="male">Macho</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>É castrado?</span>
+                <select
+                  name="neutered"
+                  defaultValue={
+                    editingDog.neutered === true
+                      ? "yes"
+                      : editingDog.neutered === false
+                        ? "no"
+                        : ""
+                  }
+                >
+                  <option value="">Não informado</option>
+                  <option value="yes">Sim</option>
+                  <option value="no">Não</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Peso (kg)</span>
+                <input
+                  name="weightKg"
+                  defaultValue={
+                    editingDog.weightGrams === null
+                      ? ""
+                      : String(editingDog.weightGrams / 1_000).replace(".", ",")
+                  }
+                  inputMode="decimal"
+                  placeholder="Ex.: 12,5"
+                />
+              </label>
+              <label className="field full">
+                <span>Alerta essencial</span>
+                <textarea
+                  name="emergencyNotes"
+                  rows={2}
+                  maxLength={2000}
+                  defaultValue={editingDog.emergencyNotes ?? ""}
+                  placeholder="Alergia, restrição ou cuidado urgente"
+                />
+              </label>
+              <label className="field full">
+                <span>Alimentação</span>
+                <textarea
+                  name="feedingNotes"
+                  rows={3}
+                  maxLength={2000}
+                  defaultValue={editingDog.feedingNotes ?? ""}
+                  placeholder="Alimentos, porções, horários e restrições"
+                />
+              </label>
+              <label className="field full">
+                <span>Temperamento</span>
+                <textarea
+                  name="temperamentNotes"
+                  rows={3}
+                  maxLength={2000}
+                  defaultValue={editingDog.temperamentNotes ?? ""}
+                />
+              </label>
+              <label className="field full">
+                <span>Saúde e cuidados</span>
+                <textarea
+                  name="healthNotes"
+                  rows={3}
+                  maxLength={2000}
+                  defaultValue={editingDog.healthNotes ?? ""}
+                />
+              </label>
+              <label className="field full">
+                <span>Medicação</span>
+                <textarea
+                  name="medicationNotes"
+                  rows={3}
+                  maxLength={2000}
+                  defaultValue={editingDog.medicationNotes ?? ""}
+                  placeholder="Nome, dose e horários"
+                />
+              </label>
+              <div className="full">
+                <VaccineFields
+                  key={editingDog.id}
+                  idPrefix={`portal-dog-${editingDog.id}`}
+                  initialVaccines={editingDog.vaccines}
+                />
+              </div>
+              <label className="check-field full">
+                <input
+                  name="vaccinesCurrent"
+                  type="checkbox"
+                  defaultChecked={Boolean(editingDog.vaccinesCurrent)}
+                />
+                <span>Vacinas conferidas e em dia</span>
+              </label>
+              <label className="field full">
+                <span>Nova foto</span>
+                <input name="photo" type="file" accept="image/jpeg,image/png,image/webp" />
+                <small>JPG, PNG ou WebP de até 5 MB.</small>
+              </label>
+              <div className="portal-dialog-actions full">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setEditingDogId(null)}
+                >
+                  Voltar
+                </button>
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={busy === `dog:${editingDog.id}`}
+                >
+                  {busy === `dog:${editingDog.id}` ? "Salvando…" : "Salvar dados"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
       {cancelAppointmentId && (
         <div
           className="portal-dialog-backdrop"

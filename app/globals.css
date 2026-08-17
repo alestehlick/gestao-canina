@@ -1827,6 +1827,25 @@ h3 {
   color: #17668a;
 }
 
+.status-pill.paid,
+.status-pill.approved {
+  border-color: #c5d8ca;
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.status-pill.issued {
+  border-color: #e5d6b6;
+  background: var(--gold-soft);
+  color: #775b32;
+}
+
+.status-pill.rejected {
+  border-color: #e8c8c4;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 .status-pill.neutral {
   border-color: var(--line);
   background: var(--surface-muted);
@@ -4074,6 +4093,7 @@ h3 {
 
 .field.full,
 .dialog-actions.full,
+.portal-dialog-actions.full,
 .cancel-summary.full,
 .check-field.full,
 .package-summary.full,
@@ -4090,6 +4110,65 @@ h3 {
 .field > small {
   color: var(--muted);
   font-size: 0.68rem;
+}
+
+.vaccine-editor {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  min-width: 0;
+  padding: 16px;
+}
+
+.vaccine-editor legend {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  padding: 0 6px;
+}
+
+.vaccine-editor > p {
+  color: var(--muted);
+  font-size: 0.84rem;
+  margin: 0;
+}
+
+.vaccine-editor-list {
+  display: grid;
+  gap: 10px;
+}
+
+.vaccine-editor-row {
+  align-items: end;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.8fr) auto;
+  padding-top: 12px;
+}
+
+.vaccine-editor-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.vaccine-remove-button {
+  background: transparent;
+  border: 0;
+  color: var(--danger);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  min-height: 42px;
+  padding: 0 4px;
+}
+
+.vaccine-add-button {
+  justify-self: start;
 }
 
 .field input,
@@ -7128,6 +7207,11 @@ h3 {
   gap: 14px;
 }
 
+.portal-dog-edit-button {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
 .portal-dog-title img {
   border-radius: 18px;
   height: 76px;
@@ -7358,6 +7442,12 @@ h3 {
   width: 100%;
 }
 
+.portal-dog-edit-dialog {
+  max-height: min(90dvh, 900px);
+  max-width: 720px;
+  overflow-y: auto;
+}
+
 .portal-dialog h2 {
   margin: 4px 0 8px;
 }
@@ -7509,6 +7599,25 @@ h3 {
     justify-content: center;
     min-height: 46px;
     width: 100%;
+  }
+
+  .vaccine-editor-row {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .vaccine-remove-button {
+    justify-self: start;
+    min-height: 34px;
+  }
+
+  .portal-dog-title {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .portal-dog-edit-button {
+    margin-left: 90px;
   }
 
   .portal-appointment-list > article {

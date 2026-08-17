@@ -11,6 +11,8 @@ import {
   dogs,
   dogTutors,
   invoiceItems,
+  invoicePayments,
+  invoiceSettlements,
   invoices,
   serviceCatalog,
   tutors,
@@ -24,6 +26,25 @@ import {
   optionalString,
   readJsonObject,
 } from "@/lib/server/http";
+import { todayInSaoPaulo } from "@/lib/service-rules";
+
+function normalizeLookupText(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/\p{Diacritic}/gu, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function normalizeCpf(value: string | null) {
+  if (!value) return null;
+  const digits = value.replace(/\D/g, "");
+  if (digits.length !== 11) {
+    throw new HttpError(400, "invalid_cpf", "Informe um CPF com 11 dígitos.");
+  }
+  return digits;
+}
 
 function normalizeBrazilianPhone(value: string | null) {
   if (!value) return null;
@@ -89,6 +110,8 @@ export async function GET(request: Request) {
       dogRows,
       appointmentRows,
       invoiceRows,
+      invoicePaymentRows,
+      invoiceSettlementRows,
       invoiceItemRows,
       balanceRows,
       receiptRows,
@@ -133,11 +156,13 @@ export async function GET(request: Request) {
           photoObjectKey: dogs.photoObjectKey,
           feedingNotes: dogs.feedingNotes,
           temperamentNotes: dogs.temperamentNotes,
+          healthNotes: dogs.healthNotes,
           medicationNotes: dogs.medicationNotes,
           vaccinesJson: dogs.vaccinesJson,
           emergencyNotes: dogs.emergencyNotes,
           vaccinesCurrent: dogs.vaccinesCurrent,
           status: dogs.status,
+          updatedAt: dogs.updatedAt,
         })
         .from(dogs)
         .innerJoin(
@@ -213,6 +238,34 @@ export async function GET(request: Request) {
         )
         .orderBy(desc(invoices.createdAt))
         .limit(100),
+      db
+        .select({
+          invoiceId: invoicePayments.invoiceId,
+          paidAt: invoicePayments.paidAt,
+        })
+        .from(invoicePayments)
+        .innerJoin(invoices, eq(invoices.id, invoicePayments.invoiceId))
+        .where(
+          and(
+            eq(invoices.establishmentId, establishmentId),
+            eq(invoices.accountId, context.accountId),
+            eq(invoicePayments.status, "active"),
+          ),
+        ),
+      db
+        .select({
+          invoiceId: invoiceSettlements.invoiceId,
+          availableOn: invoiceSettlements.availableOn,
+        })
+        .from(invoiceSettlements)
+        .innerJoin(invoices, eq(invoices.id, invoiceSettlements.invoiceId))
+        .where(
+          and(
+            eq(invoices.establishmentId, establishmentId),
+            eq(invoices.accountId, context.accountId),
+            eq(invoiceSettlements.status, "scheduled"),
+          ),
+        ),
       db
         .select({
           id: invoiceItems.id,
@@ -337,24 +390,36 @@ export async function GET(request: Request) {
         "O cadastro ligado à conta não foi encontrado.",
       );
     }
+    const paymentByInvoice = new Map(
+      invoicePaymentRows.map((payment) => [payment.invoiceId, payment.paidAt]),
+    );
+    const settlementByInvoice = new Map(
+      invoiceSettlementRows.map((settlement) => [
+        settlement.invoiceId,
+        settlement.availableOn,
+      ]),
+    );
     return json({
       identity: {
         email: identity.email,
         displayName: identity.displayName,
         role: identity.role,
+        tutorId: context.tutorId,
       },
       account,
       tutors: tutorRows,
       dogs: dogRows.map((dog) => ({
         ...dog,
         photoUrl: dog.photoObjectKey
-          ? `/api/dogs/${dog.id}?photo=1`
+          ? `/api/dogs/${dog.id}?photo=1&v=${encodeURIComponent(dog.updatedAt)}`
           : null,
         vaccines: JSON.parse(dog.vaccinesJson || "[]") as unknown,
       })),
       appointments: appointmentRows,
       invoices: invoiceRows.map((invoice) => ({
         ...invoice,
+        paidAt: paymentByInvoice.get(invoice.id) ?? null,
+        compensationAvailableOn: settlementByInvoice.get(invoice.id) ?? null,
         items: invoiceItemRows.filter((item) => item.invoiceId === invoice.id),
       })),
       credits: balanceRows.map((balance) => ({
@@ -378,37 +443,96 @@ export async function PATCH(request: Request) {
     const establishmentId = identity.establishmentId!;
     const context = await getCustomerContext(identity.userId!, establishmentId);
     const body = await readJsonObject(request);
+    const displayName = optionalString(body, "displayName", 160);
+    if (body.displayName !== undefined && !displayName) {
+      throw new HttpError(400, "invalid_name", "Informe seu nome completo.");
+    }
     const phone = normalizeBrazilianPhone(optionalString(body, "phone", 40));
     const addressLine = optionalString(body, "addressLine", 300);
     const addressCity = optionalString(body, "addressCity", 120);
     const addressRegion = optionalString(body, "addressRegion", 40);
     const addressPostalCode = optionalString(body, "addressPostalCode", 20);
+    const cpf =
+      body.cpf === undefined
+        ? undefined
+        : normalizeCpf(optionalString(body, "cpf", 20));
+    const birthDate = optionalString(body, "birthDate", 10);
+    if (
+      birthDate &&
+      (!/^\d{4}-\d{2}-\d{2}$/.test(birthDate) ||
+        birthDate > todayInSaoPaulo())
+    ) {
+      throw new HttpError(
+        400,
+        "invalid_birth_date",
+        "Informe uma data de nascimento válida.",
+      );
+    }
+    const [currentAccount] = await getDb()
+      .select({
+        displayName: customerAccounts.displayName,
+        cpf: customerAccounts.cpf,
+        birthDate: customerAccounts.birthDate,
+      })
+      .from(customerAccounts)
+      .where(
+        and(
+          eq(customerAccounts.id, context.accountId),
+          eq(customerAccounts.establishmentId, establishmentId),
+        ),
+      )
+      .limit(1);
+    if (!currentAccount) {
+      throw new HttpError(404, "customer_not_found", "Seu cadastro não foi encontrado.");
+    }
+    const nextDisplayName = displayName ?? currentAccount.displayName;
     const now = new Date().toISOString();
     const d1 = getD1Database();
     await d1.batch([
       d1
         .prepare(
           `UPDATE tutors
-          SET phone_e164 = ?, whatsapp_enabled = ?, updated_at = ?
+          SET full_name = ?, normalized_name = ?, phone_e164 = ?,
+            whatsapp_enabled = ?, updated_at = ?
           WHERE id = ? AND account_id = ?`,
         )
-        .bind(phone, Boolean(phone) ? 1 : 0, now, context.tutorId, context.accountId),
+        .bind(
+          nextDisplayName,
+          normalizeLookupText(nextDisplayName),
+          phone,
+          Boolean(phone) ? 1 : 0,
+          now,
+          context.tutorId,
+          context.accountId,
+        ),
       d1
         .prepare(
           `UPDATE customer_accounts
-          SET address_line = ?, address_city = ?, address_region = ?,
-            address_postal_code = ?, updated_at = ?
+          SET display_name = ?, normalized_name = ?, address_line = ?,
+            address_city = ?, address_region = ?, address_postal_code = ?,
+            cpf = ?, birth_date = ?, updated_at = ?
           WHERE id = ? AND establishment_id = ?`,
         )
         .bind(
+          nextDisplayName,
+          normalizeLookupText(nextDisplayName),
           addressLine,
           addressCity,
           addressRegion,
           addressPostalCode,
+          cpf === undefined ? currentAccount.cpf : cpf,
+          body.birthDate === undefined ? currentAccount.birthDate : birthDate,
           now,
           context.accountId,
           establishmentId,
         ),
+      d1
+        .prepare(
+          `UPDATE app_users
+          SET display_name = ?, updated_at = ?
+          WHERE id = ? AND establishment_id = ? AND role = 'customer'`,
+        )
+        .bind(nextDisplayName, now, identity.userId, establishmentId),
       d1
         .prepare(
           `INSERT INTO audit_events (
@@ -428,10 +552,13 @@ export async function PATCH(request: Request) {
           JSON.stringify({
             changedFields: [
               "phone",
+              "displayName",
               "addressLine",
               "addressCity",
               "addressRegion",
               "addressPostalCode",
+              "cpf",
+              "birthDate",
             ],
           }),
           now,

@@ -1181,11 +1181,15 @@ export function mapWorkspaceDogs(
         birthDate: dog.birthDate ?? undefined,
         sex: dog.sex,
         neutered: dog.neutered,
+        weightGrams: dog.weightGrams ?? undefined,
         feedingNotes: dog.feedingNotes ?? undefined,
         temperamentNotes: dog.temperamentNotes ?? undefined,
+        healthNotes: dog.healthNotes ?? undefined,
         medicationNotes: dog.medicationNotes ?? undefined,
         vaccines: parseVaccines(dog.vaccinesJson),
-        photoUrl: dog.photoObjectKey ? `/api/dogs/${dog.id}?photo=1` : undefined,
+        photoUrl: dog.photoObjectKey
+          ? `/api/dogs/${dog.id}?photo=1&v=${encodeURIComponent(dog.updatedAt)}`
+          : undefined,
         customerId: dog.accountId,
         customerName:
           customersById.get(dog.accountId)?.displayName ??
@@ -1403,6 +1407,7 @@ function activityActionLabel(action: string) {
     "customer.updated": "Cliente atualizado",
     "dog.created": "Cão cadastrado",
     "dog.updated": "Cadastro do cão atualizado",
+    "dog.photo_updated": "Foto do cão atualizada",
     "task.created": "Tarefa criada",
     "task.status_changed": "Tarefa atualizada",
     "service_prices.updated": "Preços padrão atualizados",

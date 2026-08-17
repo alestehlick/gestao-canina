@@ -87,6 +87,14 @@ function isValidPastOrPresentDate(value: string) {
   );
 }
 
+function isValidIsoDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return (
+    !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value
+  );
+}
+
 export async function POST(request: Request) {
   const requestId = crypto.randomUUID();
   try {
@@ -292,9 +300,9 @@ export async function POST(request: Request) {
 
 function readVaccines(value: unknown) {
   if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length > 30) throw new HttpError(400, "invalid_vaccines", "Informe as vacinas corretamente.");
+  if (!Array.isArray(value)) throw new HttpError(400, "invalid_vaccines", "Informe as vacinas corretamente.");
   return value.map((item) => {
-    if (!item || typeof item !== "object" || typeof (item as { name?: unknown }).name !== "string" || !String((item as { name: string }).name).trim() || typeof (item as { expiresOn?: unknown }).expiresOn !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test((item as { expiresOn: string }).expiresOn)) {
+    if (!item || typeof item !== "object" || typeof (item as { name?: unknown }).name !== "string" || !String((item as { name: string }).name).trim() || String((item as { name: string }).name).trim().length > 120 || typeof (item as { expiresOn?: unknown }).expiresOn !== "string" || !isValidIsoDate((item as { expiresOn: string }).expiresOn)) {
       throw new HttpError(400, "invalid_vaccines", "Informe nome e vencimento de cada vacina.");
     }
     return { name: (item as { name: string }).name.trim(), expiresOn: (item as { expiresOn: string }).expiresOn };

@@ -16,11 +16,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const requestId = crypto.randomUUID();
   try {
-    const identity = await requireIdentity(request, [
-      "owner",
-      "staff",
-      "finance",
-    ]);
+    const identity = await requireIdentity(request, ["owner", "finance"]);
     const date = new URL(request.url).searchParams.get("date");
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       throw new HttpError(

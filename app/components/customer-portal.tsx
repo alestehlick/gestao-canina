@@ -157,6 +157,20 @@ function nextDay(value: string) {
   return date.toISOString().slice(0, 10);
 }
 
+function daysBetween(from: string, to: string) {
+  if (!from || !to) return 0;
+  return Math.round(
+    (Date.parse(`${to}T00:00:00.000Z`) -
+      Date.parse(`${from}T00:00:00.000Z`)) /
+      86_400_000,
+  );
+}
+
+function lodgingNightOptions(from: string, to: string) {
+  const days = daysBetween(from, to);
+  return days > 0 ? [days, days + 0.5] : [];
+}
+
 function money(cents: number | null) {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
@@ -285,6 +299,11 @@ function portalRequestDetails(value: string | null) {
     else if (details.transportDirection === "one_way") parts.push("ida");
     if (details.transportDistance === "long") parts.push("distância longa");
     else if (details.transportDistance === "short") parts.push("distância curta");
+    if (typeof details.lodgingNights === "number") {
+      parts.push(
+        `${String(details.lodgingNights).replace(".", ",")} ${details.lodgingNights === 1 ? "diária" : "diárias"}`,
+      );
+    }
     return parts.join(" · ");
   } catch {
     return "";
@@ -307,9 +326,16 @@ export default function CustomerPortal() {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [selectedServiceId, setSelectedServiceId] = useState("");
-  const [requestStartDate, setRequestStartDate] = useState("");
-  const [requestEndDate, setRequestEndDate] = useState("");
+  const [requestDogIds, setRequestDogIds] = useState<string[]>([]);
+  const [requestServiceIds, setRequestServiceIds] = useState<string[]>([]);
+  const [requestStartDate, setRequestStartDate] = useState(today);
+  const [requestEndDate, setRequestEndDate] = useState(nextDay(today));
+  const [requestLodgingNights, setRequestLodgingNights] = useState(1);
+  const [requestGroomingAddon, setRequestGroomingAddon] = useState(false);
+  const [requestTransportDirection, setRequestTransportDirection] =
+    useState<"one_way" | "round_trip">("one_way");
+  const [requestTransportDistance, setRequestTransportDistance] =
+    useState<"short" | "long">("short");
   const [cancelAppointmentId, setCancelAppointmentId] = useState<string | null>(
     null,
   );
@@ -399,9 +425,22 @@ export default function CustomerPortal() {
         .slice(0, 40),
     [data],
   );
-  const selectedService = data?.services.find(
-    (service) => service.id === selectedServiceId,
+  const requestServices = (data?.services ?? []).filter((service) =>
+    requestServiceIds.includes(service.id),
   );
+  const requestIncludesLodging = requestServices.some(
+    (service) => service.code === "hotel",
+  );
+  const requestIncludesTaxiDog = requestServices.some(
+    (service) => service.code === "taxi_dog",
+  );
+  const requestIncludesBath = requestServices.some(
+    (service) => service.code === "bath",
+  );
+  const requestOnlyTaxiDog =
+    requestServices.length > 0 &&
+    requestServices.every((service) => service.code === "taxi_dog");
+  const requestCount = requestDogIds.length * requestServiceIds.length;
   const pendingCancellationIds = useMemo(
     () =>
       new Set(
@@ -432,6 +471,20 @@ export default function CustomerPortal() {
   async function submitServiceRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!data || busy) return;
+    if (!requestDogIds.length || !requestServiceIds.length) {
+      setError("Escolha ao menos um cão e um serviço.");
+      return;
+    }
+    if (
+      requestIncludesLodging &&
+      (!requestEndDate ||
+        !lodgingNightOptions(requestStartDate, requestEndDate).includes(
+          requestLodgingNights,
+        ))
+    ) {
+      setError("Revise a entrada, a saída e o número de diárias.");
+      return;
+    }
     // React clears currentTarget after the first asynchronous boundary. Keep the
     // form itself so the successful request can be reset reliably.
     const formElement = event.currentTarget;
@@ -447,30 +500,43 @@ export default function CustomerPortal() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             type: "service",
-            dogId: String(form.get("dogId") ?? ""),
-            serviceCatalogId: String(form.get("serviceCatalogId") ?? ""),
-            requestedDate: String(form.get("requestedDate") ?? ""),
-            requestedEndDate:
-              String(form.get("requestedEndDate") ?? "") || undefined,
+            dogIds: requestDogIds,
+            serviceCatalogIds: requestServiceIds,
+            requestedDate: requestStartDate,
+            requestedEndDate: requestIncludesLodging
+              ? requestEndDate
+              : undefined,
             requestedStartTime:
               String(form.get("requestedStartTime") ?? "") || undefined,
             requestedEndTime:
               String(form.get("requestedEndTime") ?? "") || undefined,
-            groomingAddon: form.get("groomingAddon") === "on",
-            transportDirection:
-              String(form.get("transportDirection") ?? "") || undefined,
-            transportDistance:
-              String(form.get("transportDistance") ?? "") || undefined,
+            lodgingNights: requestIncludesLodging
+              ? requestLodgingNights
+              : undefined,
+            groomingAddon: requestIncludesBath && requestGroomingAddon,
+            transportDirection: requestIncludesTaxiDog
+              ? requestTransportDirection
+              : undefined,
+            transportDistance: requestIncludesTaxiDog
+              ? requestTransportDistance
+              : undefined,
             notes: String(form.get("notes") ?? "") || undefined,
           }),
         }),
       );
       formElement.reset();
-      setSelectedServiceId("");
-      setRequestStartDate("");
-      setRequestEndDate("");
+      setRequestDogIds([]);
+      setRequestServiceIds([]);
+      setRequestStartDate(today);
+      setRequestEndDate(nextDay(today));
+      setRequestLodgingNights(1);
+      setRequestGroomingAddon(false);
+      setRequestTransportDirection("one_way");
+      setRequestTransportDistance("short");
       setMessage(
-        "Pedido enviado. Assim que a equipe aprovar, ele entrará automaticamente na agenda.",
+        requestCount === 1
+          ? "Pedido enviado. Assim que a equipe aprovar, ele entrará automaticamente na agenda."
+          : `${requestCount} pedidos enviados juntos. Cada serviço entrará na agenda assim que for aprovado.`,
       );
       await load();
     } catch (reason) {
@@ -990,68 +1056,146 @@ export default function CustomerPortal() {
                     entra automaticamente na agenda.
                   </p>
                 </div>
-                <form onSubmit={submitServiceRequest}>
-                  <label className="field">
-                    <span>Cão</span>
-                    <select name="dogId" required>
-                      <option value="">Selecione</option>
-                      {data.dogs.map((dog) => (
-                        <option key={dog.id} value={dog.id}>
-                          {dog.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>Serviço</span>
-                    <select
-                      name="serviceCatalogId"
-                      required
-                      value={selectedServiceId}
-                      onChange={(event) => setSelectedServiceId(event.target.value)}
-                    >
-                      <option value="">Selecione</option>
-                      {data.services.map((service) => (
-                        <option key={service.id} value={service.id}>
-                          {service.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                <form className="portal-quick-request" onSubmit={submitServiceRequest}>
+                  <fieldset className="quick-choice-group full">
+                    <legend>Cães *</legend>
+                    {data.dogs.map((dog) => (
+                      <label key={dog.id}>
+                        <input
+                          type="checkbox"
+                          checked={requestDogIds.includes(dog.id)}
+                          onChange={() =>
+                            setRequestDogIds((current) =>
+                              current.includes(dog.id)
+                                ? current.filter((id) => id !== dog.id)
+                                : [...current, dog.id],
+                            )
+                          }
+                        />
+                        <span>{dog.name}</span>
+                      </label>
+                    ))}
+                  </fieldset>
+                  <fieldset className="quick-choice-group full">
+                    <legend>Serviços *</legend>
+                    {data.services.map((service) => (
+                      <label
+                        key={service.id}
+                        className={`service-${service.code}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={requestServiceIds.includes(service.id)}
+                          onChange={() => {
+                            if (service.code === "hotel") {
+                              setRequestServiceIds((current) =>
+                                current.includes(service.id) ? [] : [service.id],
+                              );
+                              if (!requestServiceIds.includes(service.id)) {
+                                const nextEnd =
+                                  requestEndDate > requestStartDate
+                                    ? requestEndDate
+                                    : nextDay(requestStartDate);
+                                setRequestEndDate(nextEnd);
+                                setRequestLodgingNights(
+                                  lodgingNightOptions(requestStartDate, nextEnd)[0] ?? 1,
+                                );
+                              }
+                              return;
+                            }
+                            setRequestServiceIds((current) => {
+                              const withoutLodging = current.filter(
+                                (id) =>
+                                  data.services.find((item) => item.id === id)
+                                    ?.code !== "hotel",
+                              );
+                              return withoutLodging.includes(service.id)
+                                ? withoutLodging.filter((id) => id !== service.id)
+                                : [...withoutLodging, service.id];
+                            });
+                          }}
+                        />
+                        <span>{service.name}</span>
+                      </label>
+                    ))}
+                    <small>
+                      Hospedagem é solicitada separadamente dos serviços de um
+                      único dia.
+                    </small>
+                  </fieldset>
                   <label className="field">
                     <span>
-                      {selectedService?.code === "hotel"
+                      {requestIncludesLodging
                         ? "Data de entrada"
                         : "Data desejada"}
                     </span>
                     <BrazilianDateInput
-                      name="requestedDate"
                       value={requestStartDate}
                       min={today}
                       required
                       ariaLabel="Data desejada para o serviço"
-                      onChange={setRequestStartDate}
+                      onChange={(nextDateValue) => {
+                        setRequestStartDate(nextDateValue);
+                        if (
+                          requestIncludesLodging &&
+                          requestEndDate <= nextDateValue
+                        ) {
+                          const nextEnd = nextDay(nextDateValue);
+                          setRequestEndDate(nextEnd);
+                          setRequestLodgingNights(1);
+                        }
+                      }}
                     />
                   </label>
-                  {selectedService?.code === "hotel" && (
-                    <label className="field">
-                      <span>Data de saída</span>
-                      <BrazilianDateInput
-                        name="requestedEndDate"
-                        value={requestEndDate}
-                        min={nextDay(requestStartDate)}
-                        required
-                        ariaLabel="Data de saída desejada"
-                        onChange={setRequestEndDate}
-                      />
-                    </label>
+                  {requestIncludesLodging && (
+                    <>
+                      <label className="field">
+                        <span>Data de saída</span>
+                        <BrazilianDateInput
+                          value={requestEndDate}
+                          min={nextDay(requestStartDate)}
+                          required
+                          ariaLabel="Data de saída desejada"
+                          onChange={(nextEndDateValue) => {
+                            setRequestEndDate(nextEndDateValue);
+                            setRequestLodgingNights(
+                              lodgingNightOptions(
+                                requestStartDate,
+                                nextEndDateValue,
+                              )[0] ?? 1,
+                            );
+                          }}
+                        />
+                      </label>
+                      <label className="field full">
+                        <span>Número de diárias</span>
+                        <select
+                          value={requestLodgingNights}
+                          onChange={(event) =>
+                            setRequestLodgingNights(Number(event.target.value))
+                          }
+                          required
+                        >
+                          {lodgingNightOptions(
+                            requestStartDate,
+                            requestEndDate,
+                          ).map((nights) => (
+                            <option key={nights} value={nights}>
+                              {String(nights).replace(".", ",")} {nights === 1 ? "diária" : "diárias"}
+                            </option>
+                          ))}
+                        </select>
+                        <small>
+                          As opções são compatíveis com as datas escolhidas.
+                        </small>
+                      </label>
+                    </>
                   )}
-                  {selectedService &&
-                    selectedService.code !== "taxi_dog" && (
+                  {requestServices.length > 0 && !requestOnlyTaxiDog && (
                       <>
                         <label className="field">
                           <span>
-                            {selectedService.code === "hotel"
+                            {requestIncludesLodging
                               ? "Chegada (opcional)"
                               : "Início (opcional)"}
                           </span>
@@ -1062,11 +1206,11 @@ export default function CustomerPortal() {
                             <option value="noite">Noite</option>
                           </select>
                         </label>
-                        {(selectedService.code === "hotel" ||
-                          selectedService.code === "daycare") && (
+                        {(requestIncludesLodging ||
+                          requestServices.some((service) => service.code === "daycare")) && (
                           <label className="field">
                             <span>
-                              {selectedService.code === "hotel"
+                              {requestIncludesLodging
                                 ? "Saída (opcional)"
                                 : "Término (opcional)"}
                             </span>
@@ -1080,27 +1224,47 @@ export default function CustomerPortal() {
                         )}
                       </>
                     )}
-                  {selectedService?.code === "bath" && (
+                  {requestIncludesBath && (
                     <label className="portal-choice full">
-                      <input type="checkbox" name="groomingAddon" />
+                      <input
+                        type="checkbox"
+                        checked={requestGroomingAddon}
+                        onChange={(event) =>
+                          setRequestGroomingAddon(event.target.checked)
+                        }
+                      />
                       <span>
                         <strong>Incluir tosa</strong>
                         <small>O banho e a tosa serão cobrados juntos.</small>
                       </span>
                     </label>
                   )}
-                  {selectedService?.code === "taxi_dog" && (
+                  {requestIncludesTaxiDog && (
                     <div className="portal-request-options full">
                       <label className="field">
                         <span>Trajeto</span>
-                        <select name="transportDirection" defaultValue="one_way">
+                        <select
+                          value={requestTransportDirection}
+                          onChange={(event) =>
+                            setRequestTransportDirection(
+                              event.target.value as "one_way" | "round_trip",
+                            )
+                          }
+                        >
                           <option value="one_way">Ida</option>
                           <option value="round_trip">Ida e volta</option>
                         </select>
                       </label>
                       <label className="field">
                         <span>Distância</span>
-                        <select name="transportDistance" defaultValue="short">
+                        <select
+                          value={requestTransportDistance}
+                          onChange={(event) =>
+                            setRequestTransportDistance(
+                              event.target.value as "short" | "long",
+                            )
+                          }
+                        >
                           <option value="short">Curta</option>
                           <option value="long">Longa</option>
                         </select>
@@ -1116,12 +1280,24 @@ export default function CustomerPortal() {
                       placeholder="Algo importante para a equipe saber?"
                     />
                   </label>
+                  <div className="quick-service-summary full">
+                    <strong>{requestCount}</strong>
+                    <span>
+                      {requestCount === 1
+                        ? "solicitação será enviada"
+                        : "solicitações serão enviadas juntas"}
+                    </span>
+                  </div>
                   <button
                     className="primary-button portal-request-submit"
                     type="submit"
-                    disabled={busy === "request"}
+                    disabled={busy === "request" || requestCount === 0}
                   >
-                    {busy === "request" ? "Enviando…" : "Enviar solicitação"}
+                    {busy === "request"
+                      ? "Enviando…"
+                      : requestCount === 1
+                        ? "Enviar solicitação"
+                        : `Enviar ${requestCount} solicitações`}
                   </button>
                 </form>
               </section>

@@ -10,6 +10,7 @@ import {
   errorResponse,
   HttpError,
   json,
+  optionalString,
   readJsonObject,
   requiredString,
 } from "@/lib/server/http";
@@ -88,6 +89,32 @@ async function findInvitation(token: string) {
   return invitation;
 }
 
+function normalizeLookupText(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/\p{Diacritic}/gu, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function normalizeBrazilianPhone(value: string | null) {
+  if (!value) return null;
+  const digits = value.replace(/\D/g, "");
+  if (digits.length === 10 || digits.length === 11) return `+55${digits}`;
+  if (
+    (digits.length === 12 || digits.length === 13) &&
+    digits.startsWith("55")
+  ) {
+    return `+${digits}`;
+  }
+  throw new HttpError(
+    400,
+    "invalid_phone",
+    "Informe um telefone com DDD.",
+  );
+}
+
 export async function GET(request: Request) {
   const requestId = crypto.randomUUID();
   try {
@@ -98,6 +125,8 @@ export async function GET(request: Request) {
         email: invitation.email,
         role: invitation.role,
         customerName: invitation.customerName,
+        newCustomer:
+          invitation.role === "customer" && !invitation.accountId,
         expiresAt: invitation.expiresAt,
       },
     });
@@ -115,11 +144,25 @@ export async function POST(request: Request) {
     const displayName = requiredString(body, "displayName", 120);
     const password = validateNewPassword(body.password);
     const invitation = await findInvitation(token);
-    if (invitation.role === "customer" && !invitation.accountId) {
+    const createsCustomer =
+      invitation.role === "customer" && !invitation.accountId;
+    const phone = createsCustomer
+      ? normalizeBrazilianPhone(
+          requiredString(body, "phone", 40),
+        )
+      : null;
+    const addressLine = createsCustomer
+      ? optionalString(body, "addressLine", 240)
+      : null;
+    const cpf = createsCustomer ? optionalString(body, "cpf", 20) : null;
+    const birthDate = createsCustomer
+      ? optionalString(body, "birthDate", 10)
+      : null;
+    if (birthDate && !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) {
       throw new HttpError(
-        409,
-        "customer_link_missing",
-        "O convite não está ligado a um cadastro de cliente.",
+        400,
+        "invalid_birth_date",
+        "Informe uma data de nascimento válida.",
       );
     }
 
@@ -140,6 +183,10 @@ export async function POST(request: Request) {
             .limit(1)
         : [undefined];
     const userId = crypto.randomUUID();
+    const customerAccountId =
+      invitation.role === "customer"
+        ? invitation.accountId ?? crypto.randomUUID()
+        : null;
     const tutorId =
       invitation.role === "customer"
         ? existingTutor?.id ?? crypto.randomUUID()
@@ -150,6 +197,63 @@ export async function POST(request: Request) {
     const now = new Date().toISOString();
     const d1 = getD1Database();
     const statements = [];
+    if (createsCustomer && customerAccountId && tutorId) {
+      statements.push(
+        d1
+          .prepare(
+            `INSERT INTO customer_accounts (
+              id, establishment_id, display_name, normalized_name,
+              address_line, cpf, birth_date, status, created_at, updated_at
+            )
+            SELECT ?, establishment_id, ?, ?, ?, ?, ?, 'active', ?, ?
+            FROM account_invitations
+            WHERE id = ? AND token_hash = ? AND status = 'pending'
+              AND expires_at > ? AND account_id IS NULL`,
+          )
+          .bind(
+            customerAccountId,
+            displayName,
+            normalizeLookupText(displayName),
+            addressLine,
+            cpf,
+            birthDate,
+            now,
+            now,
+            invitation.id,
+            invitation.tokenHash,
+            now,
+          ),
+        d1
+          .prepare(
+            `INSERT INTO tutors (
+              id, establishment_id, account_id, full_name, normalized_name,
+              email, normalized_email, phone_e164, whatsapp_enabled,
+              is_financial_contact, status, created_at, updated_at
+            )
+            SELECT ?, establishment_id, ?, ?, ?, email, normalized_email, ?,
+              1, 1, 'active', ?, ?
+            FROM account_invitations
+            WHERE id = ? AND token_hash = ? AND status = 'pending'
+              AND expires_at > ? AND account_id IS NULL
+              AND EXISTS (
+                SELECT 1 FROM customer_accounts WHERE id = ?
+              )`,
+          )
+          .bind(
+            tutorId,
+            customerAccountId,
+            displayName,
+            normalizeLookupText(displayName),
+            phone,
+            now,
+            now,
+            invitation.id,
+            invitation.tokenHash,
+            now,
+            customerAccountId,
+          ),
+      );
+    }
     if (
       invitation.role === "customer" &&
       invitation.accountId &&
@@ -179,6 +283,22 @@ export async function POST(request: Request) {
             invitation.tokenHash,
             now,
           ),
+      );
+    }
+    if (invitation.role === "customer" && customerAccountId && tutorId) {
+      statements.push(
+        d1
+          .prepare(
+            `INSERT OR IGNORE INTO dog_tutors (
+              dog_id, tutor_id, is_primary, emergency_contact,
+              pickup_authorized, portal_visible
+            )
+            SELECT id, ?, 0, 0, 1, 1
+            FROM dogs
+            WHERE establishment_id = ? AND account_id = ?
+              AND status = 'active'`,
+          )
+          .bind(tutorId, invitation.establishmentId, customerAccountId),
       );
     }
     const userResultIndex = statements.length;
@@ -231,10 +351,11 @@ export async function POST(request: Request) {
           now,
           userId,
         ),
-      d1
+        d1
         .prepare(
           `UPDATE account_invitations
           SET status = 'accepted', accepted_at = ?, accepted_user_id = ?,
+            account_id = coalesce(account_id, ?),
             updated_at = ?
           WHERE id = ? AND token_hash = ? AND status = 'pending'
             AND expires_at > ?
@@ -245,6 +366,7 @@ export async function POST(request: Request) {
         .bind(
           now,
           userId,
+          customerAccountId,
           now,
           invitation.id,
           invitation.tokenHash,
@@ -278,12 +400,15 @@ export async function POST(request: Request) {
             entity_type, entity_id, request_id, result, metadata_json,
             occurred_at
           )
-          SELECT ?, establishment_id, ?, role, 'account.invitation_accepted',
-            'app_user', ?, ?, 'success', ?, ?
-          FROM app_users WHERE id = ?`,
+          VALUES (?,
+            (SELECT establishment_id FROM app_users WHERE id = ?), ?,
+            (SELECT role FROM app_users WHERE id = ?),
+            'account.invitation_accepted', 'app_user', ?, ?, 'success', ?, ?)`,
         )
         .bind(
           crypto.randomUUID(),
+          userId,
+          userId,
           userId,
           userId,
           requestId,
@@ -291,9 +416,10 @@ export async function POST(request: Request) {
             invitationId: invitation.id,
             email: invitation.email,
             role: invitation.role,
+            customerAccountId,
+            createdCustomer: createsCustomer,
           }),
           now,
-          userId,
         ),
     );
     const results = await d1.batch(statements);

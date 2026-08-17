@@ -27,11 +27,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const requestId = crypto.randomUUID();
   try {
-    const identity = await requireIdentity(request, [
-      "owner",
-      "staff",
-      "finance",
-    ]);
+    const identity = await requireIdentity(request, ["owner", "finance"]);
     const includeInactive =
       new URL(request.url).searchParams.get("includeInactive") === "true" &&
       identity.role !== "staff";

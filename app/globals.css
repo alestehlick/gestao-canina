@@ -6682,6 +6682,10 @@ h3 {
     padding-left: env(safe-area-inset-left);
   }
 
+  .mobile-nav.compact {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
   .mobile-nav button {
     display: grid;
     min-height: 58px;
@@ -6955,6 +6959,15 @@ h3 {
   max-width: 560px;
 }
 
+.invitation-profile-note {
+  margin: 2px 0;
+  border-left: 3px solid var(--forest);
+  background: var(--forest-soft);
+  color: var(--muted);
+  padding: 10px 12px;
+  font-size: 0.78rem;
+}
+
 .access-success,
 .access-warning,
 .portal-message {
@@ -6985,6 +6998,10 @@ h3 {
 
 .access-layout .full-panel,
 .portal-dashboard-grid .portal-pending-requests {
+  grid-column: 1 / -1;
+}
+
+.portal-dashboard-grid > .panel {
   grid-column: 1 / -1;
 }
 
@@ -7226,6 +7243,20 @@ h3 {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.portal-quick-request {
+  margin-top: 18px;
+}
+
+.portal-quick-request .quick-choice-group > small {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.portal-quick-request .quick-service-summary {
+  margin-top: 2px;
 }
 
 .portal-request-panel form .primary-button,

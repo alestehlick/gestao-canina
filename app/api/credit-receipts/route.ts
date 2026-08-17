@@ -13,11 +13,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const requestId = crypto.randomUUID();
   try {
-    const identity = await requireIdentity(request, [
-      "owner",
-      "staff",
-      "finance",
-    ]);
+    const identity = await requireIdentity(request, ["owner", "finance"]);
     const accountId = new URL(request.url).searchParams.get("accountId");
     if (accountId && accountId.length > 80) {
       throw new HttpError(

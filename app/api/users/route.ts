@@ -4,6 +4,7 @@ import {
   accountInvitations,
   appUsers,
   customerAccounts,
+  tutors,
 } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
 import {
@@ -104,13 +105,6 @@ export async function POST(request: Request) {
       );
     }
     const accountId = optionalString(body, "accountId", 80);
-    if (role === "customer" && !accountId) {
-      throw new HttpError(
-        400,
-        "customer_required",
-        "Escolha o cadastro do cliente ligado a este acesso.",
-      );
-    }
     const establishmentId = identity.establishmentId!;
     const db = getDb();
     const [existingUser] = await db
@@ -152,6 +146,29 @@ export async function POST(request: Request) {
         );
       }
       customerName = customer.displayName;
+    }
+    if (role === "customer" && !accountId) {
+      const [existingCustomerContact] = await db
+        .select({
+          accountId: tutors.accountId,
+          fullName: tutors.fullName,
+        })
+        .from(tutors)
+        .where(
+          and(
+            eq(tutors.establishmentId, establishmentId),
+            eq(tutors.normalizedEmail, email),
+            eq(tutors.status, "active"),
+          ),
+        )
+        .limit(1);
+      if (existingCustomerContact) {
+        throw new HttpError(
+          409,
+          "customer_contact_exists",
+          `Este e-mail já pertence a ${existingCustomerContact.fullName}. Escolha o cadastro existente no convite.`,
+        );
+      }
     }
 
     const invitationId = crypto.randomUUID();

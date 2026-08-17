@@ -64,11 +64,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const requestId = crypto.randomUUID();
   try {
-    const identity = await requireIdentity(request, [
-      "owner",
-      "staff",
-      "finance",
-    ]);
+    const identity = await requireIdentity(request, ["owner", "finance"]);
     const url = new URL(request.url);
     const accountId = url.searchParams.get("accountId");
     const establishmentId = identity.establishmentId!;
@@ -132,7 +128,11 @@ export async function POST(request: Request) {
   const requestId = crypto.randomUUID();
   try {
     assertSameOrigin(request);
-    const identity = await requireIdentity(request, ["owner", "finance"]);
+    const identity = await requireIdentity(request, [
+      "owner",
+      "staff",
+      "finance",
+    ]);
     const body = await readJsonObject(request);
     const accountId = requiredString(body, "accountId", 80);
     const packageId = optionalString(body, "packageId", 80);

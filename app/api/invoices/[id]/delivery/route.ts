@@ -17,7 +17,11 @@ export async function POST(
   const requestId = crypto.randomUUID();
   try {
     assertSameOrigin(request);
-    const identity = await requireIdentity(request, ["owner", "finance"]);
+    const identity = await requireIdentity(request, [
+      "owner",
+      "staff",
+      "finance",
+    ]);
     const { id } = await context.params;
     const body = await readJsonObject(request);
     const channel = body.channel;
@@ -35,6 +39,7 @@ export async function POST(
       .select({
         id: invoices.id,
         status: invoices.status,
+        sourceType: invoices.sourceType,
         deliveryChannelsJson: invoices.deliveryChannelsJson,
       })
       .from(invoices)
@@ -47,6 +52,13 @@ export async function POST(
       .limit(1);
     if (!invoice || invoice.status === "void") {
       throw new HttpError(404, "invoice_not_found", "A fatura não foi encontrada.");
+    }
+    if (identity.role === "staff" && invoice.sourceType !== "credit_package") {
+      throw new HttpError(
+        403,
+        "permission_denied",
+        "Funcionários podem compartilhar somente faturas de pacotes criadas pelo perfil do cliente.",
+      );
     }
 
     let previousChannels: unknown = [];

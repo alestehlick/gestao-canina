@@ -45,7 +45,7 @@ export async function POST(request: Request) {
   const requestId = crypto.randomUUID();
   try {
     assertSameOrigin(request);
-    const identity = await requireIdentity(request, ["owner", "staff"]);
+    const identity = await requireIdentity(request, ["owner", "finance"]);
     const body = await readJsonObject(request);
     const appointmentItemId = requiredString(body, "appointmentItemId", 80);
     const establishmentId = identity.establishmentId!;

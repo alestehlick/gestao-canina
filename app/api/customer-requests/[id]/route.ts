@@ -28,6 +28,9 @@ type RequestDetails = {
   groomingAddon?: boolean;
   transportDirection?: "one_way" | "round_trip";
   transportDistance?: "short" | "long";
+  lodgingNights?: number;
+  requestGroupId?: string;
+  requestGroupSize?: number;
 };
 
 function parseDetails(value: string | null): RequestDetails {
@@ -378,9 +381,24 @@ export async function PATCH(
     const details = parseDetails(current.detailsJson);
     const startDate = current.requestedDate;
     const endDate = service.code === "hotel" ? current.requestedEndDate : startDate;
+    const lodgingDays =
+      service.code === "hotel" && endDate ? daysBetween(startDate, endDate) : 0;
+    const requestedLodgingNights = details.lodgingNights;
     const lodgingNights =
-      service.code === "hotel" && endDate ? daysBetween(startDate, endDate) : null;
-    if (service.code === "hotel" && (!endDate || !lodgingNights || lodgingNights < 1)) {
+      service.code === "hotel"
+        ? typeof requestedLodgingNights === "number"
+          ? requestedLodgingNights
+          : lodgingDays
+        : null;
+    if (
+      service.code === "hotel" &&
+      (!endDate ||
+        lodgingDays < 1 ||
+        lodgingDays > 365 ||
+        !lodgingNights ||
+        Math.round(lodgingNights * 2) !== lodgingNights * 2 ||
+        (lodgingNights !== lodgingDays && lodgingNights !== lodgingDays + 0.5))
+    ) {
       throw new HttpError(
         409,
         "lodging_request_incomplete",
@@ -422,6 +440,9 @@ export async function PATCH(
     const appointmentDetails = JSON.stringify({
       customerRequestId: id,
       requestedByCustomer: true,
+      ...(details.requestGroupId
+        ? { customerRequestGroupId: details.requestGroupId }
+        : {}),
       ...(groomingAddon ? { groomingAddon: true } : {}),
       ...(service.code === "taxi_dog"
         ? { transportDirection, transportDistance }

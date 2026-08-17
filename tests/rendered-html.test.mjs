@@ -988,3 +988,61 @@ test("mantém extratos, contas, agendamento rápido e alertas operacionais coere
   assert.match(portal, /eq\(customerAccounts\.status, "active"\)/);
   assert.match(migration, /financial_account_id/);
 });
+
+test("mantém o funcionário nas quatro áreas operacionais e o pedido múltiplo seguro", async () => {
+  const [app, portalUi, portalRequests, reviewRequest, invitations, invitationPage, users, purchases, delivery, customers, receipts, consume, dashboard, css] =
+    await Promise.all([
+      readFile(new URL("../app/components/management-app.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/components/customer-portal.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/portal/requests/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/customer-requests/[id]/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/auth/invitations/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/convite/page.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/users/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/credit-purchases/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/invoices/[id]/delivery/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/customers/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/credit-receipts/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/credits/consume/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/dashboard/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    ]);
+
+  assert.match(app, /\["today", "requests", "dogs", "customers"\]/);
+  assert.match(app, /visibleNavItems\.length > 4/);
+  assert.match(app, /canViewFinancials=\{canManageBilling\}/);
+  assert.match(app, /canSellCredits=\{canSellCreditPackages\}/);
+  assert.match(app, /!canManagePayment && !isPaid/);
+  assert.match(app, /signedInRole === "owner"\s*\? \{ cpf:/s);
+  assert.match(css, /\.mobile-nav\.compact/);
+
+  assert.match(portalUi, /requestDogIds/);
+  assert.match(portalUi, /requestServiceIds/);
+  assert.match(portalUi, /requestCount/);
+  assert.match(portalUi, /lodgingNightOptions/);
+  assert.match(portalUi, /Hospedagem é solicitada separadamente/);
+  assert.match(portalRequests, /createBatchServiceRequests/);
+  assert.match(portalRequests, /request_batch_too_large/);
+  assert.match(portalRequests, /lodging_must_be_separate/);
+  assert.match(portalRequests, /customer\.requests_batch_created/);
+  assert.match(portalRequests, /await d1\.batch\(statements\)/);
+  assert.match(reviewRequest, /details\.lodgingNights/);
+  assert.match(reviewRequest, /customerRequestGroupId/);
+
+  assert.match(invitations, /INSERT OR IGNORE INTO dog_tutors/);
+  assert.match(invitations, /INSERT INTO customer_accounts/);
+  assert.match(invitations, /createdCustomer: createsCustomer/);
+  assert.match(invitations, /newCustomer:/);
+  assert.match(invitations, /destination: invitation\.role === "customer" \? "\/portal"/);
+  assert.match(invitationPage, /details\.newCustomer/);
+  assert.match(invitationPage, /Criar meu acesso/);
+  assert.match(invitationPage, /name="phone"/);
+  assert.match(app, /Novo cliente · fará o primeiro cadastro pelo convite/);
+  assert.match(users, /customer_contact_exists/);
+  assert.match(purchases, /\[\s*"owner",\s*"staff",\s*"finance",?\s*\]/s);
+  assert.match(delivery, /invoice\.sourceType !== "credit_package"/);
+  assert.match(customers, /Somente administradores podem cadastrar o CPF/);
+  assert.doesNotMatch(receipts, /"staff"/);
+  assert.doesNotMatch(consume, /"staff"/);
+  assert.doesNotMatch(dashboard, /"staff"/);
+});

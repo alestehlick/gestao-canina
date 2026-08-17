@@ -110,7 +110,15 @@ export async function POST(request: Request) {
       "addressPostalCode",
       24,
     );
-    const cpf = optionalString(body, "cpf", 20);
+    if (identity.role !== "owner" && body.cpf !== undefined) {
+      throw new HttpError(
+        403,
+        "permission_denied",
+        "Somente administradores podem cadastrar o CPF.",
+      );
+    }
+    const cpf =
+      identity.role === "owner" ? optionalString(body, "cpf", 20) : null;
     const birthDate = optionalString(body, "birthDate", 10);
     if (birthDate && !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) {
       throw new HttpError(400, "invalid_birth_date", "Informe uma data de nascimento válida.");

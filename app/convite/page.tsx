@@ -2,11 +2,13 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { BrazilianDateInput } from "@/app/components/brazilian-date-input";
 
 type InvitationDetails = {
   email: string;
   role: "staff" | "customer";
   customerName: string | null;
+  newCustomer: boolean;
   expiresAt: string;
 };
 
@@ -73,7 +75,19 @@ export default function InvitationPage() {
         method: "POST",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ token, displayName, password }),
+        body: JSON.stringify({
+          token,
+          displayName,
+          password,
+          ...(details.newCustomer
+            ? {
+                phone: String(form.get("phone") ?? ""),
+                addressLine: String(form.get("addressLine") ?? "") || undefined,
+                cpf: String(form.get("cpf") ?? "") || undefined,
+                birthDate: String(form.get("birthDate") ?? "") || undefined,
+              }
+            : {}),
+        }),
       });
       const payload = (await response.json()) as {
         error?: { message?: string };
@@ -119,12 +133,58 @@ export default function InvitationPage() {
                 <span>Seu nome</span>
                 <input
                   name="displayName"
+                  defaultValue={details.customerName ?? ""}
                   autoComplete="name"
                   maxLength={120}
                   autoFocus
                   required
                 />
               </label>
+              {details.newCustomer && (
+                <>
+                  <p className="invitation-profile-note">
+                    Como este é seu primeiro cadastro, informe também os dados
+                    essenciais de contato. Você poderá revisá-los depois no
+                    portal.
+                  </p>
+                  <label className="field">
+                    <span>WhatsApp *</span>
+                    <input
+                      name="phone"
+                      type="tel"
+                      inputMode="tel"
+                      autoComplete="tel"
+                      placeholder="(11) 90000-0000"
+                      required
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Endereço</span>
+                    <input
+                      name="addressLine"
+                      autoComplete="street-address"
+                      maxLength={240}
+                      placeholder="Rua, número, bairro e cidade"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>CPF</span>
+                    <input
+                      name="cpf"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      maxLength={20}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Data de nascimento</span>
+                    <BrazilianDateInput
+                      name="birthDate"
+                      ariaLabel="Data de nascimento"
+                    />
+                  </label>
+                </>
+              )}
               <label className="field">
                 <span>Crie uma senha</span>
                 <input
@@ -154,7 +214,7 @@ export default function InvitationPage() {
                 </p>
               )}
               <button className="primary-button" type="submit" disabled={busy}>
-                {busy ? "Criando conta…" : "Criar conta"}
+                {busy ? "Criando conta…" : "Criar meu acesso"}
               </button>
             </form>
           </>

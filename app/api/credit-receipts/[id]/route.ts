@@ -17,7 +17,7 @@ export async function PATCH(
   const requestId = crypto.randomUUID();
   try {
     assertSameOrigin(request);
-    const identity = await requireIdentity(request, ["owner", "staff"]);
+    const identity = await requireIdentity(request, ["owner", "finance"]);
     const { id } = await context.params;
     if (!id || id.length > 80) {
       throw new HttpError(

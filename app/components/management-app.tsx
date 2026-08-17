@@ -1646,6 +1646,18 @@ export function ManagementApp() {
   }
 
   function navigate(nextView: View) {
+    const role = workspacePayload?.identity.role ?? "owner";
+    const allowedViews =
+      role === "owner"
+        ? navItems.map((item) => item.id)
+        : role === "finance"
+          ? (["today", "billing", "customers", "cash"] as View[])
+          : (["today", "requests", "dogs", "customers"] as View[]);
+    if (!allowedViews.includes(nextView)) {
+      setToast({ message: "Esta área é restrita à administração." });
+      setView("today");
+      return;
+    }
     setSelectedDogId(null);
     setSelectedCustomerId(null);
     setView(nextView);
@@ -2333,7 +2345,10 @@ export function ManagementApp() {
       phone: String(form.get("phone") ?? "").trim() || "Não informado",
       email: String(form.get("email") ?? "").trim() || "Não informado",
       address: String(form.get("address") ?? "").trim() || undefined,
-      cpf: String(form.get("cpf") ?? "").trim() || undefined,
+      cpf:
+        signedInRole === "owner"
+          ? String(form.get("cpf") ?? "").trim() || undefined
+          : customerToEdit.cpf,
       birthDate: String(form.get("birthDate") ?? "").trim() || undefined,
     };
 
@@ -2363,7 +2378,9 @@ export function ManagementApp() {
                 whatsappEnabled: Boolean(phone),
                 isFinancialContact: true,
                 addressLine: updated.address ?? null,
-                cpf: updated.cpf ?? null,
+                ...(signedInRole === "owner"
+                  ? { cpf: updated.cpf ?? null }
+                  : {}),
                 birthDate: updated.birthDate ?? null,
               }),
             },
@@ -2831,7 +2848,10 @@ export function ManagementApp() {
     const phone = String(form.get("phone") ?? "").trim();
     const email = String(form.get("email") ?? "").trim();
     const address = String(form.get("address") ?? "").trim();
-    const cpf = String(form.get("cpf") ?? "").trim();
+    const cpf =
+      signedInRole === "owner"
+        ? String(form.get("cpf") ?? "").trim()
+        : "";
     const birthDate = String(form.get("birthDate") ?? "").trim();
     if (runtimeMode === "ready") {
       if (!phone && !email) {
@@ -2853,7 +2873,9 @@ export function ManagementApp() {
               whatsappEnabled: Boolean(phone),
               isFinancialContact: true,
               addressLine: address || undefined,
-              cpf: cpf || undefined,
+              ...(signedInRole === "owner" && cpf
+                ? { cpf }
+                : {}),
               birthDate: birthDate || undefined,
             }),
           }),
@@ -4882,6 +4904,11 @@ export function ManagementApp() {
   const signedInName =
     workspacePayload?.identity.displayName || "Administração";
   const signedInRole = workspacePayload?.identity.role ?? "owner";
+  const canManageOperations = ["owner", "staff"].includes(signedInRole);
+  const canManageBilling = ["owner", "finance"].includes(signedInRole);
+  const canSellCreditPackages = ["owner", "staff", "finance"].includes(
+    signedInRole,
+  );
   const visibleNavItems = navItems.filter((item) => {
     if (signedInRole === "owner") return true;
     if (signedInRole === "finance") {
@@ -4971,13 +4998,15 @@ export function ManagementApp() {
           <strong>Hospet Quintal <small>HQ</small></strong>
         </button>
         <div className="mobile-header-actions">
-          <button
-            className="icon-text-button"
-            onClick={() => setDialog("task")}
-            aria-label="Nova tarefa"
-          >
-            Tarefa
-          </button>
+          {canManageOperations && (
+            <button
+              className="icon-text-button"
+              onClick={() => setDialog("task")}
+              aria-label="Nova tarefa"
+            >
+              Tarefa
+            </button>
+          )}
           {runtimeMode === "ready" && (
             <button
               className="icon-text-button"
@@ -5086,20 +5115,24 @@ export function ManagementApp() {
                 </div>
               )}
             </div>
-            <button className="secondary-button" onClick={() => setDialog("task")}>
-              Nova tarefa
-            </button>
-            <button
-              className="primary-button"
-              onClick={() => openServiceDialog()}
-            >
-              <span aria-hidden="true">+</span> Novo serviço
-            </button>
+            {canManageOperations && (
+              <>
+                <button className="secondary-button" onClick={() => setDialog("task")}>
+                  Nova tarefa
+                </button>
+                <button
+                  className="primary-button"
+                  onClick={() => openServiceDialog()}
+                >
+                  <span aria-hidden="true">+</span> Novo serviço
+                </button>
+              </>
+            )}
           </div>
         </header>
 
         <main id="conteudo-principal">
-          {view === "today" && (
+          {view === "today" && ["owner", "staff", "finance"].includes(signedInRole) && (
             <TodayView
               bookings={bookings}
               dogs={dogs}
@@ -5119,9 +5152,9 @@ export function ManagementApp() {
               onCancel={askToCancel}
               onToggleTask={toggleTask}
               onClearCompletedTasks={clearCompletedTasks}
-              onViewBilling={() => navigate("billing")}
-              onOpenInvoice={openExistingInvoice}
-              onLodgingInvoice={issueLodgingInvoice}
+              onViewBilling={canManageBilling ? () => navigate("billing") : undefined}
+              onOpenInvoice={canManageBilling ? openExistingInvoice : undefined}
+              onLodgingInvoice={canManageBilling ? issueLodgingInvoice : undefined}
               onOpenReceipt={openReceipt}
               onSaveDogFeeding={saveDogFeeding}
               onQuickService={
@@ -5129,23 +5162,23 @@ export function ManagementApp() {
                   ? () => setDialog("quickService")
                   : undefined
               }
-              invoice={invoices.find(
+              invoice={canManageBilling ? invoices.find(
                 (item) => item.status !== "paid" && item.status !== "void",
-              )}
-              billingReminders={invoices.filter(
+              ) : undefined}
+              billingReminders={canManageBilling ? invoices.filter(
                 (item) =>
                   item.status !== "paid" &&
                   item.status !== "void" &&
                   item.followUpOn === operationalToday,
-              )}
+              ) : []}
             />
           )}
-          {view === "requests" && (
+          {view === "requests" && ["owner", "staff"].includes(signedInRole) && (
             <CustomerRequestsView
               onPendingCountChange={setPendingCustomerRequestCount}
             />
           )}
-          {view === "dogs" &&
+          {view === "dogs" && ["owner", "staff"].includes(signedInRole) &&
             (selectedDog ? (
               <DogProfile
                 dog={selectedDog}
@@ -5163,7 +5196,7 @@ export function ManagementApp() {
                 onEditBooking={openBookingEditor}
                 onCancelBooking={askToCancel}
                 onOpenReceipt={openReceipt}
-                onLodgingInvoice={issueLodgingInvoice}
+                onLodgingInvoice={canManageBilling ? issueLodgingInvoice : undefined}
               />
             ) : (
               <DogsView
@@ -5175,7 +5208,7 @@ export function ManagementApp() {
                 }}
               />
             ))}
-          {view === "customers" &&
+          {view === "customers" && ["owner", "staff", "finance"].includes(signedInRole) &&
             (selectedCustomer ? (
               <CustomerProfile
                 customer={selectedCustomer}
@@ -5213,21 +5246,25 @@ export function ManagementApp() {
                 openMenuId={openMenuId}
                 onEditBooking={openBookingEditor}
                 onCancelBooking={askToCancel}
-                onLodgingInvoice={issueLodgingInvoice}
-                onStatement={() => openStatement(selectedCustomer.id)}
+                onLodgingInvoice={canManageBilling ? issueLodgingInvoice : undefined}
+                onStatement={canManageBilling ? () => openStatement(selectedCustomer.id) : undefined}
+                canViewFinancials={canManageBilling}
+                canViewCpf={signedInRole === "owner"}
+                canSellCredits={canSellCreditPackages}
               />
             ) : (
               <CustomersView
                 customers={customers}
                 dogs={dogs}
                 onSelect={setSelectedCustomerId}
+                canViewFinancials={canManageBilling}
                 onNew={() => {
                   setRegistrationType("customer");
                   setDialog("registration");
                 }}
               />
             ))}
-          {view === "billing" && (
+          {view === "billing" && canManageBilling && (
             <BillingView
               invoices={invoices}
               billableServices={billableServices}
@@ -5262,7 +5299,7 @@ export function ManagementApp() {
               onOpenBilling={() => setView("billing")}
             />
           )}
-          {view === "activity" && (
+          {view === "activity" && signedInRole === "owner" && (
             <ActivityView
               activities={activities}
               onLoadPeriod={loadActivityPeriod}
@@ -5271,7 +5308,7 @@ export function ManagementApp() {
           {view === "access" && signedInRole === "owner" && (
             <AccessView customers={customers} />
           )}
-          {view === "settings" && (
+          {view === "settings" && signedInRole === "owner" && (
             <SettingsView
               prices={servicePrices}
               lodgingPricing={lodgingPricing}
@@ -5285,7 +5322,10 @@ export function ManagementApp() {
         </main>
       </div>
 
-      <nav className="mobile-nav" aria-label="Navegação móvel">
+      <nav
+        className={`mobile-nav${visibleNavItems.length <= 4 ? " compact" : ""}`}
+        aria-label="Navegação móvel"
+      >
         {visibleNavItems.slice(0, 4).map((item) => (
           <button
             key={item.id}
@@ -5311,22 +5351,24 @@ export function ManagementApp() {
             </span>
           </button>
         ))}
-        <button
-          className={
-            mobileMoreOpen ||
-            ["billing", "cash", "activity", "access", "settings"].includes(view)
-              ? "active"
-              : ""
-          }
-          onClick={() => setMobileMoreOpen((current) => !current)}
-          aria-expanded={mobileMoreOpen}
-        >
-          <span className="mobile-nav-mark" aria-hidden="true" />
-          Mais
-        </button>
+        {visibleNavItems.length > 4 && (
+          <button
+            className={
+              mobileMoreOpen ||
+              ["billing", "cash", "activity", "access", "settings"].includes(view)
+                ? "active"
+                : ""
+            }
+            onClick={() => setMobileMoreOpen((current) => !current)}
+            aria-expanded={mobileMoreOpen}
+          >
+            <span className="mobile-nav-mark" aria-hidden="true" />
+            Mais
+          </button>
+        )}
       </nav>
 
-      {mobileMoreOpen && (
+      {mobileMoreOpen && visibleNavItems.length > 4 && (
         <div className="mobile-more-menu" role="menu">
           {visibleNavItems.slice(4).map((item) => (
             <button
@@ -6310,10 +6352,12 @@ export function ManagementApp() {
               <span>Endereço</span>
               <input name="address" defaultValue={customerToEdit.address} placeholder="Rua, número, bairro e cidade" />
             </label>
-            <label className="field">
-              <span>CPF</span>
-              <input name="cpf" defaultValue={customerToEdit.cpf} inputMode="numeric" />
-            </label>
+            {signedInRole === "owner" && (
+              <label className="field">
+                <span>CPF</span>
+                <input name="cpf" defaultValue={customerToEdit.cpf} inputMode="numeric" />
+              </label>
+            )}
             <label className="field">
               <span>Data de nascimento</span>
               <BrazilianDateInput
@@ -6462,7 +6506,9 @@ export function ManagementApp() {
                 />
               </label>
               <label className="field full"><span>Endereço</span><input name="address" placeholder="Rua, número, bairro e cidade" /></label>
-              <label className="field"><span>CPF</span><input name="cpf" inputMode="numeric" /></label>
+              {signedInRole === "owner" && (
+                <label className="field"><span>CPF</span><input name="cpf" inputMode="numeric" /></label>
+              )}
               <label className="field">
                 <span>Data de nascimento</span>
                 <BrazilianDateInput
@@ -6734,6 +6780,7 @@ export function ManagementApp() {
           longStayDiscountPercent={lodgingPricing.longStayDiscountPercent}
           liveMode={runtimeMode === "ready"}
           canReversePayment={signedInRole === "owner"}
+          canManagePayment={canManageBilling}
           busy={
             busyAction === "issue-invoice" ||
             busyAction === "register-invoice-payment" ||
@@ -7173,9 +7220,9 @@ function TodayView({
   onCancel: (booking: Booking) => void;
   onToggleTask: (id: string) => void;
   onClearCompletedTasks: () => void;
-  onViewBilling: () => void;
-  onOpenInvoice: (invoice: Invoice) => void;
-  onLodgingInvoice: (
+  onViewBilling?: () => void;
+  onOpenInvoice?: (invoice: Invoice) => void;
+  onLodgingInvoice?: (
     booking: Booking,
     kind: "deposit" | "balance",
   ) => void;
@@ -7440,7 +7487,7 @@ function TodayView({
             </section>
           )}
 
-          {isToday && billingReminders.length > 0 && (
+          {isToday && onOpenInvoice && billingReminders.length > 0 && (
             <section className="panel compact-panel billing-reminder-panel">
               <div className="panel-heading">
                 <div>
@@ -7465,7 +7512,7 @@ function TodayView({
             </section>
           )}
 
-          {invoice && (
+          {invoice && onOpenInvoice && onViewBilling && (
             <section className="panel compact-panel billing-snapshot">
               <div className="panel-heading">
                 <div>
@@ -8461,7 +8508,7 @@ function ProfileAppointments({
   onEdit: (booking: Booking) => void;
   onCancel: (booking: Booking) => void;
   onOpenReceipt: (receipt: ServiceReceipt) => void;
-  onLodgingInvoice: (
+  onLodgingInvoice?: (
     booking: Booking,
     kind: "deposit" | "balance",
   ) => void;
@@ -8576,7 +8623,7 @@ function DogProfile({
   onEditBooking: (booking: Booking) => void;
   onCancelBooking: (booking: Booking) => void;
   onOpenReceipt: (receipt: ServiceReceipt) => void;
-  onLodgingInvoice: (
+  onLodgingInvoice?: (
     booking: Booking,
     kind: "deposit" | "balance",
   ) => void;
@@ -8782,11 +8829,13 @@ function CustomersView({
   dogs,
   onSelect,
   onNew,
+  canViewFinancials,
 }: {
   customers: Customer[];
   dogs: Dog[];
   onSelect: (id: string) => void;
   onNew: () => void;
+  canViewFinancials: boolean;
 }) {
   const dogNamesByCustomer = useMemo(() => {
     const dogNameById = new Map(dogs.map((dog) => [dog.id, dog.name]));
@@ -8822,7 +8871,7 @@ function CustomersView({
               <th>Contato</th>
               <th>Cães</th>
               <th>Créditos</th>
-              <th>Situação</th>
+              {canViewFinancials && <th>Situação</th>}
               <th>
                 <span className="sr-only">Abrir</span>
               </th>
@@ -8849,9 +8898,11 @@ function CustomersView({
                   {dogNamesByCustomer.get(customer.id) || "Nenhum"}
                 </td>
                 <td>{customer.creditsLabel}</td>
-                <td>
-                  <CustomerStatus customer={customer} />
-                </td>
+                {canViewFinancials && (
+                  <td>
+                    <CustomerStatus customer={customer} />
+                  </td>
+                )}
                 <td>
                   <button
                     className="row-link"
@@ -8880,7 +8931,7 @@ function CustomersView({
                 <small>{customer.phone}</small>
               </span>
             </span>
-            <CustomerStatus customer={customer} />
+            {canViewFinancials && <CustomerStatus customer={customer} />}
             <span className="mobile-data-detail">
               {dogNamesByCustomer.get(customer.id) || "Nenhum cão"}
             </span>
@@ -8925,6 +8976,9 @@ function CustomerProfile({
   onCancelBooking,
   onLodgingInvoice,
   onStatement,
+  canViewFinancials,
+  canViewCpf,
+  canSellCredits,
 }: {
   customer: Customer;
   dogs: Dog[];
@@ -8947,13 +9001,19 @@ function CustomerProfile({
   openMenuId: string | null;
   onEditBooking: (booking: Booking) => void;
   onCancelBooking: (booking: Booking) => void;
-  onLodgingInvoice: (
+  onLodgingInvoice?: (
     booking: Booking,
     kind: "deposit" | "balance",
   ) => void;
-  onStatement: () => void;
+  onStatement?: () => void;
+  canViewFinancials: boolean;
+  canViewCpf: boolean;
+  canSellCredits: boolean;
 }) {
   const [tab, setTab] = useState("Resumo");
+  const profileTabs = canViewFinancials
+    ? ["Resumo", "Serviços", "Financeiro e créditos"]
+    : ["Resumo", "Serviços", "Créditos"];
   const balances = creditBalances[customer.id] ?? {
     daycare: 0,
     bath: 0,
@@ -8970,18 +9030,22 @@ function CustomerProfile({
           {customer.initials}
         </span>
         <div className="profile-title">
-          <div className="profile-badges">
-            <CustomerStatus customer={customer} />
-          </div>
+          {canViewFinancials && (
+            <div className="profile-badges">
+              <CustomerStatus customer={customer} />
+            </div>
+          )}
           <h2>{customer.name}</h2>
           <p>
             {customer.phone} · {customer.email}
           </p>
         </div>
         <div className="profile-actions">
-          <button className="secondary-button" onClick={onStatement}>
-            Emitir extrato
-          </button>
+          {onStatement && (
+            <button className="secondary-button" onClick={onStatement}>
+              Emitir extrato
+            </button>
+          )}
           <button className="secondary-button" onClick={onEdit}>
             Editar
           </button>
@@ -8991,7 +9055,7 @@ function CustomerProfile({
         </div>
       </section>
       <div className="tabs" role="tablist" aria-label="Perfil do cliente">
-        {["Resumo", "Serviços", "Financeiro e créditos"].map(
+        {profileTabs.map(
           (item) => (
             <button
               key={item}
@@ -9039,10 +9103,12 @@ function CustomerProfile({
                 <span>Endereço</span>
                 <strong>{customer.address || "Não informado"}</strong>
               </div>
-              <div>
-                <span>CPF</span>
-                <strong>{customer.cpf || "Não informado"}</strong>
-              </div>
+              {canViewCpf && (
+                <div>
+                  <span>CPF</span>
+                  <strong>{customer.cpf || "Não informado"}</strong>
+                </div>
+              )}
               <div>
                 <span>Data de nascimento</span>
                 <strong>
@@ -9075,40 +9141,42 @@ function CustomerProfile({
           />
         </section>
       )}
-      {tab === "Financeiro e créditos" && (
+      {(tab === "Financeiro e créditos" || tab === "Créditos") && (
         <div className="profile-grid">
-          <section className="panel profile-main-card">
-            <p className="section-kicker">Cobranças</p>
-            <h3>Movimentações recentes</h3>
-            {invoices.length ? (
-              <div className="invoice-mini-list">
-                {invoices.map((invoice) => (
-                  <div key={invoice.id}>
-                    <span>
-                      <strong>Cobrança {invoice.number}</strong>
-                      <small>{invoice.due}</small>
-                    </span>
-                    <span>
-                      <strong>{formatCurrency(invoice.amountCents)}</strong>
-                      {invoice.status === "pending" && (
-                        <button
-                          className="text-button"
-                          onClick={() => onOpenInvoice(invoice)}
-                        >
-                          Ver fatura
-                        </button>
-                      )}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <EmptyState
-                title="Tudo em dia"
-                description="Não há cobranças para este cliente."
-              />
-            )}
-          </section>
+          {canViewFinancials && (
+            <section className="panel profile-main-card">
+              <p className="section-kicker">Cobranças</p>
+              <h3>Movimentações recentes</h3>
+              {invoices.length ? (
+                <div className="invoice-mini-list">
+                  {invoices.map((invoice) => (
+                    <div key={invoice.id}>
+                      <span>
+                        <strong>Cobrança {invoice.number}</strong>
+                        <small>{invoice.due}</small>
+                      </span>
+                      <span>
+                        <strong>{formatCurrency(invoice.amountCents)}</strong>
+                        {invoice.status === "pending" && (
+                          <button
+                            className="text-button"
+                            onClick={() => onOpenInvoice(invoice)}
+                          >
+                            Ver fatura
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title="Tudo em dia"
+                  description="Não há cobranças para este cliente."
+                />
+              )}
+            </section>
+          )}
           <section className="panel">
             <div className="panel-heading">
               <div>
@@ -9121,9 +9189,11 @@ function CustomerProfile({
                     Ajustar saldo
                   </button>
                 )}
-                <button className="text-button" onClick={() => onAddCredits()}>
-                  Vender pacote
-                </button>
+                {canSellCredits && (
+                  <button className="text-button" onClick={() => onAddCredits()}>
+                    Vender pacote
+                  </button>
+                )}
               </div>
             </div>
             <div className="credit-list">
@@ -9141,11 +9211,11 @@ function CustomerProfile({
               </div>
             </div>
             <p className="ledger-note">
-              O saldo é calculado pelo extrato. Ajustes administrativos ficam
-              registrados no histórico.
+              Estes saldos podem ser consultados pela equipe durante o atendimento.
+              Os créditos são liberados somente após a confirmação do pagamento.
             </p>
           </section>
-          <section className="panel profile-full-card">
+          {canViewFinancials && <section className="panel profile-full-card">
             <div className="panel-heading">
               <div>
                 <p className="section-kicker">Pacotes pré-pagos</p>
@@ -9180,8 +9250,8 @@ function CustomerProfile({
                 description="Use “Vender pacote” para preparar a fatura e liberar os créditos após registrar o pagamento."
               />
             )}
-          </section>
-          <section className="panel profile-full-card">
+          </section>}
+          {canViewFinancials && <section className="panel profile-full-card">
             <div className="panel-heading">
               <div>
                 <p className="section-kicker">Recibos</p>
@@ -9217,7 +9287,7 @@ function CustomerProfile({
                 description="Ao usar um crédito em um serviço, o recibo aparecerá aqui."
               />
             )}
-          </section>
+          </section>}
         </div>
       )}
     </div>
@@ -11035,6 +11105,11 @@ function customerRequestDetailsText(request: CustomerRequestRow) {
   else if (details.transportDirection === "one_way") parts.push("ida");
   if (details.transportDistance === "long") parts.push("distância longa");
   else if (details.transportDistance === "short") parts.push("distância curta");
+  if (typeof details.lodgingNights === "number") {
+    parts.push(
+      `${String(details.lodgingNights).replace(".", ",")} ${details.lodgingNights === 1 ? "diária" : "diárias"}`,
+    );
+  }
   if (request.requestedStartTime) {
     parts.push(`início: ${formatOperationalTime(request.requestedStartTime)}`);
   }
@@ -11450,9 +11525,9 @@ function AccessView({ customers }: { customers: Customer[] }) {
           {inviteRole === "customer" && (
             <label className="field full">
               <span>Cadastro do cliente</span>
-              <select name="accountId" defaultValue="" required>
-                <option value="" disabled>
-                  Selecione o cliente
+              <select name="accountId" defaultValue="">
+                <option value="">
+                  Novo cliente · fará o primeiro cadastro pelo convite
                 </option>
                 {customers.map((customer) => (
                   <option key={customer.id} value={customer.id}>
@@ -11460,6 +11535,10 @@ function AccessView({ customers }: { customers: Customer[] }) {
                   </option>
                 ))}
               </select>
+              <small>
+                Para quem já está cadastrado, escolha o nome. Para um cliente
+                novo, mantenha a primeira opção.
+              </small>
             </label>
           )}
           {error && <p className="form-error full">{error}</p>}
@@ -12483,6 +12562,7 @@ function InvoiceDialog({
   longStayDiscountPercent,
   liveMode,
   canReversePayment,
+  canManagePayment,
   busy,
 }: {
   state: InvoiceState;
@@ -12510,6 +12590,7 @@ function InvoiceDialog({
   longStayDiscountPercent: number;
   liveMode: boolean;
   canReversePayment: boolean;
+  canManagePayment: boolean;
   busy: boolean;
 }) {
   const [deliveryBusy, setDeliveryBusy] =
@@ -12846,7 +12927,17 @@ function InvoiceDialog({
             </p>
           </div>
 
-          {!isPaid && compensationAvailableOn && (
+          {!canManagePayment && !isPaid && (
+            <div className="invoice-compensation-status">
+              <strong>Fatura preparada</strong>
+              <span>
+                Você pode compartilhar o PDF. A administração confirmará o
+                pagamento e liberará os créditos quando o valor for recebido.
+              </span>
+            </div>
+          )}
+
+          {canManagePayment && !isPaid && compensationAvailableOn && (
             <div className="invoice-compensation-status">
               <strong>Recebimento em compensação</strong>
               <span>
@@ -12864,7 +12955,7 @@ function InvoiceDialog({
             </div>
           )}
 
-          {!isPaid && compensationAvailableOn && settlementEditorOpen && (
+          {canManagePayment && !isPaid && compensationAvailableOn && settlementEditorOpen && (
             <div className="settlement-editor">
               <label>
                 <span>Nova data prevista</span>
@@ -12927,7 +13018,7 @@ function InvoiceDialog({
             </div>
           )}
 
-          {!isPaid && (
+          {canManagePayment && !isPaid && (
             <div className="invoice-payment-register">
               {compensationAvailableOn &&
               state.invoice?.compensationFinancialAccountId ? (
@@ -13061,7 +13152,7 @@ function InvoiceDialog({
             </form>
           )}
 
-          {!isPaid && !state.invoice?.mergeId && cancelInvoiceOpen && (
+          {canManagePayment && !isPaid && !state.invoice?.mergeId && cancelInvoiceOpen && (
             <form
               className="invoice-reversal-form"
               onSubmit={async (event) => {
@@ -13112,7 +13203,7 @@ function InvoiceDialog({
           )}
 
           <div className="dialog-actions">
-            {!isPaid && !cancelInvoiceOpen && (
+            {canManagePayment && !isPaid && !cancelInvoiceOpen && (
               <button
                 className="danger-button"
                 type="button"
@@ -13139,7 +13230,7 @@ function InvoiceDialog({
                 Estornar pagamento
               </button>
             )}
-            {!isPaid && (
+            {canManagePayment && !isPaid && (
               <button
                 className="primary-button"
                 type="button"

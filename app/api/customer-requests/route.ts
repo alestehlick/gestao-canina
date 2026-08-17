@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   customerAccounts,
@@ -14,6 +14,19 @@ export async function GET(request: Request) {
   try {
     const identity = await requireIdentity(request, ["owner", "staff"]);
     const db = getDb();
+    const url = new URL(request.url);
+    if (url.searchParams.get("summary") === "1") {
+      const [summary] = await db
+        .select({ pendingCount: count() })
+        .from(customerRequests)
+        .where(
+          and(
+            eq(customerRequests.establishmentId, identity.establishmentId!),
+            eq(customerRequests.status, "pending"),
+          ),
+        );
+      return json({ pendingCount: summary?.pendingCount ?? 0 });
+    }
     const requests = await db
       .select({
         id: customerRequests.id,

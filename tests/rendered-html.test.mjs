@@ -663,7 +663,7 @@ test("separa acessos, protege o portal e registra pedidos dos clientes", async (
 });
 
 test("aprova pedidos do portal junto com a agenda e protege a experiência do cliente", async () => {
-  const [review, requests, portalApi, portalUi, dogPhoto, schema, migration] =
+  const [review, requests, portalApi, portalUi, dogPhoto, schema, migration, app, css, requestList] =
     await Promise.all([
       readFile(
         new URL("../app/api/customer-requests/[id]/route.ts", import.meta.url),
@@ -690,6 +690,9 @@ test("aprova pedidos do portal junto com a agenda e protege a experiência do cl
         ),
         "utf8",
       ),
+      readFile(new URL("../app/components/management-app.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/customer-requests/route.ts", import.meta.url), "utf8"),
     ]);
 
   assert.match(review, /customer_request\.approved_and_scheduled/);
@@ -708,6 +711,13 @@ test("aprova pedidos do portal junto com a agenda e protege a experiência do cl
   assert.match(portalUi, /Cancelamento solicitado/);
   assert.match(portalUi, /portal-dialog-backdrop/);
   assert.match(portalUi, /transportDistance/);
+  assert.match(portalUi, /const formElement = event\.currentTarget/);
+  assert.match(portalUi, /formElement\.reset\(\)/);
+  assert.match(requestList, /summary\?\.pendingCount/);
+  assert.match(app, /nav-count nav-count-alert/);
+  assert.match(app, /pendingCustomerRequestCount/);
+  assert.match(css, /\.customer-portal-content > \.panel/);
+  assert.match(css, /\.nav-count-alert/);
   assert.match(dogPhoto, /eq\(dogTutors\.portalVisible, true\)/);
   assert.match(schema, /customer_requests_pending_cancellation_unique/);
   assert.match(migration, /CREATE UNIQUE INDEX `customer_requests_pending_service_unique`/);

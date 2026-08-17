@@ -366,7 +366,10 @@ export default function CustomerPortal() {
   async function submitServiceRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!data || busy) return;
-    const form = new FormData(event.currentTarget);
+    // React clears currentTarget after the first asynchronous boundary. Keep the
+    // form itself so the successful request can be reset reliably.
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     setBusy("request");
     setMessage("");
     setError("");
@@ -396,7 +399,7 @@ export default function CustomerPortal() {
           }),
         }),
       );
-      event.currentTarget.reset();
+      formElement.reset();
       setSelectedServiceId("");
       setRequestStartDate("");
       setRequestEndDate("");

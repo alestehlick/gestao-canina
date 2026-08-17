@@ -1031,6 +1031,8 @@ export function ManagementApp() {
   const [creditPurchases, setCreditPurchases] = useState<CreditPurchase[]>([]);
   const [receipts, setReceipts] = useState<ServiceReceipt[]>([]);
   const [activities, setActivities] = useState<AuditActivity[]>([]);
+  const [pendingCustomerRequestCount, setPendingCustomerRequestCount] =
+    useState(0);
   const [financialAccounts, setFinancialAccounts] = useState<FinancialAccount[]>([]);
   const [servicePrices, setServicePrices] =
     useState<Record<ServiceType, number>>(defaultServicePrices);
@@ -1394,6 +1396,45 @@ export function ManagementApp() {
       }
     }
   }, [endSession]);
+
+  const refreshCustomerRequestCount = useCallback(async () => {
+    try {
+      const result = await requestJson<{ pendingCount: number }>(
+        "/api/customer-requests?summary=1",
+      );
+      setPendingCustomerRequestCount(result.pendingCount);
+    } catch (error) {
+      if (isSessionError(error)) endSession();
+    }
+  }, [endSession]);
+
+  useEffect(() => {
+    const role = workspacePayload?.identity.role;
+    if (runtimeMode !== "ready" || !role || !["owner", "staff"].includes(role)) {
+      return;
+    }
+    const initialTimer = window.setTimeout(
+      () => void refreshCustomerRequestCount(),
+      0,
+    );
+    const interval = window.setInterval(
+      () => void refreshCustomerRequestCount(),
+      60_000,
+    );
+    const onReturn = () => {
+      if (document.visibilityState === "visible") {
+        void refreshCustomerRequestCount();
+      }
+    };
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
+    };
+  }, [refreshCustomerRequestCount, runtimeMode, workspacePayload]);
 
   useEffect(() => {
     if (runtimeMode !== "ready") return;
@@ -4858,6 +4899,16 @@ export function ManagementApp() {
                   {pendingBillingCount}
                 </span>
               )}
+              {item.id === "requests" && pendingCustomerRequestCount > 0 && (
+                <span
+                  className="nav-count nav-count-alert"
+                  aria-label={`${pendingCustomerRequestCount} pedidos novos`}
+                >
+                  {pendingCustomerRequestCount > 99
+                    ? "99+"
+                    : pendingCustomerRequestCount}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -5060,7 +5111,11 @@ export function ManagementApp() {
               )}
             />
           )}
-          {view === "requests" && <CustomerRequestsView />}
+          {view === "requests" && (
+            <CustomerRequestsView
+              onPendingCountChange={setPendingCustomerRequestCount}
+            />
+          )}
           {view === "dogs" &&
             (selectedDog ? (
               <DogProfile
@@ -10921,7 +10976,11 @@ function customerRequestDetailsText(request: CustomerRequestRow) {
   return parts.join(" · ");
 }
 
-function CustomerRequestsView() {
+function CustomerRequestsView({
+  onPendingCountChange,
+}: {
+  onPendingCountChange: (count: number) => void;
+}) {
   const [requests, setRequests] = useState<CustomerRequestRow[]>([]);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -10933,6 +10992,9 @@ function CustomerRequestsView() {
         "/api/customer-requests",
       );
       setRequests(payload.requests);
+      onPendingCountChange(
+        payload.requests.filter((request) => request.status === "pending").length,
+      );
       setError("");
     } catch (reason) {
       setError(
@@ -10941,7 +11003,7 @@ function CustomerRequestsView() {
           : "Não foi possível carregar os pedidos.",
       );
     }
-  }, []);
+  }, [onPendingCountChange]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);

@@ -100,9 +100,7 @@ export default function InvitationPage() {
   return (
     <main className="startup-screen">
       <section className="startup-card auth-card invitation-card">
-        <span className="brand-mark startup-mark" aria-hidden="true">
-          HQ
-        </span>
+        <span className="brand-mark startup-mark" aria-hidden="true" />
         <p className="eyebrow">Hospet Quintal · novo acesso</p>
         <h1>{complete ? "Conta criada." : "Prepare seu acesso."}</h1>
         {complete ? (

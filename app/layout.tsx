@@ -41,7 +41,8 @@ export async function generateMetadata(): Promise<Metadata> {
       "Agenda, cuidados, clientes e faturas para uma operação canina organizada.",
     applicationName: "Hospet Quintal",
     icons: {
-      icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+      icon: [{ url: "/hospet-quintal-simbolo.png", type: "image/png" }],
+      apple: [{ url: "/hospet-quintal-simbolo.png", type: "image/png" }],
     },
     robots: { index: false, follow: false },
     openGraph: {

@@ -407,13 +407,10 @@ h3 {
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--forest);
-  border-radius: 50%;
-  background: var(--forest);
-  color: #fff;
-  font-family: var(--font-serif);
-  font-size: 0.78rem;
-  letter-spacing: 0.06em;
+  border: 0;
+  border-radius: 10px;
+  background: #ffa300 url("/hospet-quintal-simbolo.png") center / cover no-repeat;
+  box-shadow: 0 0 0 1px rgb(37 42 39 / 8%);
 }
 
 .brand strong,

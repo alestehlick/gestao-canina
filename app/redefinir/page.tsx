@@ -52,9 +52,7 @@ export default function PasswordResetPage() {
   return (
     <main className="startup-screen">
       <section className="startup-card auth-card">
-        <span className="brand-mark startup-mark" aria-hidden="true">
-          HQ
-        </span>
+        <span className="brand-mark startup-mark" aria-hidden="true" />
         <p className="eyebrow">Segurança da conta</p>
         <h1>{complete ? "Senha alterada." : "Crie uma nova senha."}</h1>
         {complete ? (

@@ -16,7 +16,7 @@ test("mantém a experiência em português, privada e com demonstração segura"
 
   assert.match(layout, /lang="pt-BR"/);
   assert.match(layout, /Hospet Quintal/);
-  assert.match(layout, /\/favicon\.svg/);
+  assert.match(layout, /\/hospet-quintal-simbolo\.png/);
   assert.match(page, /<ManagementApp \/>/);
   assert.match(app, /Demonstração segura/);
   assert.match(app, /\/api\/workspace/);
@@ -94,6 +94,30 @@ test("usa a marca oficial nas prévias de links compartilhados", async () => {
   assert.match(layout, /height: 1280/);
   assert.match(layout, /alt: "Hospet Quintal"/);
   assert.ok(image.length > 100_000);
+});
+
+test("usa o símbolo oficial na navegação e nas telas de acesso", async () => {
+  const [css, layout, management, portal, symbol] = await Promise.all([
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(
+      new URL("../app/components/management-app.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/components/customer-portal.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../public/hospet-quintal-simbolo.png", import.meta.url),
+    ),
+  ]);
+
+  assert.match(css, /url\("\/hospet-quintal-simbolo\.png"\)/);
+  assert.match(layout, /hospet-quintal-simbolo\.png/);
+  assert.doesNotMatch(management, /className="brand-mark"[^>]*>\s*HQ\s*</);
+  assert.doesNotMatch(portal, /className="brand-mark"[^>]*>\s*HQ\s*</);
+  assert.ok(symbol.length > 1_000);
 });
 
 test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () => {

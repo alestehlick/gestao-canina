@@ -4902,9 +4902,7 @@ export function ManagementApp() {
 
       <aside className="sidebar" aria-label="Navegação principal">
         <button className="brand" onClick={() => navigate("today")}>
-          <span className="brand-mark" aria-hidden="true">
-            HQ
-          </span>
+          <span className="brand-mark" aria-hidden="true" />
           <span>
             <strong>Hospet Quintal <small>HQ</small></strong>
             <small>Operação e cuidados</small>
@@ -4969,7 +4967,7 @@ export function ManagementApp() {
 
       <div className="mobile-header">
         <button className="brand compact" onClick={() => navigate("today")}>
-          <span className="brand-mark">HQ</span>
+          <span className="brand-mark" aria-hidden="true" />
           <strong>Hospet Quintal <small>HQ</small></strong>
         </button>
         <div className="mobile-header-actions">
@@ -6844,9 +6842,7 @@ function StartupScreen({
   return (
     <main className="startup-screen">
       <section className="startup-card" aria-live="polite">
-        <span className="brand-mark startup-mark" aria-hidden="true">
-          HQ
-        </span>
+        <span className="brand-mark startup-mark" aria-hidden="true" />
         <p className="eyebrow">Hospet Quintal · HQ</p>
         <h1>{title}</h1>
         <p>{description}</p>
@@ -6878,9 +6874,7 @@ function LoginScreen({
   return (
     <main className="startup-screen">
       <section className="startup-card auth-card">
-        <span className="brand-mark startup-mark" aria-hidden="true">
-          HQ
-        </span>
+        <span className="brand-mark startup-mark" aria-hidden="true" />
         <p className="eyebrow">Acesso protegido</p>
         <h1>Entre para cuidar da operação.</h1>
         <p>
@@ -6944,9 +6938,7 @@ function InitialSetupScreen({
   return (
     <main className="startup-screen setup-screen">
       <section className="startup-card setup-card">
-        <span className="brand-mark startup-mark" aria-hidden="true">
-          HQ
-        </span>
+        <span className="brand-mark startup-mark" aria-hidden="true" />
         <p className="eyebrow">Configuração única</p>
         <h1>Cadastre os dois administradores.</h1>
         <p>
@@ -7074,9 +7066,7 @@ function OnboardingScreen({
   return (
     <main className="startup-screen">
       <section className="startup-card onboarding-card">
-        <span className="brand-mark startup-mark" aria-hidden="true">
-          HQ
-        </span>
+        <span className="brand-mark startup-mark" aria-hidden="true" />
         <p className="eyebrow">Primeiro acesso</p>
         <h1>Vamos preparar seu ambiente privado.</h1>
         <p>

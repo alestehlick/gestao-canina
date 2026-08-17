@@ -833,7 +833,7 @@ export default function CustomerPortal() {
     return (
       <main className="startup-screen">
         <section className="startup-card">
-          <span className="brand-mark startup-mark">HQ</span>
+          <span className="brand-mark startup-mark" aria-hidden="true" />
           <h1>{error ? "Não foi possível abrir" : "Abrindo seu portal"}</h1>
           <p>{error || "Carregando seus cães, serviços e documentos."}</p>
           {error ? (
@@ -872,7 +872,7 @@ export default function CustomerPortal() {
     <div className="customer-portal">
       <header className="customer-portal-header">
         <button className="brand compact" onClick={() => setView("home")}>
-          <span className="brand-mark">HQ</span>
+          <span className="brand-mark" aria-hidden="true" />
           <span>
             <strong>Hospet Quintal</strong>
             <small>Área do cliente</small>

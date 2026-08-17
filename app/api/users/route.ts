@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, ne, or } from "drizzle-orm";
 import { getD1Database, getDb } from "@/db";
 import {
   accountInvitations,
@@ -43,11 +43,26 @@ export async function GET(request: Request) {
           role: appUsers.role,
           tutorId: appUsers.tutorId,
           status: appUsers.status,
+          customerStatus: customerAccounts.status,
           createdAt: appUsers.createdAt,
           updatedAt: appUsers.updatedAt,
         })
         .from(appUsers)
-        .where(eq(appUsers.establishmentId, establishmentId))
+        .leftJoin(tutors, eq(tutors.id, appUsers.tutorId))
+        .leftJoin(
+          customerAccounts,
+          eq(customerAccounts.id, tutors.accountId),
+        )
+        .where(
+          and(
+            eq(appUsers.establishmentId, establishmentId),
+            or(
+              ne(appUsers.role, "customer"),
+              isNull(customerAccounts.id),
+              ne(customerAccounts.status, "deleted"),
+            ),
+          ),
+        )
         .orderBy(desc(appUsers.createdAt)),
       db
         .select({
@@ -152,8 +167,13 @@ export async function POST(request: Request) {
         .select({
           accountId: tutors.accountId,
           fullName: tutors.fullName,
+          accountStatus: customerAccounts.status,
         })
         .from(tutors)
+        .innerJoin(
+          customerAccounts,
+          eq(customerAccounts.id, tutors.accountId),
+        )
         .where(
           and(
             eq(tutors.establishmentId, establishmentId),
@@ -166,7 +186,9 @@ export async function POST(request: Request) {
         throw new HttpError(
           409,
           "customer_contact_exists",
-          `Este e-mail já pertence a ${existingCustomerContact.fullName}. Escolha o cadastro existente no convite.`,
+          existingCustomerContact.accountStatus === "archived"
+            ? `Este e-mail pertence ao cadastro inativo de ${existingCustomerContact.fullName}. Reative o cliente antes de criar o acesso.`
+            : `Este e-mail já pertence a ${existingCustomerContact.fullName}. Escolha o cadastro existente no convite.`,
         );
       }
     }

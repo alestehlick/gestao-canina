@@ -185,7 +185,9 @@ export async function GET(request: Request) {
         .where(
           and(
             eq(customerAccounts.establishmentId, establishmentId),
-            eq(customerAccounts.status, "active"),
+            identity.role === "owner"
+              ? inArray(customerAccounts.status, ["active", "archived"])
+              : eq(customerAccounts.status, "active"),
           ),
         )
         .orderBy(asc(customerAccounts.normalizedName)),
@@ -205,7 +207,9 @@ export async function GET(request: Request) {
         .where(
           and(
             eq(dogs.establishmentId, establishmentId),
-            eq(dogs.status, "active"),
+            identity.role === "owner"
+              ? inArray(dogs.status, ["active", "archived"])
+              : eq(dogs.status, "active"),
           ),
         )
         .orderBy(asc(dogs.normalizedName)),
@@ -223,7 +227,9 @@ export async function GET(request: Request) {
         .where(
           and(
             eq(dogs.establishmentId, establishmentId),
-            eq(dogs.status, "active"),
+            identity.role === "owner"
+              ? inArray(dogs.status, ["active", "archived"])
+              : eq(dogs.status, "active"),
           ),
         ),
       db

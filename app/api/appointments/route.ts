@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { getD1Database, getDb } from "@/db";
 import {
+  customerAccounts,
   dogs,
   establishments,
   serviceCatalog,
@@ -194,6 +195,24 @@ export async function POST(request: Request) {
         404,
         "record_not_found",
         "Cão ou serviço não encontrado.",
+      );
+    }
+    const [activeAccount] = await db
+      .select({ id: customerAccounts.id })
+      .from(customerAccounts)
+      .where(
+        and(
+          eq(customerAccounts.id, dog.accountId),
+          eq(customerAccounts.establishmentId, establishmentId),
+          eq(customerAccounts.status, "active"),
+        ),
+      )
+      .limit(1);
+    if (!activeAccount) {
+      throw new HttpError(
+        409,
+        "customer_inactive",
+        "Reative o cliente antes de criar um novo serviço.",
       );
     }
     if (service.code === "bath_grooming") {

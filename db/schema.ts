@@ -68,7 +68,7 @@ export const customerAccounts = sqliteTable(
     addressPostalCode: text("address_postal_code"),
     cpf: text("cpf"),
     birthDate: text("birth_date"),
-    status: text("status", { enum: ["active", "archived"] })
+    status: text("status", { enum: ["active", "archived", "deleted"] })
       .notNull()
       .default("active"),
     createdAt: text("created_at").notNull().default(now),

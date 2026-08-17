@@ -322,6 +322,10 @@ async function readResponse<T>(response: Response): Promise<T> {
 
 export default function CustomerPortal() {
   const [data, setData] = useState<PortalData | null>(null);
+  const [accessUnavailable, setAccessUnavailable] = useState<{
+    title: string;
+    message: string;
+  } | null>(null);
   const [view, setView] = useState<PortalView>("home");
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
@@ -347,11 +351,39 @@ export default function CustomerPortal() {
         credentials: "same-origin",
         cache: "no-store",
       });
+      const payload = (await response.json()) as PortalData & {
+        error?: { code?: string; message?: string };
+      };
+      if (
+        response.status === 403 &&
+        ["customer_inactive", "customer_deleted"].includes(
+          payload.error?.code ?? "",
+        )
+      ) {
+        setData(null);
+        setAccessUnavailable({
+          title:
+            payload.error?.code === "customer_inactive"
+              ? "Cadastro inativo"
+              : "Cadastro indisponível",
+          message:
+            payload.error?.message ??
+            "Entre em contato com a Hospet Quintal para verificar seu acesso.",
+        });
+        setError("");
+        return;
+      }
       if (response.status === 401 || response.status === 403) {
         window.location.assign("/");
         return;
       }
-      setData(await readResponse<PortalData>(response));
+      if (!response.ok) {
+        throw new Error(
+          payload.error?.message || "Não foi possível abrir seu portal.",
+        );
+      }
+      setData(payload);
+      setAccessUnavailable(null);
       setError("");
     } catch (reason) {
       setError(
@@ -893,6 +925,24 @@ export default function CustomerPortal() {
       body: "{}",
     }).catch(() => undefined);
     window.location.assign("/");
+  }
+
+  if (accessUnavailable) {
+    return (
+      <main className="startup-screen">
+        <section className="startup-card auth-card inactive-access-card">
+          <span className="brand-mark startup-mark" aria-hidden="true" />
+          <p className="eyebrow">Hospet Quintal · área do cliente</p>
+          <h1>{accessUnavailable.title}</h1>
+          <p>{accessUnavailable.message}</p>
+          <div className="inactive-access-actions">
+            <button className="quiet-button" onClick={() => void logout()}>
+              Sair desta conta
+            </button>
+          </div>
+        </section>
+      </main>
+    );
   }
 
   if (!data) {

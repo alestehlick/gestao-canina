@@ -1027,6 +1027,7 @@ export function ManagementApp() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [dogs, setDogs] = useState<Dog[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [inactiveCustomers, setInactiveCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [billableServices, setBillableServices] = useState<BillableService[]>(
     [],
@@ -1134,6 +1135,7 @@ export function ManagementApp() {
     setTasks([]);
     setDogs([]);
     setCustomers([]);
+    setInactiveCustomers([]);
     setInvoices([]);
     setBillableServices([]);
     setCreditBalances({});
@@ -1181,6 +1183,7 @@ export function ManagementApp() {
     setTasks(demoTasks);
     setDogs(demoDogs);
     setCustomers(demoCustomers);
+    setInactiveCustomers([]);
     setInvoices(demoInvoices);
     setBillableServices(demoBillableServices);
     setCreditBalances(demoCreditBalances);
@@ -1207,6 +1210,7 @@ export function ManagementApp() {
     setTasks(data.tasks);
     setDogs(data.dogs);
     setCustomers(data.customers);
+    setInactiveCustomers(data.inactiveCustomers);
     setInvoices(data.invoices);
     setBillableServices(data.billableServices);
     setCreditBalances(data.creditBalances);
@@ -2502,7 +2506,7 @@ export function ManagementApp() {
   }
 
   async function archiveCustomerProfile() {
-    if (!customerToEdit || !window.confirm(`Inativar ${customerToEdit.name} e seus cães? Eles deixarão de aparecer nos novos agendamentos.`)) {
+    if (!customerToEdit || !window.confirm(`Inativar ${customerToEdit.name}? O cadastro sairá das buscas e de novos agendamentos, mas o histórico será preservado.`)) {
       return;
     }
     if (runtimeMode === "ready") {
@@ -2525,6 +2529,16 @@ export function ManagementApp() {
     setCustomers((current) =>
       current.filter((customer) => customer.id !== customerToEdit.id),
     );
+    setInactiveCustomers((current) => [
+      {
+        ...customerToEdit,
+        recordStatus: "archived",
+        dogNames: dogs
+          .filter((dog) => dog.customerId === customerToEdit.id)
+          .map((dog) => dog.name),
+      },
+      ...current,
+    ]);
     setDogs((current) =>
       current.filter((dog) => dog.customerId !== customerToEdit.id),
     );
@@ -2534,8 +2548,41 @@ export function ManagementApp() {
     setToast({ message: "Cliente inativado." });
   }
 
+  async function reactivateCustomerProfile() {
+    if (!customerToEdit || !window.confirm(`Reativar ${customerToEdit.name}? Os cães ligados a este cadastro voltarão a ficar disponíveis.`)) {
+      return;
+    }
+    if (runtimeMode === "ready") {
+      const result = await runLiveAction(
+        `reactivate-customer:${customerToEdit.id}`,
+        () =>
+          requestJson(`/api/customers/${customerToEdit.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ status: "active" }),
+          }),
+        { refresh: true, successMessage: "Cliente reativado." },
+      );
+      if (result) {
+        setDialog(null);
+        setCustomerToEdit(null);
+        setSelectedCustomerId(null);
+      }
+      return;
+    }
+    setInactiveCustomers((current) =>
+      current.filter((customer) => customer.id !== customerToEdit.id),
+    );
+    setCustomers((current) => [
+      { ...customerToEdit, recordStatus: "active" },
+      ...current,
+    ]);
+    setDialog(null);
+    setCustomerToEdit(null);
+    setToast({ message: "Cliente reativado." });
+  }
+
   async function deleteCustomerProfile() {
-    if (!customerToEdit || !window.confirm(`Excluir definitivamente ${customerToEdit.name}? Essa ação só funciona quando não há histórico.`)) {
+    if (!customerToEdit || !window.confirm(`Excluir ${customerToEdit.name} do cadastro? O histórico permanecerá como texto, mas os dados de contato e o acesso serão removidos. Esta ação não pode ser desfeita.`)) {
       return;
     }
     if (runtimeMode === "ready") {
@@ -2555,6 +2602,9 @@ export function ManagementApp() {
       return;
     }
     setCustomers((current) =>
+      current.filter((customer) => customer.id !== customerToEdit.id),
+    );
+    setInactiveCustomers((current) =>
       current.filter((customer) => customer.id !== customerToEdit.id),
     );
     setDogs((current) =>
@@ -4875,7 +4925,9 @@ export function ManagementApp() {
 
   const selectedDog = dogs.find((dog) => dog.id === selectedDogId) ?? null;
   const selectedCustomer =
-    customers.find((customer) => customer.id === selectedCustomerId) ?? null;
+    [...customers, ...inactiveCustomers].find(
+      (customer) => customer.id === selectedCustomerId,
+    ) ?? null;
   const serviceDraftDog =
     dogs.find((dog) => dog.id === serviceDraftDogId) ?? null;
   const serviceDogMatches = (() => {
@@ -5255,8 +5307,12 @@ export function ManagementApp() {
             ) : (
               <CustomersView
                 customers={customers}
+                inactiveCustomers={
+                  signedInRole === "owner" ? inactiveCustomers : []
+                }
                 dogs={dogs}
                 onSelect={setSelectedCustomerId}
+                onEditInactive={openCustomerEditor}
                 canViewFinancials={canManageBilling}
                 onNew={() => {
                   setRegistrationType("customer");
@@ -6369,12 +6425,20 @@ export function ManagementApp() {
             <div className="dialog-actions full">
               {signedInRole === "owner" && (
                 <>
-                  <button className="text-button danger" type="button" onClick={() => void archiveCustomerProfile()}>
-                    Inativar
-                  </button>
-                  <button className="text-button danger" type="button" onClick={() => void deleteCustomerProfile()}>
-                    Excluir
-                  </button>
+                  {customerToEdit.recordStatus === "archived" ? (
+                    <>
+                      <button className="text-button" type="button" onClick={() => void reactivateCustomerProfile()}>
+                        Reativar
+                      </button>
+                      <button className="text-button danger" type="button" onClick={() => void deleteCustomerProfile()}>
+                        Excluir cadastro
+                      </button>
+                    </>
+                  ) : (
+                    <button className="text-button danger" type="button" onClick={() => void archiveCustomerProfile()}>
+                      Inativar
+                    </button>
+                  )}
                 </>
               )}
               <button
@@ -8826,17 +8890,22 @@ function DogProfile({
 
 function CustomersView({
   customers,
+  inactiveCustomers,
   dogs,
   onSelect,
+  onEditInactive,
   onNew,
   canViewFinancials,
 }: {
   customers: Customer[];
+  inactiveCustomers: Customer[];
   dogs: Dog[];
   onSelect: (id: string) => void;
+  onEditInactive: (customer: Customer) => void;
   onNew: () => void;
   canViewFinancials: boolean;
 }) {
+  const [showInactive, setShowInactive] = useState(false);
   const dogNamesByCustomer = useMemo(() => {
     const dogNameById = new Map(dogs.map((dog) => [dog.id, dog.name]));
     return new Map(
@@ -8858,6 +8927,17 @@ function CustomersView({
           <h2>{customers.length} clientes ativos</h2>
         </div>
         <div className="inline-actions">
+          {inactiveCustomers.length > 0 && (
+            <button
+              className="quiet-button"
+              onClick={() => setShowInactive((current) => !current)}
+              aria-expanded={showInactive}
+            >
+              {showInactive
+                ? "Ocultar inativos"
+                : `Inativos (${inactiveCustomers.length})`}
+            </button>
+          )}
           <button className="secondary-button" onClick={onNew}>
             + Novo cliente
           </button>
@@ -8938,6 +9018,49 @@ function CustomersView({
           </button>
         ))}
       </div>
+      {showInactive && (
+        <section className="inactive-customer-section" aria-label="Clientes inativos">
+          <div className="inactive-customer-heading">
+            <div>
+              <p className="section-kicker">Fora da operação</p>
+              <h3>Clientes inativos</h3>
+            </div>
+            <p>
+              Não aparecem em buscas ou novos serviços. Reative para voltar a
+              utilizá-los.
+            </p>
+          </div>
+          <div className="inactive-customer-list">
+            {inactiveCustomers.map((customer) => (
+              <article key={customer.id}>
+                <span className="avatar avatar-neutral">
+                  {customer.initials}
+                </span>
+                <span>
+                  <strong>{customer.name}</strong>
+                  <small>
+                    {[customer.phone, customer.email]
+                      .filter((value) => value && value !== "Não informado")
+                      .join(" · ") || "Contato não informado"}
+                  </small>
+                  <em>
+                    {customer.dogNames?.length
+                      ? customer.dogNames.join(", ")
+                      : "Nenhum cão vinculado"}
+                  </em>
+                </span>
+                <span className="status-pill neutral">Inativo</span>
+                <button
+                  className="row-link"
+                  onClick={() => onEditInactive(customer)}
+                >
+                  Gerenciar
+                </button>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
     </section>
   );
 }
@@ -11293,6 +11416,7 @@ type AccessUser = {
   displayName: string;
   role: "owner" | "staff" | "finance" | "customer";
   status: "active" | "disabled" | "invited";
+  customerStatus?: "active" | "archived" | null;
 };
 
 type AccessInvitation = {
@@ -11574,7 +11698,11 @@ function AccessView({ customers }: { customers: Customer[] }) {
                     : user.role === "customer"
                       ? "Cliente"
                       : "Funcionário"}{" "}
-                  · {user.status === "active" ? "ativo" : "desativado"}
+                  · {user.customerStatus === "archived"
+                    ? "cadastro inativo"
+                    : user.status === "active"
+                      ? "ativo"
+                      : "desativado"}
                 </em>
               </span>
               <div className="access-actions">
@@ -11591,7 +11719,7 @@ function AccessView({ customers }: { customers: Customer[] }) {
                     Copiar recuperação
                   </button>
                 )}
-                {user.status === "active" && (
+                {user.status === "active" && user.customerStatus !== "archived" && (
                   <button
                     className="text-button"
                     disabled={busy === `reset-${user.id}`}
@@ -11600,7 +11728,7 @@ function AccessView({ customers }: { customers: Customer[] }) {
                     Redefinir senha
                   </button>
                 )}
-                {user.role !== "owner" && (
+                {user.role !== "owner" && user.customerStatus !== "archived" && (
                   <button
                     className="text-button"
                     disabled={busy === user.id}

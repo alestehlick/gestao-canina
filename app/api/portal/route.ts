@@ -68,6 +68,8 @@ async function getCustomerContext(userId: string, establishmentId: string) {
       userId: appUsers.id,
       tutorId: tutors.id,
       accountId: tutors.accountId,
+      tutorStatus: tutors.status,
+      accountStatus: customerAccounts.status,
     })
     .from(appUsers)
     .innerJoin(tutors, eq(tutors.id, appUsers.tutorId))
@@ -78,8 +80,6 @@ async function getCustomerContext(userId: string, establishmentId: string) {
         eq(appUsers.establishmentId, establishmentId),
         eq(appUsers.role, "customer"),
         eq(appUsers.status, "active"),
-        eq(tutors.status, "active"),
-        eq(customerAccounts.status, "active"),
       ),
     )
     .limit(1);
@@ -88,6 +88,20 @@ async function getCustomerContext(userId: string, establishmentId: string) {
       403,
       "customer_link_missing",
       "Sua conta ainda não está ligada a um cadastro de cliente.",
+    );
+  }
+  if (context.accountStatus === "archived") {
+    throw new HttpError(
+      403,
+      "customer_inactive",
+      "Seu cadastro está inativo. Entre em contato com a Hospet Quintal para solicitar a reativação.",
+    );
+  }
+  if (context.accountStatus === "deleted" || context.tutorStatus !== "active") {
+    throw new HttpError(
+      403,
+      "customer_deleted",
+      "Este cadastro não está mais disponível.",
     );
   }
   return context;

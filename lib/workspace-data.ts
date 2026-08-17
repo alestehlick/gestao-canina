@@ -68,7 +68,7 @@ export type WorkspaceTutor = {
   phoneE164: string | null;
   whatsappEnabled: boolean;
   isFinancialContact: boolean;
-  status: "active" | "archived";
+  status: "active" | "archived" | "deleted";
   createdAt: string;
   updatedAt: string;
 };
@@ -396,6 +396,7 @@ export type WorkspacePayload =
 export type WorkspaceUiData = {
   operationalToday: string;
   customers: Customer[];
+  inactiveCustomers: Customer[];
   dogs: Dog[];
   bookings: Booking[];
   billableServices: BillableService[];
@@ -571,6 +572,54 @@ export function mapWorkspaceCustomers(
           : openInvoices.length > 0
             ? "pending"
             : "current",
+        recordStatus: "active",
+      };
+    });
+}
+
+export function mapWorkspaceInactiveCustomers(
+  payload: WorkspaceReadyPayload,
+): Customer[] {
+  const dogNamesByAccount = new Map<string, string[]>();
+  for (const dog of payload.dogs) {
+    if (dog.status === "deceased") continue;
+    const names = dogNamesByAccount.get(dog.accountId) ?? [];
+    names.push(dog.name);
+    dogNamesByAccount.set(dog.accountId, names);
+  }
+
+  return payload.customers
+    .filter((account) => account.status === "archived")
+    .map((account) => {
+      const activeTutors = account.tutors.filter(
+        (tutor) => tutor.status === "active",
+      );
+      const contact =
+        activeTutors.find((tutor) => tutor.isFinancialContact) ??
+        activeTutors[0];
+      const dogNames = (dogNamesByAccount.get(account.id) ?? []).sort(
+        (left, right) => left.localeCompare(right, "pt-BR"),
+      );
+      return {
+        id: account.id,
+        name: account.displayName,
+        initials: initialsFor(account.displayName),
+        phone: formatPhoneForDisplay(contact?.phoneE164),
+        email: contact?.email?.trim() || "Não informado",
+        address: [
+          account.addressLine,
+          account.addressCity,
+          account.addressRegion,
+          account.addressPostalCode,
+        ].filter(Boolean).join(" · ") || undefined,
+        cpf: account.cpf ?? undefined,
+        birthDate: account.birthDate ?? undefined,
+        dogIds: [],
+        dogNames,
+        balanceCents: 0,
+        creditsLabel: "Cadastro inativo",
+        status: "current",
+        recordStatus: "archived",
       };
     });
 }
@@ -1160,7 +1209,11 @@ export function mapWorkspaceDogs(
   }
 
   return payload.dogs
-    .filter((dog) => dog.status === "active")
+    .filter(
+      (dog) =>
+        dog.status === "active" &&
+        customersById.get(dog.accountId)?.status === "active",
+    )
     .map((dog) => {
       const dogBookings = (bookingsByDog.get(dog.id) ?? []).sort(
         compareBookings,
@@ -1369,6 +1422,7 @@ export function transformWorkspacePayload(
       creditBalances,
       operationalToday,
     ),
+    inactiveCustomers: mapWorkspaceInactiveCustomers(payload),
     dogs: mapWorkspaceDogs(
       payload,
       creditBalances,
@@ -1405,6 +1459,9 @@ function activityActionLabel(action: string) {
     "appointment.status_changed": "Situação do atendimento atualizada",
     "customer.created": "Cliente cadastrado",
     "customer.updated": "Cliente atualizado",
+    "customer.archived": "Cliente inativado",
+    "customer.reactivated": "Cliente reativado",
+    "customer.deleted": "Cadastro de cliente excluído",
     "dog.created": "Cão cadastrado",
     "dog.updated": "Cadastro do cão atualizado",
     "dog.photo_updated": "Foto do cão atualizada",
@@ -1463,8 +1520,6 @@ function activityActionLabel(action: string) {
       "Cancelamento solicitado pelo cliente aprovado",
     "customer_request.rejected": "Pedido de cliente não aprovado",
     "customer.profile_updated": "Cliente atualizou seus dados",
-    "customer.archived": "Cliente inativado",
-    "customer.deleted": "Cliente excluído",
     "dog.archived": "Cão inativado",
     "dog.deleted": "Cão excluído",
     "tasks.completed_cleared": "Tarefas concluídas removidas do quadro",

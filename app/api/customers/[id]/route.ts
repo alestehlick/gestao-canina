@@ -1,13 +1,11 @@
 import { and, eq, or, sql } from "drizzle-orm";
-import { getDb } from "@/db";
+import { getD1Database, getDb } from "@/db";
 import {
-  appointments,
   auditEvents,
-  creditMovements,
-  creditPurchases,
   customerAccounts,
+  customerRequests,
   dogs,
-  invoices,
+  recurringSchedules,
   tutors,
 } from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
@@ -149,6 +147,13 @@ export async function PATCH(
         "O cliente não foi encontrado.",
       );
     }
+    if (account.status === "deleted") {
+      throw new HttpError(
+        410,
+        "customer_deleted",
+        "Este cadastro foi excluído e não pode mais ser alterado.",
+      );
+    }
     const contacts = await db
       .select()
       .from(tutors)
@@ -261,23 +266,69 @@ export async function PATCH(
       action:
         body.status === "archived"
           ? "customer.archived"
+          : body.status === "active" && account.status === "archived"
+            ? "customer.reactivated"
           : "customer.updated",
       entityType: "customer",
       entityId: id,
       requestId,
+      metadataJson: JSON.stringify({
+        name: nextDisplayName,
+        previousStatus: account.status,
+        nextStatus: body.status ?? account.status,
+      }),
     });
     if (body.status === "archived") {
       await db.batch([
         accountUpdate,
         tutorUpdate,
         db
+          .update(recurringSchedules)
+          .set({
+            status: "ended",
+            endsOn: sql`coalesce(${recurringSchedules.endsOn}, date('now'))`,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(recurringSchedules.establishmentId, establishmentId),
+              eq(recurringSchedules.status, "active"),
+              sql`${recurringSchedules.dogId} in (
+                select id from dogs where account_id = ${id}
+              )`,
+            ),
+          ),
+        db
+          .update(customerRequests)
+          .set({
+            status: "cancelled",
+            responseNote: sql`coalesce(
+              ${customerRequests.responseNote},
+              'Cadastro do cliente inativado.'
+            )`,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(customerRequests.establishmentId, establishmentId),
+              eq(customerRequests.accountId, id),
+              eq(customerRequests.status, "pending"),
+            ),
+          ),
+        auditInsert,
+      ]);
+    } else if (body.status === "active" && account.status === "archived") {
+      await db.batch([
+        accountUpdate,
+        tutorUpdate,
+        db
           .update(dogs)
-          .set({ status: "archived", updatedAt: now })
+          .set({ status: "active", updatedAt: now })
           .where(
             and(
               eq(dogs.accountId, id),
               eq(dogs.establishmentId, establishmentId),
-              eq(dogs.status, "active"),
+              eq(dogs.status, "archived"),
             ),
           ),
         auditInsert,
@@ -316,7 +367,11 @@ export async function DELETE(
     const establishmentId = identity.establishmentId!;
     const db = getDb();
     const [account] = await db
-      .select({ id: customerAccounts.id, displayName: customerAccounts.displayName })
+      .select({
+        id: customerAccounts.id,
+        displayName: customerAccounts.displayName,
+        status: customerAccounts.status,
+      })
       .from(customerAccounts)
       .where(
         and(
@@ -328,35 +383,148 @@ export async function DELETE(
     if (!account) {
       throw new HttpError(404, "customer_not_found", "O cliente não foi encontrado.");
     }
-    const references = await Promise.all([
-      db.select({ id: dogs.id }).from(dogs).where(eq(dogs.accountId, id)).limit(1),
-      db.select({ id: appointments.id }).from(appointments).where(eq(appointments.accountId, id)).limit(1),
-      db.select({ id: invoices.id }).from(invoices).where(eq(invoices.accountId, id)).limit(1),
-      db.select({ id: creditPurchases.id }).from(creditPurchases).where(eq(creditPurchases.accountId, id)).limit(1),
-      db.select({ id: creditMovements.id }).from(creditMovements).where(eq(creditMovements.accountId, id)).limit(1),
-    ]);
-    if (references.some((items) => items.length > 0)) {
+    if (account.status === "deleted") {
+      throw new HttpError(410, "customer_deleted", "Este cadastro já foi excluído.");
+    }
+    if (account.status !== "archived") {
       throw new HttpError(
         409,
-        "customer_has_history",
-        "Este cliente possui histórico operacional. Use Inativar para preservar os registros.",
+        "customer_must_be_archived",
+        "Inative o cliente antes de excluir o cadastro.",
       );
     }
-    await db.batch([
-      db.delete(tutors).where(eq(tutors.accountId, id)),
-      db.delete(customerAccounts).where(eq(customerAccounts.id, id)),
-      db.insert(auditEvents).values({
-        id: crypto.randomUUID(),
+    const now = new Date().toISOString();
+    const d1 = getD1Database();
+    const results = await d1.batch([
+      d1.prepare(
+        `UPDATE admin_sessions
+         SET revoked_at = ?
+         WHERE revoked_at IS NULL AND user_id IN (
+           SELECT au.id FROM app_users au
+           INNER JOIN tutors t ON t.id = au.tutor_id
+           WHERE t.account_id = ? AND au.establishment_id = ?
+         ) AND EXISTS (
+           SELECT 1 FROM customer_accounts
+           WHERE id = ? AND establishment_id = ? AND status = 'archived'
+         )`,
+      ).bind(now, id, establishmentId, id, establishmentId),
+      d1.prepare(
+        `UPDATE password_reset_tokens
+         SET status = 'revoked', updated_at = ?
+         WHERE status = 'pending' AND user_id IN (
+           SELECT au.id FROM app_users au
+           INNER JOIN tutors t ON t.id = au.tutor_id
+           WHERE t.account_id = ? AND au.establishment_id = ?
+         ) AND EXISTS (
+           SELECT 1 FROM customer_accounts
+           WHERE id = ? AND establishment_id = ? AND status = 'archived'
+         )`,
+      ).bind(now, id, establishmentId, id, establishmentId),
+      d1.prepare(
+        `UPDATE app_users
+         SET status = 'disabled',
+           email = 'deleted+' || id || '@invalid.local',
+           normalized_email = 'deleted+' || id || '@invalid.local',
+           updated_at = ?
+         WHERE establishment_id = ? AND tutor_id IN (
+           SELECT id FROM tutors WHERE account_id = ?
+         ) AND EXISTS (
+           SELECT 1 FROM customer_accounts
+           WHERE id = ? AND establishment_id = ? AND status = 'archived'
+         )`,
+      ).bind(now, establishmentId, id, id, establishmentId),
+      d1.prepare(
+        `UPDATE account_invitations
+         SET status = 'revoked', updated_at = ?
+         WHERE establishment_id = ? AND account_id = ? AND status = 'pending'
+           AND EXISTS (
+             SELECT 1 FROM customer_accounts
+             WHERE id = ? AND establishment_id = ? AND status = 'archived'
+           )`,
+      ).bind(now, establishmentId, id, id, establishmentId),
+      d1.prepare(
+        `UPDATE customer_requests
+         SET status = 'cancelled', response_note = coalesce(
+           response_note,
+           'Cadastro do cliente excluído.'
+         ), updated_at = ?
+         WHERE establishment_id = ? AND account_id = ? AND status = 'pending'
+           AND EXISTS (
+             SELECT 1 FROM customer_accounts
+             WHERE id = ? AND establishment_id = ? AND status = 'archived'
+           )`,
+      ).bind(now, establishmentId, id, id, establishmentId),
+      d1.prepare(
+        `UPDATE recurring_schedules
+         SET status = 'ended', ends_on = coalesce(ends_on, substr(?, 1, 10)),
+           updated_at = ?
+         WHERE establishment_id = ? AND dog_id IN (
+           SELECT id FROM dogs WHERE account_id = ?
+         ) AND status = 'active' AND EXISTS (
+           SELECT 1 FROM customer_accounts
+           WHERE id = ? AND establishment_id = ? AND status = 'archived'
+         )`,
+      ).bind(now, now, establishmentId, id, id, establishmentId),
+      d1.prepare(
+        `UPDATE dogs SET status = 'archived', updated_at = ?
+         WHERE establishment_id = ? AND account_id = ? AND status = 'active'
+           AND EXISTS (
+             SELECT 1 FROM customer_accounts
+             WHERE id = ? AND establishment_id = ? AND status = 'archived'
+           )`,
+      ).bind(now, establishmentId, id, id, establishmentId),
+      d1.prepare(
+        `UPDATE tutors
+         SET email = NULL, normalized_email = NULL, phone_e164 = NULL,
+           whatsapp_enabled = 0, is_financial_contact = 0,
+           status = 'archived', updated_at = ?
+         WHERE establishment_id = ? AND account_id = ? AND EXISTS (
+           SELECT 1 FROM customer_accounts
+           WHERE id = ? AND establishment_id = ? AND status = 'archived'
+         )`,
+      ).bind(now, establishmentId, id, id, establishmentId),
+      d1.prepare(
+        `UPDATE customer_accounts
+         SET status = 'deleted', address_line = NULL, address_city = NULL,
+           address_region = NULL, address_postal_code = NULL, cpf = NULL,
+           birth_date = NULL, updated_at = ?
+         WHERE id = ? AND establishment_id = ? AND status = 'archived'`,
+      ).bind(now, id, establishmentId),
+      d1.prepare(
+        `INSERT INTO audit_events (
+          id, establishment_id, actor_user_id, actor_role, action,
+          entity_type, entity_id, request_id, result, metadata_json,
+          occurred_at
+        ) SELECT ?, ?, ?, ?, 'customer.deleted', 'customer', ?, ?,
+          'success', ?, ?
+          WHERE EXISTS (
+            SELECT 1 FROM customer_accounts
+            WHERE id = ? AND establishment_id = ? AND status = 'deleted'
+          )`,
+      ).bind(
+        crypto.randomUUID(),
         establishmentId,
-        actorUserId: identity.userId,
-        actorRole: identity.role,
-        action: "customer.deleted",
-        entityType: "customer",
-        entityId: id,
+        identity.userId,
+        identity.role,
+        id,
         requestId,
-        metadataJson: JSON.stringify({ name: account.displayName }),
-      }),
+        JSON.stringify({
+          name: account.displayName,
+          retainedHistory: true,
+          contactReleased: true,
+        }),
+        now,
+        id,
+        establishmentId,
+      ),
     ]);
+    if ((results[8].meta.changes ?? 0) !== 1) {
+      throw new HttpError(
+        409,
+        "customer_delete_conflict",
+        "O cadastro mudou enquanto era excluído. Atualize a página e tente novamente.",
+      );
+    }
     return json({ deleted: true });
   } catch (error) {
     return errorResponse(error, requestId);

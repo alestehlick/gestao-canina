@@ -1,6 +1,11 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { getD1Database, getDb } from "@/db";
-import { dogs, establishments, serviceCatalog } from "@/db/schema";
+import {
+  customerAccounts,
+  dogs,
+  establishments,
+  serviceCatalog,
+} from "@/db/schema";
 import { requireIdentity } from "@/lib/server/auth";
 import { rethrowAppointmentConflict } from "@/lib/server/appointment-conflicts";
 import {
@@ -120,6 +125,25 @@ export async function POST(request: Request) {
     }
     if (new Set(dogRows.map((dog) => dog.accountId)).size !== 1) {
       throw new HttpError(400, "mixed_customers", "Selecione somente cães do mesmo cliente.");
+    }
+    const accountId = dogRows[0].accountId;
+    const [activeAccount] = await db
+      .select({ id: customerAccounts.id })
+      .from(customerAccounts)
+      .where(
+        and(
+          eq(customerAccounts.id, accountId),
+          eq(customerAccounts.establishmentId, establishmentId),
+          eq(customerAccounts.status, "active"),
+        ),
+      )
+      .limit(1);
+    if (!activeAccount) {
+      throw new HttpError(
+        409,
+        "customer_inactive",
+        "Reative o cliente antes de criar novos serviços.",
+      );
     }
     const lodgingService = serviceRows.find((service) => service.code === "hotel");
     const includesLodging = Boolean(lodgingService);

@@ -53,6 +53,8 @@ export type Customer = {
   balanceCents: number;
   creditsLabel: string;
   status: "current" | "pending" | "overdue";
+  recordStatus?: "active" | "archived";
+  dogNames?: string[];
 };
 
 export type Booking = {

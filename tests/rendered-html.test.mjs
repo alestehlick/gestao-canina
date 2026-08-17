@@ -447,7 +447,8 @@ test("mantém cadastros seguros, práticos e sem menus redundantes", async () =>
   assert.match(app, /name="neutered"/);
   assert.match(dogRoute, /dog_has_history/);
   assert.match(dogRoute, /requireIdentity\(request, \["owner"\]\)/);
-  assert.match(customerRoute, /customer_has_history/);
+  assert.match(customerRoute, /customer_must_be_archived/);
+  assert.match(customerRoute, /retainedHistory: true/);
   assert.match(taskRoute, /tasks\.completed_cleared/);
 });
 
@@ -985,7 +986,7 @@ test("mantém extratos, contas, agendamento rápido e alertas operacionais coere
   assert.match(regularBillingRoute, /billing_item_locked/);
   assert.match(regularBillingRoute, /active_invoice_id IS NULL/);
   assert.match(schema, /sqliteTable\(\s*"financial_accounts"/);
-  assert.match(portal, /eq\(customerAccounts\.status, "active"\)/);
+  assert.match(portal, /customer_inactive/);
   assert.match(migration, /financial_account_id/);
 });
 
@@ -1045,4 +1046,44 @@ test("mantém o funcionário nas quatro áreas operacionais e o pedido múltiplo
   assert.doesNotMatch(receipts, /"staff"/);
   assert.doesNotMatch(consume, /"staff"/);
   assert.doesNotMatch(dashboard, /"staff"/);
+});
+
+test("separa clientes ativos, inativos e excluídos sem perder o histórico", async () => {
+  const [app, customerRoute, portalRoute, portalUi, workspaceRoute, workspaceData, appointments, batchAppointments, schema, css] =
+    await Promise.all([
+      readFile(new URL("../app/components/management-app.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/customers/[id]/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/portal/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/components/customer-portal.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/workspace/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../lib/workspace-data.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/appointments/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/appointments/batch/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    ]);
+
+  assert.match(schema, /enum: \["active", "archived", "deleted"\]/);
+  assert.match(workspaceRoute, /inArray\(customerAccounts\.status, \["active", "archived"\]\)/);
+  assert.match(workspaceData, /mapWorkspaceInactiveCustomers/);
+  assert.match(workspaceData, /recordStatus: "archived"/);
+  assert.match(app, /Inativos \(\$\{inactiveCustomers\.length\}\)/);
+  assert.match(app, /Reativar/);
+  assert.match(app, /Excluir cadastro/);
+  assert.match(css, /\.inactive-customer-section/);
+
+  assert.match(customerRoute, /customer_must_be_archived/);
+  assert.match(customerRoute, /SET status = 'deleted'/);
+  assert.match(customerRoute, /normalized_email = 'deleted\+'/);
+  assert.match(customerRoute, /UPDATE admin_sessions/);
+  assert.match(customerRoute, /retainedHistory: true/);
+  assert.match(customerRoute, /contactReleased: true/);
+  assert.doesNotMatch(customerRoute, /db\.delete\(customerAccounts\)/);
+
+  assert.match(portalRoute, /customer_inactive/);
+  assert.match(portalRoute, /customer_deleted/);
+  assert.match(portalUi, /Cadastro inativo/);
+  assert.match(portalUi, /Sair desta conta/);
+  assert.match(appointments, /Reative o cliente antes de criar um novo serviço/);
+  assert.match(batchAppointments, /Reative o cliente antes de criar novos serviços/);
 });

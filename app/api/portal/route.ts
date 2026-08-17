@@ -169,15 +169,28 @@ export async function GET(request: Request) {
           depositPercent: appointments.depositPercent,
           status: appointments.status,
           serviceName: appointmentItems.serviceNameSnapshot,
+          serviceCode: serviceCatalog.code,
           description: appointmentItems.descriptionSnapshot,
           totalCents: appointmentItems.totalCents,
           settlementMethod: appointmentItems.settlementMethod,
         })
         .from(appointments)
         .innerJoin(dogs, eq(dogs.id, appointments.dogId))
+        .innerJoin(
+          dogTutors,
+          and(
+            eq(dogTutors.dogId, appointments.dogId),
+            eq(dogTutors.tutorId, context.tutorId),
+            eq(dogTutors.portalVisible, true),
+          ),
+        )
         .leftJoin(
           appointmentItems,
           eq(appointmentItems.appointmentId, appointments.id),
+        )
+        .leftJoin(
+          serviceCatalog,
+          eq(serviceCatalog.id, appointmentItems.serviceCatalogId),
         )
         .where(
           and(
@@ -310,6 +323,7 @@ export async function GET(request: Request) {
           and(
             eq(serviceCatalog.establishmentId, establishmentId),
             eq(serviceCatalog.active, true),
+            sql`${serviceCatalog.code} <> 'bath_grooming'`,
           ),
         )
         .orderBy(asc(serviceCatalog.name)),

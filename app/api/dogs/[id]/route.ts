@@ -5,6 +5,7 @@ import {
   appointments,
   auditEvents,
   dogs,
+  dogTutors,
   recurringSchedules,
   tutors,
 } from "@/db/schema";
@@ -40,7 +41,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     if (!dog?.photoObjectKey) throw new HttpError(404, "photo_not_found", "A foto não foi encontrada.");
     if (identity.role === "customer") {
       const [customerContext] = await getDb()
-        .select({ accountId: tutors.accountId })
+        .select({ accountId: tutors.accountId, tutorId: tutors.id })
         .from(appUsers)
         .innerJoin(tutors, eq(tutors.id, appUsers.tutorId))
         .where(
@@ -51,7 +52,24 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
           ),
         )
         .limit(1);
-      if (!customerContext || customerContext.accountId !== dog.accountId) {
+      const [visibleLink] = customerContext
+        ? await getDb()
+            .select({ dogId: dogTutors.dogId })
+            .from(dogTutors)
+            .where(
+              and(
+                eq(dogTutors.dogId, dog.id),
+                eq(dogTutors.tutorId, customerContext.tutorId),
+                eq(dogTutors.portalVisible, true),
+              ),
+            )
+            .limit(1)
+        : [];
+      if (
+        !customerContext ||
+        customerContext.accountId !== dog.accountId ||
+        !visibleLink
+      ) {
         throw new HttpError(404, "photo_not_found", "A foto não foi encontrada.");
       }
     }

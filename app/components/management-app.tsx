@@ -10889,14 +10889,43 @@ type CustomerRequestRow = {
   serviceName: string | null;
   requestedDate: string | null;
   requestedEndDate: string | null;
+  requestedStartTime: string | null;
+  requestedEndTime: string | null;
+  detailsJson: string | null;
   notes: string | null;
   createdAt: string;
 };
+
+function customerRequestDetailsText(request: CustomerRequestRow) {
+  const details = (() => {
+    try {
+      return request.detailsJson
+        ? (JSON.parse(request.detailsJson) as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  })();
+  const parts: string[] = [];
+  if (details.groomingAddon === true) parts.push("com tosa");
+  if (details.transportDirection === "round_trip") parts.push("ida e volta");
+  else if (details.transportDirection === "one_way") parts.push("ida");
+  if (details.transportDistance === "long") parts.push("distância longa");
+  else if (details.transportDistance === "short") parts.push("distância curta");
+  if (request.requestedStartTime) {
+    parts.push(`início: ${formatOperationalTime(request.requestedStartTime)}`);
+  }
+  if (request.requestedEndTime) {
+    parts.push(`fim: ${formatOperationalTime(request.requestedEndTime)}`);
+  }
+  return parts.join(" · ");
+}
 
 function CustomerRequestsView() {
   const [requests, setRequests] = useState<CustomerRequestRow[]>([]);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -10931,11 +10960,23 @@ function CustomerRequestsView() {
           )
         : null;
     setBusy(request.id);
+    setError("");
+    setNotice("");
     try {
-      await requestJson(`/api/customer-requests/${request.id}`, {
+      const result = await requestJson<{ action: string }>(
+        `/api/customer-requests/${request.id}`,
+        {
         method: "PATCH",
         body: JSON.stringify({ status, responseNote }),
-      });
+        },
+      );
+      setNotice(
+        result.action === "appointment_created"
+          ? "Pedido aprovado e serviço incluído na agenda."
+          : result.action === "appointment_cancelled"
+            ? "Pedido aprovado e serviço cancelado na agenda."
+            : "Pedido não aprovado. O cliente verá a resposta no portal.",
+      );
       await load();
     } catch (reason) {
       setError(
@@ -10960,6 +11001,7 @@ function CustomerRequestsView() {
         <span className="count-badge">{pending.length}</span>
       </div>
       {error && <p className="form-error">{error}</p>}
+      {notice && <p className="form-success">{notice}</p>}
       {pending.length ? (
         <div className="request-review-list">
           {pending.map((request) => (
@@ -10983,6 +11025,9 @@ function CustomerRequestsView() {
                       : ""}
                   </small>
                 )}
+                {customerRequestDetailsText(request) && (
+                  <small>{customerRequestDetailsText(request)}</small>
+                )}
                 {request.notes && <em>{request.notes}</em>}
               </div>
               <div className="access-actions">
@@ -10995,10 +11040,14 @@ function CustomerRequestsView() {
                 </button>
                 <button
                   className="primary-button"
-                  disabled={busy === request.id}
+                  disabled={busy === request.id || request.type === "profile_update"}
                   onClick={() => void review(request, "approved")}
                 >
-                  Aprovar
+                  {request.type === "cancellation"
+                    ? "Aprovar e cancelar"
+                    : request.type === "service"
+                      ? "Aprovar e agendar"
+                      : "Alterar no cadastro"}
                 </button>
               </div>
             </article>
@@ -11022,10 +11071,11 @@ function CustomerRequestsView() {
         </details>
       )}
       <div className="audit-note">
-        <strong>Aprovar não altera a agenda automaticamente</strong>
+        <strong>Aprovação segura e automática</strong>
         <p>
-          Depois de conferir disponibilidade, crie o serviço na agenda. Isso
-          evita reservas automáticas em horários ou datas incompatíveis.
+          Ao aprovar um novo serviço, ele entra na Agenda na mesma operação. Se
+          houver conflito de data, o pedido continua pendente. Cancelamentos só
+          são aplicados quando ainda não existe cobrança ou pagamento.
         </p>
       </div>
     </section>

@@ -15,6 +15,7 @@ import {
   generateStatementPdf,
   type CustomerStatement,
 } from "@/lib/statement-pdf";
+import { todayInSaoPaulo } from "@/lib/service-rules";
 
 type PortalData = {
   identity: { email: string; displayName: string; role: "customer" };
@@ -63,6 +64,7 @@ type PortalData = {
     depositPercent: number | null;
     status: string;
     serviceName: string | null;
+    serviceCode: string | null;
     description: string | null;
     totalCents: number | null;
     settlementMethod: string | null;
@@ -116,6 +118,10 @@ type PortalData = {
     appointmentId: string | null;
     serviceCatalogId: string | null;
     requestedDate: string | null;
+    requestedEndDate: string | null;
+    requestedStartTime: string | null;
+    requestedEndTime: string | null;
+    detailsJson: string | null;
     notes: string | null;
     responseNote: string | null;
     createdAt: string;
@@ -125,18 +131,30 @@ type PortalData = {
 
 type PortalView = "home" | "schedule" | "dogs" | "finance" | "account";
 
-const today = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "America/Sao_Paulo",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-}).format(new Date());
+const today = todayInSaoPaulo();
+const vaccineAlertLimit = (() => {
+  const value = new Date(`${today}T12:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + 30);
+  return value.toISOString().slice(0, 10);
+})();
+
+function nextDay(value: string) {
+  if (!value) return today;
+  const date = new Date(`${value}T12:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
 
 function money(cents: number | null) {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
     currency: "BRL",
   }).format((cents ?? 0) / 100);
+}
+
+function maskedCpf(value: string | null) {
+  const digits = value?.replace(/\D/g, "") ?? "";
+  return digits.length === 11 ? `***.***.***-${digits.slice(-2)}` : "Não informado";
 }
 
 function shortDate(value: string | null) {
@@ -208,6 +226,22 @@ function statusLabel(status: string) {
   );
 }
 
+function portalRequestDetails(value: string | null) {
+  if (!value) return "";
+  try {
+    const details = JSON.parse(value) as Record<string, unknown>;
+    const parts: string[] = [];
+    if (details.groomingAddon === true) parts.push("com tosa");
+    if (details.transportDirection === "round_trip") parts.push("ida e volta");
+    else if (details.transportDirection === "one_way") parts.push("ida");
+    if (details.transportDistance === "long") parts.push("distância longa");
+    else if (details.transportDistance === "short") parts.push("distância curta");
+    return parts.join(" · ");
+  } catch {
+    return "";
+  }
+}
+
 async function readResponse<T>(response: Response): Promise<T> {
   const payload = (await response.json()) as {
     error?: { message?: string };
@@ -224,6 +258,12 @@ export default function CustomerPortal() {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [selectedServiceId, setSelectedServiceId] = useState("");
+  const [requestStartDate, setRequestStartDate] = useState("");
+  const [requestEndDate, setRequestEndDate] = useState("");
+  const [cancelAppointmentId, setCancelAppointmentId] = useState<string | null>(
+    null,
+  );
 
   const load = useCallback(async () => {
     try {
@@ -251,14 +291,33 @@ export default function CustomerPortal() {
     return () => window.clearTimeout(timer);
   }, [load]);
 
+  useEffect(() => {
+    if (!cancelAppointmentId) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCancelAppointmentId(null);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [cancelAppointmentId]);
+
   const futureAppointments = useMemo(
     () =>
       (data?.appointments ?? [])
         .filter(
           (appointment) =>
-            appointment.endDate >= today && appointment.status !== "cancelled",
+            appointment.endDate >= today &&
+            !["completed", "cancelled"].includes(appointment.status),
         )
-        .sort((left, right) => left.startDate.localeCompare(right.startDate)),
+        .sort(
+          (left, right) =>
+            left.startDate.localeCompare(right.startDate) ||
+            left.dogName.localeCompare(right.dogName, "pt-BR"),
+        ),
     [data],
   );
   const pastAppointments = useMemo(
@@ -266,9 +325,41 @@ export default function CustomerPortal() {
       (data?.appointments ?? [])
         .filter(
           (appointment) =>
-            appointment.endDate < today || appointment.status === "completed",
+            appointment.endDate < today ||
+            appointment.status === "completed" ||
+            appointment.status === "cancelled",
         )
+        .sort((left, right) => right.startDate.localeCompare(left.startDate))
         .slice(0, 40),
+    [data],
+  );
+  const selectedService = data?.services.find(
+    (service) => service.id === selectedServiceId,
+  );
+  const pendingCancellationIds = useMemo(
+    () =>
+      new Set(
+        (data?.requests ?? [])
+          .filter(
+            (request) =>
+              request.type === "cancellation" && request.status === "pending",
+          )
+          .map((request) => request.appointmentId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    [data],
+  );
+  const petAlerts = useMemo(
+    () =>
+      (data?.dogs ?? []).flatMap((dog) =>
+        dog.vaccines
+          .filter((vaccine) => vaccine.expiresOn <= vaccineAlertLimit)
+          .map((vaccine) => ({
+            dogName: dog.name,
+            vaccineName: vaccine.name,
+            expiresOn: vaccine.expiresOn,
+          })),
+      ),
     [data],
   );
 
@@ -292,13 +383,25 @@ export default function CustomerPortal() {
             requestedDate: String(form.get("requestedDate") ?? ""),
             requestedEndDate:
               String(form.get("requestedEndDate") ?? "") || undefined,
+            requestedStartTime:
+              String(form.get("requestedStartTime") ?? "") || undefined,
+            requestedEndTime:
+              String(form.get("requestedEndTime") ?? "") || undefined,
+            groomingAddon: form.get("groomingAddon") === "on",
+            transportDirection:
+              String(form.get("transportDirection") ?? "") || undefined,
+            transportDistance:
+              String(form.get("transportDistance") ?? "") || undefined,
             notes: String(form.get("notes") ?? "") || undefined,
           }),
         }),
       );
       event.currentTarget.reset();
+      setSelectedServiceId("");
+      setRequestStartDate("");
+      setRequestEndDate("");
       setMessage(
-        "Pedido enviado. A equipe confirmará a disponibilidade antes de incluí-lo na agenda.",
+        "Pedido enviado. Assim que a equipe aprovar, ele entrará automaticamente na agenda.",
       );
       await load();
     } catch (reason) {
@@ -310,11 +413,14 @@ export default function CustomerPortal() {
     }
   }
 
-  async function requestCancellation(appointmentId: string) {
+  async function requestCancellation(
+    event: FormEvent<HTMLFormElement>,
+    appointmentId: string,
+  ) {
+    event.preventDefault();
     if (busy) return;
-    const notes = window.prompt(
-      "Conte brevemente o motivo do pedido de cancelamento.",
-    )?.trim();
+    const form = new FormData(event.currentTarget);
+    const notes = String(form.get("reason") ?? "").trim();
     if (!notes) return;
     setBusy(`cancel:${appointmentId}`);
     setMessage("");
@@ -333,6 +439,7 @@ export default function CustomerPortal() {
         }),
       );
       setMessage("Pedido de cancelamento enviado para a equipe.");
+      setCancelAppointmentId(null);
       await load();
     } catch (reason) {
       setError(
@@ -487,8 +594,33 @@ export default function CustomerPortal() {
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-|-$/g, "");
-      pdf.save(
-        `fatura-${safeName}-${invoice.dueDate ?? invoice.issuedAt?.slice(0, 10) ?? today}.pdf`,
+      const filename = `fatura-${safeName}-${invoice.dueDate ?? invoice.issuedAt?.slice(0, 10) ?? today}.pdf`;
+      const blob = pdf.output("blob");
+      const file = new File([blob], filename, { type: "application/pdf" });
+      if (
+        navigator.share &&
+        (!navigator.canShare || navigator.canShare({ files: [file] }))
+      ) {
+        await navigator.share({
+          title: `Fatura ${invoice.invoiceNumber}`,
+          text: `Fatura da Hospet Quintal · ${money(invoice.totalCents)}`,
+          files: [file],
+        });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = filename;
+        anchor.click();
+        URL.revokeObjectURL(url);
+      }
+      setMessage("Fatura preparada para compartilhar ou salvar.");
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Não foi possível preparar a fatura.",
       );
     } finally {
       setBusy("");
@@ -570,6 +702,13 @@ export default function CustomerPortal() {
   const pendingRequests = data.requests.filter(
     (request) => request.status === "pending",
   );
+  const visibleInvoices = data.invoices
+    .filter((invoice) => invoice.status !== "void")
+    .sort(
+      (left, right) =>
+        Number(left.status === "paid") - Number(right.status === "paid") ||
+        (right.issuedAt ?? "").localeCompare(left.issuedAt ?? ""),
+    );
   return (
     <div className="customer-portal">
       <header className="customer-portal-header">
@@ -585,9 +724,9 @@ export default function CustomerPortal() {
             [
               ["home", "Início"],
               ["schedule", "Serviços"],
-              ["dogs", "Meus cães"],
-              ["finance", "Financeiro"],
-              ["account", "Minha conta"],
+              ["dogs", "Cães"],
+              ["finance", "Faturas"],
+              ["account", "Conta"],
             ] as Array<[PortalView, string]>
           ).map(([id, label]) => (
             <button
@@ -606,7 +745,11 @@ export default function CustomerPortal() {
 
       <main className="customer-portal-content">
         {(message || error) && (
-          <div className={error ? "portal-message error" : "portal-message"}>
+          <div
+            className={error ? "portal-message error" : "portal-message"}
+            role={error ? "alert" : "status"}
+            aria-live="polite"
+          >
             {error || message}
           </div>
         )}
@@ -626,6 +769,18 @@ export default function CustomerPortal() {
                 próximos serviços
               </span>
             </section>
+            {petAlerts.length > 0 && (
+              <section className="portal-alert-strip" aria-label="Avisos de vacinas">
+                <strong>Vacinas que precisam de atenção</strong>
+                <span>
+                  {petAlerts.map((alert) => (
+                    <span key={`${alert.dogName}-${alert.vaccineName}`}>
+                      {alert.dogName}: {alert.vaccineName} · {alert.expiresOn < today ? "vencida" : `vence em ${shortDate(alert.expiresOn)}`}
+                    </span>
+                  ))}
+                </span>
+              </section>
+            )}
             <div className="portal-dashboard-grid">
               <section className="panel">
                 <div className="panel-heading">
@@ -636,8 +791,9 @@ export default function CustomerPortal() {
                 </div>
                 <PortalAppointmentList
                   appointments={futureAppointments.slice(0, 4)}
-                  onCancel={requestCancellation}
+                  onCancel={setCancelAppointmentId}
                   busy={busy}
+                  pendingCancellationIds={pendingCancellationIds}
                 />
               </section>
               <section className="panel portal-request-panel">
@@ -645,8 +801,8 @@ export default function CustomerPortal() {
                   <p className="section-kicker">Novo pedido</p>
                   <h2>Solicitar um serviço</h2>
                   <p>
-                    A solicitação será confirmada pela equipe antes de entrar
-                    na agenda.
+                    A equipe confere a disponibilidade. Ao aprovar, o serviço
+                    entra automaticamente na agenda.
                   </p>
                 </div>
                 <form onSubmit={submitServiceRequest}>
@@ -663,7 +819,12 @@ export default function CustomerPortal() {
                   </label>
                   <label className="field">
                     <span>Serviço</span>
-                    <select name="serviceCatalogId" required>
+                    <select
+                      name="serviceCatalogId"
+                      required
+                      value={selectedServiceId}
+                      onChange={(event) => setSelectedServiceId(event.target.value)}
+                    >
                       <option value="">Selecione</option>
                       {data.services.map((service) => (
                         <option key={service.id} value={service.id}>
@@ -673,20 +834,105 @@ export default function CustomerPortal() {
                     </select>
                   </label>
                   <label className="field">
-                    <span>Data desejada</span>
+                    <span>
+                      {selectedService?.code === "hotel"
+                        ? "Data de entrada"
+                        : "Data desejada"}
+                    </span>
                     <BrazilianDateInput
                       name="requestedDate"
+                      value={requestStartDate}
                       min={today}
                       required
                       ariaLabel="Data desejada para o serviço"
+                      onChange={setRequestStartDate}
                     />
                   </label>
-                  <label className="field">
+                  {selectedService?.code === "hotel" && (
+                    <label className="field">
+                      <span>Data de saída</span>
+                      <BrazilianDateInput
+                        name="requestedEndDate"
+                        value={requestEndDate}
+                        min={nextDay(requestStartDate)}
+                        required
+                        ariaLabel="Data de saída desejada"
+                        onChange={setRequestEndDate}
+                      />
+                    </label>
+                  )}
+                  {selectedService &&
+                    selectedService.code !== "taxi_dog" && (
+                      <>
+                        <label className="field">
+                          <span>
+                            {selectedService.code === "hotel"
+                              ? "Chegada (opcional)"
+                              : "Início (opcional)"}
+                          </span>
+                          <select name="requestedStartTime">
+                            <option value="">Sem preferência</option>
+                            <option value="manha">Manhã</option>
+                            <option value="tarde">Tarde</option>
+                            <option value="noite">Noite</option>
+                          </select>
+                        </label>
+                        {(selectedService.code === "hotel" ||
+                          selectedService.code === "daycare") && (
+                          <label className="field">
+                            <span>
+                              {selectedService.code === "hotel"
+                                ? "Saída (opcional)"
+                                : "Término (opcional)"}
+                            </span>
+                            <select name="requestedEndTime">
+                              <option value="">Sem preferência</option>
+                              <option value="manha">Manhã</option>
+                              <option value="tarde">Tarde</option>
+                              <option value="noite">Noite</option>
+                            </select>
+                          </label>
+                        )}
+                      </>
+                    )}
+                  {selectedService?.code === "bath" && (
+                    <label className="portal-choice full">
+                      <input type="checkbox" name="groomingAddon" />
+                      <span>
+                        <strong>Incluir tosa</strong>
+                        <small>O banho e a tosa serão cobrados juntos.</small>
+                      </span>
+                    </label>
+                  )}
+                  {selectedService?.code === "taxi_dog" && (
+                    <div className="portal-request-options full">
+                      <label className="field">
+                        <span>Trajeto</span>
+                        <select name="transportDirection" defaultValue="one_way">
+                          <option value="one_way">Ida</option>
+                          <option value="round_trip">Ida e volta</option>
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Distância</span>
+                        <select name="transportDistance" defaultValue="short">
+                          <option value="short">Curta</option>
+                          <option value="long">Longa</option>
+                        </select>
+                      </label>
+                    </div>
+                  )}
+                  <label className="field full">
                     <span>Observações</span>
-                    <textarea name="notes" rows={3} maxLength={2000} />
+                    <textarea
+                      name="notes"
+                      rows={3}
+                      maxLength={2000}
+                      placeholder="Algo importante para a equipe saber?"
+                    />
                   </label>
                   <button
-                    className="primary-button"
+                    className="primary-button portal-request-submit"
                     type="submit"
                     disabled={busy === "request"}
                   >
@@ -704,21 +950,30 @@ export default function CustomerPortal() {
                   </div>
                   <span className="soft-count">{pendingRequests.length}</span>
                 </div>
-                {pendingRequests.map((request) => (
-                  <div key={request.id}>
-                    <strong>
-                      {request.type === "service"
-                        ? "Novo serviço"
-                        : request.type === "cancellation"
-                          ? "Cancelamento"
-                          : "Atualização cadastral"}
-                    </strong>
-                    <span>
-                      {shortDate(request.requestedDate ?? request.createdAt)}
-                    </span>
-                    <small>{request.notes}</small>
-                  </div>
-                ))}
+                {pendingRequests.map((request) => {
+                  const service = data.services.find(
+                    (item) => item.id === request.serviceCatalogId,
+                  );
+                  const dog = data.dogs.find((item) => item.id === request.dogId);
+                  return (
+                    <div key={request.id}>
+                      <strong>
+                        {request.type === "service"
+                          ? `${dog?.name ?? "Cão"} · ${service?.name ?? "Serviço"}`
+                          : request.type === "cancellation"
+                            ? "Cancelamento solicitado"
+                            : "Atualização cadastral"}
+                      </strong>
+                      <span>
+                        {shortDate(request.requestedDate ?? request.createdAt)}
+                        {request.requestedEndDate
+                          ? ` a ${shortDate(request.requestedEndDate)}`
+                          : ""}
+                      </span>
+                      {request.notes && <small>{request.notes}</small>}
+                    </div>
+                  );
+                })}
               </section>
             )}
           </>
@@ -735,16 +990,56 @@ export default function CustomerPortal() {
             <h2>Próximos</h2>
             <PortalAppointmentList
               appointments={futureAppointments}
-              onCancel={requestCancellation}
+              onCancel={setCancelAppointmentId}
               busy={busy}
+              pendingCancellationIds={pendingCancellationIds}
             />
             <h2 className="portal-subheading">Concluídos</h2>
             <PortalAppointmentList
               appointments={pastAppointments}
-              onCancel={requestCancellation}
+              onCancel={setCancelAppointmentId}
               busy={busy}
+              pendingCancellationIds={pendingCancellationIds}
               historical
             />
+            {data.requests.length > 0 && (
+              <details className="portal-request-history">
+                <summary>Pedidos enviados ({data.requests.length})</summary>
+                <div>
+                  {data.requests.slice(0, 30).map((request) => {
+                    const service = data.services.find(
+                      (item) => item.id === request.serviceCatalogId,
+                    );
+                    const dog = data.dogs.find((item) => item.id === request.dogId);
+                    return (
+                      <article key={request.id}>
+                        <span>
+                          <strong>
+                            {request.type === "cancellation"
+                              ? "Cancelamento"
+                              : service?.name || "Solicitação"}
+                          </strong>
+                          <small>
+                            {dog?.name ? `${dog.name} · ` : ""}
+                            {shortDate(request.requestedDate ?? request.createdAt)}
+                            {request.requestedEndDate
+                              ? ` a ${shortDate(request.requestedEndDate)}`
+                              : ""}
+                          </small>
+                          {portalRequestDetails(request.detailsJson) && (
+                            <small>{portalRequestDetails(request.detailsJson)}</small>
+                          )}
+                          {request.responseNote && <em>{request.responseNote}</em>}
+                        </span>
+                        <span className={`status-pill ${request.status}`}>
+                          {statusLabel(request.status)}
+                        </span>
+                      </article>
+                    );
+                  })}
+                </div>
+              </details>
+            )}
           </section>
         )}
 
@@ -766,6 +1061,42 @@ export default function CustomerPortal() {
                     <h2>{dog.name}</h2>
                     <small>{dog.breed || "Raça não informada"}</small>
                   </div>
+                </div>
+                <div className="portal-dog-facts">
+                  <span>
+                    <small>Nascimento</small>
+                    <strong>{shortDate(dog.birthDate)}</strong>
+                  </span>
+                  <span>
+                    <small>Sexo</small>
+                    <strong>
+                      {dog.sex === "female"
+                        ? "Fêmea"
+                        : dog.sex === "male"
+                          ? "Macho"
+                          : "Não informado"}
+                    </strong>
+                  </span>
+                  <span>
+                    <small>Castração</small>
+                    <strong>
+                      {dog.neutered === null
+                        ? "Não informado"
+                        : dog.neutered
+                          ? "Castrado"
+                          : "Não castrado"}
+                    </strong>
+                  </span>
+                  {dog.weightGrams !== null && (
+                    <span>
+                      <small>Peso</small>
+                      <strong>
+                        {new Intl.NumberFormat("pt-BR", {
+                          maximumFractionDigits: 1,
+                        }).format(dog.weightGrams / 1000)} kg
+                      </strong>
+                    </span>
+                  )}
                 </div>
                 <dl className="portal-dog-details">
                   <div>
@@ -797,8 +1128,8 @@ export default function CustomerPortal() {
                   )}
                 </div>
                 <p className="portal-safety-note">
-                  Para alterar cuidados ou medicação, envie uma observação em
-                  uma solicitação. A equipe confirmará a atualização.
+                  Para alterar alimentação, medicação ou cuidados, fale com a
+                  equipe pelo WhatsApp habitual.
                 </p>
               </article>
             ))}
@@ -842,18 +1173,23 @@ export default function CustomerPortal() {
                   {busy === "statement" ? "Preparando…" : "Extrato do mês"}
                 </button>
               </div>
-              {data.invoices
-                .filter((invoice) => invoice.status !== "void")
-                .map((invoice) => (
+              {visibleInvoices.length ? (
+                visibleInvoices.map((invoice) => (
                   <article key={invoice.id}>
-                    <div>
+                    <div className="portal-invoice-heading">
                       <strong>{invoice.invoiceNumber}</strong>
                       <small>
-                        {shortDate(invoice.issuedAt)} ·{" "}
-                        {statusLabel(invoice.status)}
+                        {invoice.status === "paid"
+                          ? `Emitida em ${shortDate(invoice.issuedAt)}`
+                          : `Vence em ${shortDate(invoice.dueDate)}`}
                       </small>
                     </div>
-                    <strong>{money(invoice.totalCents)}</strong>
+                    <div className="portal-invoice-total">
+                      <strong>{money(invoice.totalCents)}</strong>
+                      <span className={`status-pill ${invoice.status}`}>
+                        {statusLabel(invoice.status)}
+                      </span>
+                    </div>
                     <div className="portal-invoice-items">
                       {invoice.items.map((item) => (
                         <span key={item.id}>
@@ -869,10 +1205,13 @@ export default function CustomerPortal() {
                     >
                       {busy === `invoice:${invoice.id}`
                         ? "Preparando…"
-                        : "Baixar PDF"}
+                        : "Compartilhar PDF"}
                     </button>
                   </article>
-                ))}
+                ))
+              ) : (
+                <p className="portal-empty">Nenhuma fatura emitida.</p>
+              )}
             </section>
             <section className="panel portal-receipt-list">
               <div className="panel-heading">
@@ -909,6 +1248,20 @@ export default function CustomerPortal() {
                 O e-mail de acesso é <strong>{data.identity.email}</strong>.
                 Para trocá-lo, fale com a administração.
               </p>
+              <div className="portal-account-facts">
+                <span>
+                  <small>CPF</small>
+                  <strong>{maskedCpf(data.account.cpf)}</strong>
+                </span>
+                <span>
+                  <small>Data de nascimento</small>
+                  <strong>
+                    {data.account.birthDate
+                      ? shortDate(data.account.birthDate)
+                      : "Não informada"}
+                  </strong>
+                </span>
+              </div>
               <form className="portal-profile-form" onSubmit={saveProfile}>
                 <label className="field">
                   <span>WhatsApp ou telefone</span>
@@ -916,6 +1269,7 @@ export default function CustomerPortal() {
                     name="phone"
                     defaultValue={mainTutor?.phoneE164 ?? ""}
                     inputMode="tel"
+                    autoComplete="tel"
                     maxLength={40}
                   />
                 </label>
@@ -924,6 +1278,7 @@ export default function CustomerPortal() {
                   <input
                     name="addressLine"
                     defaultValue={data.account.addressLine ?? ""}
+                    autoComplete="street-address"
                     maxLength={300}
                   />
                 </label>
@@ -932,6 +1287,7 @@ export default function CustomerPortal() {
                   <input
                     name="addressCity"
                     defaultValue={data.account.addressCity ?? ""}
+                    autoComplete="address-level2"
                     maxLength={120}
                   />
                 </label>
@@ -940,6 +1296,7 @@ export default function CustomerPortal() {
                   <input
                     name="addressRegion"
                     defaultValue={data.account.addressRegion ?? ""}
+                    autoComplete="address-level1"
                     maxLength={40}
                   />
                 </label>
@@ -949,6 +1306,7 @@ export default function CustomerPortal() {
                     name="addressPostalCode"
                     defaultValue={data.account.addressPostalCode ?? ""}
                     inputMode="numeric"
+                    autoComplete="postal-code"
                     maxLength={20}
                   />
                 </label>
@@ -975,6 +1333,62 @@ export default function CustomerPortal() {
           </div>
         )}
       </main>
+      {cancelAppointmentId && (
+        <div
+          className="portal-dialog-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) setCancelAppointmentId(null);
+          }}
+        >
+          <section
+            className="portal-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cancel-request-title"
+          >
+            <p className="section-kicker">Pedido à equipe</p>
+            <h2 id="cancel-request-title">Solicitar cancelamento</h2>
+            <p>
+              O serviço permanece na agenda até a equipe aprovar o pedido.
+            </p>
+            <form
+              onSubmit={(event) =>
+                void requestCancellation(event, cancelAppointmentId)
+              }
+            >
+              <label className="field">
+                <span>Motivo</span>
+                <textarea
+                  name="reason"
+                  rows={4}
+                  maxLength={2000}
+                  required
+                  autoFocus
+                />
+              </label>
+              <div className="portal-dialog-actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setCancelAppointmentId(null)}
+                >
+                  Voltar
+                </button>
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={busy === `cancel:${cancelAppointmentId}`}
+                >
+                  {busy === `cancel:${cancelAppointmentId}`
+                    ? "Enviando…"
+                    : "Enviar pedido"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -983,11 +1397,13 @@ function PortalAppointmentList({
   appointments,
   onCancel,
   busy,
+  pendingCancellationIds,
   historical = false,
 }: {
   appointments: PortalData["appointments"];
   onCancel: (id: string) => void;
   busy: string;
+  pendingCancellationIds: Set<string>;
   historical?: boolean;
 }) {
   if (!appointments.length) {
@@ -996,7 +1412,14 @@ function PortalAppointmentList({
   return (
     <div className="portal-appointment-list">
       {appointments.map((appointment) => (
-        <article key={appointment.id}>
+        <article
+          key={appointment.id}
+          className={
+            appointment.serviceCode
+              ? `portal-service-${appointment.serviceCode}`
+              : undefined
+          }
+        >
           <time dateTime={appointment.startDate}>
             <strong>{shortDate(appointment.startDate)}</strong>
           </time>
@@ -1019,13 +1442,17 @@ function PortalAppointmentList({
           </span>
           {!historical &&
             !["completed", "cancelled"].includes(appointment.status) && (
-              <button
-                className="text-button muted"
-                onClick={() => onCancel(appointment.id)}
-                disabled={busy === `cancel:${appointment.id}`}
-              >
-                Solicitar cancelamento
-              </button>
+              pendingCancellationIds.has(appointment.id) ? (
+                <span className="status-pill pending">Cancelamento solicitado</span>
+              ) : (
+                <button
+                  className="text-button muted"
+                  onClick={() => onCancel(appointment.id)}
+                  disabled={busy === `cancel:${appointment.id}`}
+                >
+                  Solicitar cancelamento
+                </button>
+              )
             )}
         </article>
       ))}

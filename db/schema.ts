@@ -730,6 +730,9 @@ export const customerRequests = sqliteTable(
     ),
     requestedDate: text("requested_date"),
     requestedEndDate: text("requested_end_date"),
+    requestedStartTime: text("requested_start_time"),
+    requestedEndTime: text("requested_end_time"),
+    detailsJson: text("details_json"),
     notes: text("notes"),
     reviewedByUserId: text("reviewed_by_user_id").references(
       () => appUsers.id,
@@ -750,6 +753,17 @@ export const customerRequests = sqliteTable(
       table.accountId,
       table.createdAt,
     ),
+    uniqueIndex("customer_requests_pending_service_unique")
+      .on(
+        table.establishmentId,
+        table.dogId,
+        table.serviceCatalogId,
+        table.requestedDate,
+      )
+      .where(sql`${table.type} = 'service' and ${table.status} = 'pending'`),
+    uniqueIndex("customer_requests_pending_cancellation_unique")
+      .on(table.appointmentId)
+      .where(sql`${table.type} = 'cancellation' and ${table.status} = 'pending'`),
   ],
 );
 

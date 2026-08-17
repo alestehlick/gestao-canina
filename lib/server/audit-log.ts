@@ -77,6 +77,13 @@ export async function loadAuditLog(
           WHEN ae.entity_type = 'service_catalog' THEN (
             SELECT sc.name FROM service_catalog sc WHERE sc.id = ae.entity_id
           )
+          WHEN ae.entity_type = 'customer_request' THEN (
+            SELECT COALESCE(d.name, ca.display_name)
+            FROM customer_requests cr
+            JOIN customer_accounts ca ON ca.id = cr.account_id
+            LEFT JOIN dogs d ON d.id = cr.dog_id
+            WHERE cr.id = ae.entity_id
+          )
           ELSE NULL
         END AS subjectName,
         CASE
@@ -90,6 +97,11 @@ export async function loadAuditLog(
           )
           WHEN ae.entity_type = 'credit_receipt' THEN (
             SELECT cr.customer_name_snapshot FROM credit_receipts cr WHERE cr.id = ae.entity_id
+          )
+          WHEN ae.entity_type = 'customer_request' THEN (
+            SELECT ca.display_name FROM customer_requests cr
+            JOIN customer_accounts ca ON ca.id = cr.account_id
+            WHERE cr.id = ae.entity_id
           )
           ELSE NULL
         END AS secondaryName,
@@ -107,6 +119,11 @@ export async function loadAuditLog(
           WHEN ae.entity_type = 'credit_movement' THEN (
             SELECT sc.name FROM credit_movements cm
             JOIN service_catalog sc ON sc.id = cm.service_catalog_id WHERE cm.id = ae.entity_id
+          )
+          WHEN ae.entity_type = 'customer_request' THEN (
+            SELECT sc.name FROM customer_requests cr
+            LEFT JOIN service_catalog sc ON sc.id = cr.service_catalog_id
+            WHERE cr.id = ae.entity_id
           )
           ELSE NULL
         END AS serviceName,
@@ -131,6 +148,9 @@ export async function loadAuditLog(
           )
           WHEN ae.entity_type = 'credit_movement' THEN (
             SELECT substr(cm.occurred_at, 1, 10) FROM credit_movements cm WHERE cm.id = ae.entity_id
+          )
+          WHEN ae.entity_type = 'customer_request' THEN (
+            SELECT cr.requested_date FROM customer_requests cr WHERE cr.id = ae.entity_id
           )
           ELSE NULL
         END AS eventDate,

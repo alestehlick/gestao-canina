@@ -662,6 +662,57 @@ test("separa acessos, protege o portal e registra pedidos dos clientes", async (
   assert.match(migration, /CREATE TABLE `password_reset_tokens`/);
 });
 
+test("aprova pedidos do portal junto com a agenda e protege a experiência do cliente", async () => {
+  const [review, requests, portalApi, portalUi, dogPhoto, schema, migration] =
+    await Promise.all([
+      readFile(
+        new URL("../app/api/customer-requests/[id]/route.ts", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/api/portal/requests/route.ts", import.meta.url),
+        "utf8",
+      ),
+      readFile(new URL("../app/api/portal/route.ts", import.meta.url), "utf8"),
+      readFile(
+        new URL("../app/components/customer-portal.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/api/dogs/[id]/route.ts", import.meta.url),
+        "utf8",
+      ),
+      readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+      readFile(
+        new URL(
+          "../drizzle/0023_customer_request_fulfillment.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    ]);
+
+  assert.match(review, /customer_request\.approved_and_scheduled/);
+  assert.match(review, /INSERT INTO appointments/);
+  assert.match(review, /INSERT INTO appointment_items/);
+  assert.match(review, /appointment_created/);
+  assert.match(review, /customer_request\.approved_and_cancelled/);
+  assert.match(review, /appointment_has_payment/);
+  assert.match(review, /rethrowAppointmentConflict/);
+  assert.match(requests, /todayInSaoPaulo/);
+  assert.match(requests, /customer_requests_pending_service_unique/);
+  assert.match(requests, /eq\(dogTutors\.portalVisible, true\)/);
+  assert.match(portalUi, /requestedStartTime/);
+  assert.match(portalApi, /serviceCatalog\.code.*bath_grooming/s);
+  assert.match(portalUi, /entrará automaticamente na agenda/);
+  assert.match(portalUi, /Cancelamento solicitado/);
+  assert.match(portalUi, /portal-dialog-backdrop/);
+  assert.match(portalUi, /transportDistance/);
+  assert.match(dogPhoto, /eq\(dogTutors\.portalVisible, true\)/);
+  assert.match(schema, /customer_requests_pending_cancellation_unique/);
+  assert.match(migration, /CREATE UNIQUE INDEX `customer_requests_pending_service_unique`/);
+});
+
 test("mantém histórico descritivo, indicadores recentes e horários flexíveis", async () => {
   const [app, workspace, activities, auditLog, appointments, appointmentEdit] =
     await Promise.all([

@@ -1452,6 +1452,10 @@ function activityActionLabel(action: string) {
     "auth.password_reset_completed": "Senha redefinida",
     "customer.request_created": "Cliente enviou um pedido",
     "customer_request.approved": "Pedido de cliente aprovado",
+    "customer_request.approved_and_scheduled":
+      "Pedido de cliente aprovado e incluído na Agenda",
+    "customer_request.approved_and_cancelled":
+      "Cancelamento solicitado pelo cliente aprovado",
     "customer_request.rejected": "Pedido de cliente não aprovado",
     "customer.profile_updated": "Cliente atualizou seus dados",
     "customer.archived": "Cliente inativado",

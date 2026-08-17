@@ -120,6 +120,21 @@ test("usa o símbolo oficial na navegação e nas telas de acesso", async () => 
   assert.ok(symbol.length > 1_000);
 });
 
+test("avisa sobre pedidos novos também na navegação móvel", async () => {
+  const [management, styles] = await Promise.all([
+    readFile(
+      new URL("../app/components/management-app.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(management, /className="mobile-nav-badge"/);
+  assert.match(management, /pendingCustomerRequestCount > 99/);
+  assert.match(management, /pedidos novos/);
+  assert.match(styles, /\.mobile-nav-badge\s*\{[^}]*background:\s*#c9473f;/s);
+});
+
 test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () => {
   const [
     schema,

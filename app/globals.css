@@ -6711,6 +6711,35 @@ h3 {
     background: var(--forest);
   }
 
+  .mobile-nav-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    white-space: nowrap;
+  }
+
+  .mobile-nav-badge {
+    display: inline-flex;
+    min-width: 18px;
+    height: 18px;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--surface);
+    border-radius: 999px;
+    background: #c9473f;
+    color: #fff;
+    padding: 0 4px;
+    font-size: 0.56rem;
+    font-weight: 820;
+    line-height: 1;
+  }
+
+  .mobile-more-menu .mobile-more-alert {
+    color: #b13e38;
+    font-weight: 780;
+  }
+
   .mobile-fab {
     position: fixed;
     right: max(15px, env(safe-area-inset-right));

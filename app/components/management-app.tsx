@@ -5296,7 +5296,19 @@ export function ManagementApp() {
             }}
           >
             <span className="mobile-nav-mark" aria-hidden="true" />
-            {item.shortLabel}
+            <span className="mobile-nav-label">
+              {item.shortLabel}
+              {item.id === "requests" && pendingCustomerRequestCount > 0 && (
+                <span
+                  className="mobile-nav-badge"
+                  aria-label={`${pendingCustomerRequestCount} pedidos novos`}
+                >
+                  {pendingCustomerRequestCount > 99
+                    ? "99+"
+                    : pendingCustomerRequestCount}
+                </span>
+              )}
+            </span>
           </button>
         ))}
         <button
@@ -5326,6 +5338,14 @@ export function ManagementApp() {
               }}
             >
               <strong>{item.label}</strong>
+              {item.id === "requests" && pendingCustomerRequestCount > 0 && (
+                <span className="mobile-more-alert">
+                  {pendingCustomerRequestCount > 99
+                    ? "99+"
+                    : pendingCustomerRequestCount}{" "}
+                  novos
+                </span>
+              )}
               {item.id === "billing" && pendingBillingCount > 0 && (
                 <span>{pendingBillingCount} pendentes</span>
               )}

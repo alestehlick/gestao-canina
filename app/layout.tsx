@@ -26,7 +26,10 @@ export async function generateMetadata(): Promise<Metadata> {
     requestHeaders.get("x-forwarded-proto") ??
     (host?.startsWith("localhost") ? "http" : "https");
   const origin = requestOrigin(host, protocol);
-  const socialImage = new URL("/og.png", origin).toString();
+  const socialImage = new URL(
+    "/hospet-quintal-compartilhamento.png",
+    origin,
+  ).toString();
 
   return {
     metadataBase: new URL(origin),
@@ -45,9 +48,18 @@ export async function generateMetadata(): Promise<Metadata> {
       title: "Hospet Quintal",
       description:
         "Agenda, cuidados, clientes e faturas em um só lugar.",
+      siteName: "Hospet Quintal",
+      url: origin,
       locale: "pt_BR",
       type: "website",
-      images: [{ url: socialImage, width: 1200, height: 630 }],
+      images: [
+        {
+          url: socialImage,
+          width: 1280,
+          height: 1280,
+          alt: "Hospet Quintal",
+        },
+      ],
     },
     twitter: {
       card: "summary_large_image",

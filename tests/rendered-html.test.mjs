@@ -80,6 +80,22 @@ test("mantém a experiência em português, privada e com demonstração segura"
   assert.match(styles, /\.billing-status-filters\s*\{[^}]*overflow-x:\s*auto;/s);
 });
 
+test("usa a marca oficial nas prévias de links compartilhados", async () => {
+  const layout = await readFile(
+    new URL("../app/layout.tsx", import.meta.url),
+    "utf8",
+  );
+  const image = await readFile(
+    new URL("../public/hospet-quintal-compartilhamento.png", import.meta.url),
+  );
+
+  assert.match(layout, /hospet-quintal-compartilhamento\.png/);
+  assert.match(layout, /width: 1280/);
+  assert.match(layout, /height: 1280/);
+  assert.match(layout, /alt: "Hospet Quintal"/);
+  assert.ok(image.length > 100_000);
+});
+
 test("mantém o Caixa íntegro, reversível e ligado aos pagamentos", async () => {
   const [
     schema,

@@ -984,6 +984,9 @@ export default function CustomerPortal() {
         Number(left.status === "paid") - Number(right.status === "paid") ||
         (right.issuedAt ?? "").localeCompare(left.issuedAt ?? ""),
     );
+  const visibleCredits = data.credits.filter(
+    (credit) => credit.availableUnits !== 0,
+  );
   return (
     <div className="customer-portal">
       <header className="customer-portal-header">
@@ -1052,14 +1055,20 @@ export default function CustomerPortal() {
               aria-labelledby="portal-credit-summary-title"
             >
               <div>
-                <p className="section-kicker">Créditos disponíveis</p>
+                <p className="section-kicker">Créditos</p>
                 <h2 id="portal-credit-summary-title">Seus saldos</h2>
               </div>
-              {data.credits.length ? (
+              {visibleCredits.length ? (
                 <div className="portal-credit-summary-list">
-                  {data.credits.map((credit) => (
-                    <span key={credit.serviceCatalogId}>
-                      <small>{credit.serviceName}</small>
+                  {visibleCredits.map((credit) => (
+                    <span
+                      key={credit.serviceCatalogId}
+                      className={credit.availableUnits < 0 ? "credit-due" : ""}
+                    >
+                      <small>
+                        {credit.serviceName}
+                        {credit.availableUnits < 0 ? " · a regularizar" : ""}
+                      </small>
                       <strong>{credit.availableUnits}</strong>
                     </span>
                   ))}

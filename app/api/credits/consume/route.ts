@@ -48,6 +48,7 @@ export async function POST(request: Request) {
     const identity = await requireIdentity(request, ["owner", "finance"]);
     const body = await readJsonObject(request);
     const appointmentItemId = requiredString(body, "appointmentItemId", 80);
+    const allowNegative = body.allowNegative === true;
     const establishmentId = identity.establishmentId!;
     const db = getDb();
 
@@ -225,7 +226,16 @@ export async function POST(request: Request) {
           )
           SELECT ?, a.establishment_id, a.account_id, a.dog_id,
             ai.service_catalog_id, ai.id, NULL, NULL, 'consume', ?,
-            'Serviço concluído com crédito pré-pago', ?, ?, ${nowExpression}
+            CASE WHEN (
+              SELECT COALESCE(SUM(cm.delta_units), 0)
+              FROM credit_movements cm
+              WHERE cm.establishment_id = a.establishment_id
+                AND cm.account_id = a.account_id
+                AND cm.service_catalog_id = ai.service_catalog_id
+            ) >= ?
+              THEN 'Serviço concluído com crédito pré-pago'
+              ELSE 'Serviço concluído com crédito a prazo'
+            END, ?, ?, ${nowExpression}
           FROM appointment_items ai
           INNER JOIN appointments a ON a.id = ai.appointment_id
           WHERE ai.id = ?
@@ -234,21 +244,23 @@ export async function POST(request: Request) {
             AND a.status = 'completed'
             AND ai.settlement_method = 'unsettled'
             AND ai.active_invoice_id IS NULL
-            AND (
+            AND (? = 1 OR (
               SELECT COALESCE(SUM(cm.delta_units), 0)
               FROM credit_movements cm
               WHERE cm.establishment_id = a.establishment_id
                 AND cm.account_id = a.account_id
                 AND cm.service_catalog_id = ai.service_catalog_id
-            ) >= ?`,
+            ) >= ?)`,
         )
         .bind(
           movementId,
           -creditUnits,
+          creditUnits,
           idempotencyKey,
           identity.userId,
           appointmentItemId,
           establishmentId,
+          allowNegative ? 1 : 0,
           creditUnits,
         ),
       d1
@@ -356,6 +368,7 @@ export async function POST(request: Request) {
             serviceCatalogId: item.serviceCatalogId,
             accountId: item.accountId,
             creditUnits,
+            allowNegative,
             groomingAddon,
             groomingChargeId,
           }),
@@ -381,10 +394,10 @@ export async function POST(request: Request) {
         );
       throw new HttpError(
         409,
-        Number(balance?.value ?? 0) < creditUnits
+        !allowNegative && Number(balance?.value ?? 0) < creditUnits
           ? "insufficient_credits"
           : "service_settlement_conflict",
-        Number(balance?.value ?? 0) < creditUnits
+        !allowNegative && Number(balance?.value ?? 0) < creditUnits
           ? `O cliente precisa de ${creditUnits} ${creditUnits === 1 ? "crédito" : "créditos"} disponível${creditUnits === 1 ? "" : "is"} para este serviço.`
           : "O pagamento deste serviço foi alterado por outra operação.",
       );
@@ -416,6 +429,7 @@ export async function POST(request: Request) {
       consumed: true,
       idempotent: false,
       remainingUnits: Number(remaining?.value ?? 0),
+      usedOnAccount: Number(remaining?.value ?? 0) < 0,
       receipt,
       chargeCreated: groomingAddon,
       groomingChargeId,

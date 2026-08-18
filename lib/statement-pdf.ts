@@ -257,14 +257,18 @@ export async function generateStatementPdf(statement: CustomerStatement) {
     setInk();
     pdf.setFont("helvetica", "bold");
     pdf.setFontSize(9);
-    pdf.text("Pacotes pré-pagos disponíveis", margin, y);
+    pdf.text("Saldos de créditos", margin, y);
     y += 5;
     setMuted();
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(8.5);
     const creditLines = pdf.splitTextToSize(
       statement.creditBalances
-        .map((item) => `${item.serviceName}: ${item.units}`)
+        .map((item) =>
+          item.units < 0
+            ? `${item.serviceName}: ${Math.abs(item.units)} a regularizar`
+            : `${item.serviceName}: ${item.units} disponível${item.units === 1 ? "" : "is"}`,
+        )
         .join(" - "),
       contentWidth,
     ) as string[];

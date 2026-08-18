@@ -966,16 +966,24 @@ function recurrenceDates(
   return [startDate];
 }
 
-function totalCredits(
+function creditBalanceSummary(
   balances: CreditBalances,
   customerId: string,
 ) {
-  const customerBalance = balances[customerId];
-  if (!customerBalance) return 0;
-  return creditServiceTypes.reduce(
-    (total, serviceType) => total + customerBalance[serviceType],
+  const balance = balances[customerId];
+  if (!balance) return "Sem créditos";
+  const available = creditServiceTypes.reduce(
+    (total, serviceType) => total + Math.max(0, balance[serviceType] ?? 0),
     0,
   );
+  const due = creditServiceTypes.reduce(
+    (total, serviceType) => total + Math.max(0, -(balance[serviceType] ?? 0)),
+    0,
+  );
+  if (due && available) return `${due} a regularizar · ${available} disponíveis`;
+  if (due) return `${due} ${due === 1 ? "crédito a regularizar" : "créditos a regularizar"}`;
+  if (available) return `${available} ${available === 1 ? "crédito disponível" : "créditos disponíveis"}`;
+  return "Sem créditos";
 }
 
 function initials(value: string) {
@@ -1087,6 +1095,10 @@ export function ManagementApp() {
     useState<BillableService | null>(null);
   const [billingTab, setBillingTab] = useState<BillingTab>("pending");
   const [creditCustomerId, setCreditCustomerId] = useState<string>("");
+  const [creditPackagePreset, setCreditPackagePreset] = useState<{
+    serviceType?: ActiveCreditServiceType;
+    units?: number;
+  }>({});
   const [creditAdjustmentCustomerId, setCreditAdjustmentCustomerId] =
     useState<string>("");
   const [statementCustomerId, setStatementCustomerId] = useState<string>("");
@@ -1848,7 +1860,7 @@ export function ManagementApp() {
             customer.id === booking.customerId
               ? {
                   ...customer,
-                  creditsLabel: `${totalCredits(nextBalances, customer.id)} créditos disponíveis`,
+                  creditsLabel: creditBalanceSummary(nextBalances, customer.id),
                 }
               : customer,
           ),
@@ -3133,7 +3145,10 @@ export function ManagementApp() {
     setSelectedBillables((current) => [...current, service.id]);
   }
 
-  async function useCreditsForBillable(service: BillableService) {
+  async function useCreditsForBillable(
+    service: BillableService,
+    allowNegative = false,
+  ) {
     const serviceType = service.serviceType;
     const creditUnits = service.creditUnits ?? 0;
     if (
@@ -3148,7 +3163,7 @@ export function ManagementApp() {
     const available = creditBalances[service.customerId]?.[
       serviceType as CreditServiceType
     ] ?? 0;
-    if (available < creditUnits) {
+    if (available < creditUnits && !allowNegative) {
       setToast({
         message: `Saldo insuficiente: são necessários ${creditUnits} ${
           creditUnits === 1 ? "crédito" : "créditos"
@@ -3164,10 +3179,12 @@ export function ManagementApp() {
           requestJson<{
             receipt?: { id: string };
             chargeCreated?: boolean;
+            usedOnAccount?: boolean;
           }>("/api/credits/consume", {
             method: "POST",
             body: JSON.stringify({
               appointmentItemId: service.appointmentItemId,
+              allowNegative,
             }),
           }),
         {
@@ -3180,7 +3197,13 @@ export function ManagementApp() {
         );
         setToast({
           message: result.chargeCreated
-            ? "Crédito de banho utilizado. O recibo está pronto e a tosa foi separada para cobrança regular."
+            ? result.usedOnAccount
+              ? "Crédito de banho lançado a prazo. A tosa foi separada para cobrança regular."
+              : "Crédito de banho utilizado. O recibo está pronto e a tosa foi separada para cobrança regular."
+            : result.usedOnAccount
+              ? `${creditUnits} ${
+                  creditUnits === 1 ? "crédito lançado" : "créditos lançados"
+                } a prazo. O saldo ficou negativo e aparece para regularização.`
             : `${creditUnits} ${
                 creditUnits === 1 ? "crédito utilizado" : "créditos utilizados"
               }. O recibo está pronto.`,
@@ -3240,7 +3263,13 @@ export function ManagementApp() {
     ]);
     setToast({
       message: hasGroomingAddon
-        ? "Crédito de banho utilizado. A tosa foi separada para cobrança regular."
+        ? nextBalance < 0
+          ? "Crédito de banho lançado a prazo. A tosa foi separada para cobrança regular."
+          : "Crédito de banho utilizado. A tosa foi separada para cobrança regular."
+        : nextBalance < 0
+          ? `${creditUnits} ${
+              creditUnits === 1 ? "crédito lançado" : "créditos lançados"
+            } a prazo. O saldo ficou negativo e aparece para regularização.`
         : `${creditUnits} ${
             creditUnits === 1 ? "crédito utilizado" : "créditos utilizados"
           }. O recibo está pronto.`,
@@ -3321,8 +3350,12 @@ export function ManagementApp() {
     return true;
   }
 
-  function openCreditPackage(customerId?: string) {
+  function openCreditPackage(
+    customerId?: string,
+    preset?: { serviceType: ActiveCreditServiceType; units: number },
+  ) {
     if (customerId) setCreditCustomerId(customerId);
+    setCreditPackagePreset(preset ?? {});
     setDialog("creditPackage");
   }
 
@@ -3347,7 +3380,7 @@ export function ManagementApp() {
       !customers.some((customer) => customer.id === accountId) ||
       !creditServiceTypes.includes(serviceType as CreditServiceType) ||
       !Number.isInteger(targetUnits) ||
-      targetUnits < 0 ||
+      targetUnits < -10_000 ||
       targetUnits > 10_000 ||
       reason.length < 3
     ) {
@@ -3600,7 +3633,7 @@ export function ManagementApp() {
         `Recibo ${receipt.number}`,
         `${receipt.service} para ${receipt.dogName}`,
         `Data: ${receipt.date}`,
-        `${receipt.creditUnits} ${receipt.creditUnits === 1 ? "crédito pré-pago utilizado" : "créditos pré-pagos utilizados"}.`,
+        `${receipt.creditUnits} ${receipt.creditUnits === 1 ? "crédito utilizado" : "créditos utilizados"}.`,
         "Nenhuma nova fatura foi gerada.",
       ].join("\n");
 
@@ -4464,7 +4497,7 @@ export function ManagementApp() {
           customer.id === purchase.customerId
             ? {
                 ...customer,
-                creditsLabel: `${totalCredits(nextBalances, customer.id)} créditos disponíveis`,
+                creditsLabel: creditBalanceSummary(nextBalances, customer.id),
               }
             : customer,
         ),
@@ -5336,7 +5369,7 @@ export function ManagementApp() {
               onUseCredits={useCreditsForBillable}
               onCreateInvoice={openInvoiceForSelection}
               onOpenInvoice={openExistingInvoice}
-              onAddCredits={(customerId) => openCreditPackage(customerId)}
+              onAddCredits={openCreditPackage}
               onOpenReceipt={openReceipt}
               onToggleCash={toggleInvoiceCash}
               onSaveNote={saveInvoiceNote}
@@ -6762,9 +6795,12 @@ export function ManagementApp() {
 
       {dialog === "creditPackage" && (
         <CreditPackageDialog
-          key={creditCustomerId}
+          key={`${creditCustomerId}:${creditPackagePreset.serviceType ?? "daycare"}:${creditPackagePreset.units ?? 4}`}
           customers={customers}
           initialCustomerId={creditCustomerId}
+          initialServiceType={creditPackagePreset.serviceType}
+          initialUnits={creditPackagePreset.units}
+          balances={creditBalances}
           creditPricing={creditPricing}
           onClose={() => setDialog(null)}
           onSubmit={submitCreditPackage}
@@ -8699,7 +8735,9 @@ function DogProfile({
     grooming: 0,
     transport: 0,
   };
-  const hasCredits = totalCredits(creditBalances, dog.customerId) > 0;
+  const hasCredits = creditServiceTypes.some(
+    (serviceType) => (balances[serviceType] ?? 0) !== 0,
+  );
   return (
     <div className="profile-page">
       <button className="back-button" onClick={onBack}>
@@ -8794,26 +8832,26 @@ function DogProfile({
           </section>
           <section className="panel">
             <p className="section-kicker">Créditos</p>
-            <h3>Disponíveis</h3>
+            <h3>Saldos</h3>
             {hasCredits ? (
               <div className="credit-list">
                 <div>
                   <span>Creche</span>
-                  <strong>{balances.daycare}</strong>
+                  <strong className={balances.daycare < 0 ? "negative-credit-value" : ""}>{balances.daycare}</strong>
                 </div>
                 <div>
                   <span>Banho</span>
-                  <strong>{balances.bath}</strong>
+                  <strong className={balances.bath < 0 ? "negative-credit-value" : ""}>{balances.bath}</strong>
                 </div>
                 <div>
                   <span>Taxi-dog</span>
-                  <strong>{balances.transport}</strong>
+                  <strong className={balances.transport < 0 ? "negative-credit-value" : ""}>{balances.transport}</strong>
                 </div>
               </div>
             ) : (
               <EmptyState
                 title="Sem créditos"
-                description="A conta deste cliente não possui utilizações pré-pagas."
+                description="A conta deste cliente está sem créditos disponíveis ou a regularizar."
               />
             )}
           </section>
@@ -9322,20 +9360,21 @@ function CustomerProfile({
             <div className="credit-list">
               <div>
                 <span>Creche</span>
-                <strong>{balances.daycare}</strong>
+                <strong className={balances.daycare < 0 ? "negative-credit-value" : ""}>{balances.daycare}</strong>
               </div>
               <div>
                 <span>Banho</span>
-                <strong>{balances.bath}</strong>
+                <strong className={balances.bath < 0 ? "negative-credit-value" : ""}>{balances.bath}</strong>
               </div>
               <div>
                 <span>Taxi-dog</span>
-                <strong>{balances.transport}</strong>
+                <strong className={balances.transport < 0 ? "negative-credit-value" : ""}>{balances.transport}</strong>
               </div>
             </div>
             <p className="ledger-note">
-              Estes saldos podem ser consultados pela equipe durante o atendimento.
-              Os créditos são liberados somente após a confirmação do pagamento.
+              Saldos negativos são créditos usados a prazo. Quando um novo pacote
+              for pago, os créditos entram nesta mesma carteira e reduzem a dívida
+              automaticamente.
             </p>
           </section>
           {canViewFinancials && <section className="panel profile-full-card">
@@ -9464,10 +9503,16 @@ function BillingView({
   receipts: ServiceReceipt[];
   onToggleBillable: (service: BillableService) => void;
   onRegularBilling: (service: BillableService) => void;
-  onUseCredits: (service: BillableService) => void | Promise<void>;
+  onUseCredits: (
+    service: BillableService,
+    allowNegative?: boolean,
+  ) => void | Promise<void>;
   onCreateInvoice: () => void;
   onOpenInvoice: (invoice: Invoice) => void;
-  onAddCredits: (customerId?: string) => void;
+  onAddCredits: (
+    customerId?: string,
+    preset?: { serviceType: ActiveCreditServiceType; units: number },
+  ) => void;
   onOpenReceipt: (receipt: ServiceReceipt) => void;
   onToggleCash: (invoice: Invoice) => void;
   onSaveNote: (
@@ -9506,6 +9551,8 @@ function BillingView({
   const [mergeDueDate, setMergeDueDate] = useState(operationalToday);
   const [creditSearch, setCreditSearch] = useState("");
   const [showZeroCreditAccounts, setShowZeroCreditAccounts] = useState(false);
+  const [creditOnAccountService, setCreditOnAccountService] =
+    useState<BillableService | null>(null);
   const synchronizedHistoryInvoices = historyInvoices.map(
     (historyInvoice) =>
       invoices.find((invoice) => invoice.id === historyInvoice.id) ??
@@ -9544,9 +9591,27 @@ function BillingView({
     return (
       matchesSearch &&
       (showZeroCreditAccounts ||
-        totalCredits(creditBalances, customer.id) > 0)
+        creditServiceTypes.some(
+          (serviceType) =>
+            (creditBalances[customer.id]?.[serviceType] ?? 0) !== 0,
+        ))
     );
   });
+  const negativeCreditAccounts = customers
+    .flatMap((customer) =>
+      creditServiceTypes.flatMap((serviceType) => {
+        const balance = creditBalances[customer.id]?.[serviceType] ?? 0;
+        return balance < 0
+          ? [{ customer, serviceType, balance }]
+          : [];
+      }),
+    )
+    .sort(
+      (left, right) =>
+        left.customer.name.localeCompare(right.customer.name, "pt-BR", {
+          sensitivity: "base",
+        }) || left.serviceType.localeCompare(right.serviceType),
+    );
   const renewalCandidates = customers.flatMap((customer) =>
     creditServiceTypes.flatMap((serviceType) => {
       const hasBought = creditPurchases.some(
@@ -9557,7 +9622,9 @@ function BillingView({
       );
       if (!hasBought) return [];
       const balance = creditBalances[customer.id]?.[serviceType] ?? 0;
-      return balance <= 1 ? [{ customer, serviceType, balance }] : [];
+      return balance >= 0 && balance <= 1
+        ? [{ customer, serviceType, balance }]
+        : [];
     }),
   ).sort((left, right) =>
     left.balance - right.balance ||
@@ -9938,8 +10005,9 @@ function BillingView({
                 <p className="section-kicker">Aguardando faturamento</p>
                 <h2>Serviços concluídos</h2>
                 <small className="panel-heading-note">
-                  Escolha Regular para conferir o valor e incluir na fatura, ou
-                  quite o serviço com créditos disponíveis.
+                  Escolha Regular para definir o valor e incluir na fatura, ou
+                  use créditos — inclusive a prazo para clientes que acertam o
+                  saldo posteriormente.
                 </small>
               </div>
               <span className="invoice-only-badge">
@@ -10017,11 +10085,6 @@ function BillingView({
                           </small>
                         )}
                       </span>
-                      <strong className="billable-amount">
-                        {lodgingValuePending
-                          ? "Valor a definir"
-                          : formatCurrency(service.amountCents)}
-                      </strong>
                       <span className="billable-payment-actions">
                         <button
                           type="button"
@@ -10036,17 +10099,29 @@ function BillingView({
                         {canUseCredits && (
                           <button
                             type="button"
-                            className="text-button billable-credit-action"
-                            disabled={checked || availableCredits < creditUnits}
-                            onClick={() => void onUseCredits(service)}
+                            className={`text-button billable-credit-action${
+                              availableCredits < creditUnits ? " on-account" : ""
+                            }`}
+                            disabled={checked}
+                            onClick={() => {
+                              if (availableCredits < creditUnits) {
+                                setCreditOnAccountService(service);
+                              } else {
+                                void onUseCredits(service);
+                              }
+                            }}
                             title={
                               availableCredits < creditUnits
-                                ? `Saldo atual: ${availableCredits}`
+                                ? `Saldo atual: ${availableCredits}; após o lançamento: ${availableCredits - creditUnits}`
                                 : `Saldo após o uso: ${availableCredits - creditUnits}`
                             }
                           >
                             {availableCredits < creditUnits
-                              ? "Sem saldo"
+                              ? availableCredits > 0
+                                ? `Usar ${creditUnits} créditos (${creditUnits - availableCredits} a prazo)`
+                                : `Usar ${creditUnits} ${
+                                    creditUnits === 1 ? "crédito" : "créditos"
+                                  } a prazo`
                               : `Usar ${creditUnits} ${
                                   creditUnits === 1 ? "crédito" : "créditos"
                                 }`}
@@ -10510,6 +10585,47 @@ function BillingView({
               />
             )}
           </section>
+          {tab === "pending" && negativeCreditAccounts.length > 0 && (
+            <section className="panel full-panel negative-credit-panel">
+              <div className="panel-heading">
+                <div>
+                  <p className="section-kicker">Créditos usados a prazo</p>
+                  <h2>Saldos a regularizar</h2>
+                  <small className="panel-heading-note">
+                    Estes clientes utilizaram serviços além do saldo disponível.
+                    Ao pagar um novo pacote, os créditos entram nesta mesma
+                    carteira e reduzem automaticamente o saldo negativo.
+                  </small>
+                </div>
+                <span className="negative-credit-count">
+                  {negativeCreditAccounts.length}
+                </span>
+              </div>
+              <div className="negative-credit-list">
+                {negativeCreditAccounts.map(({ customer, serviceType, balance }) => (
+                  <article key={`${customer.id}:${serviceType}`}>
+                    <span>
+                      <strong>{customer.name}</strong>
+                      <small>{serviceLabels[serviceType]}</small>
+                    </span>
+                    <strong className="negative-credit-value">{balance}</strong>
+                    <button
+                      className="text-button"
+                      type="button"
+                      onClick={() =>
+                        onAddCredits(customer.id, {
+                          serviceType: serviceType as ActiveCreditServiceType,
+                          units: Math.abs(balance),
+                        })
+                      }
+                    >
+                      Regularizar
+                    </button>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
         </>
       )}
 
@@ -10596,15 +10712,15 @@ function BillingView({
                     <div className="credit-list">
                       <div>
                         <span>Creche</span>
-                        <strong>{balance.daycare}</strong>
+                        <strong className={balance.daycare < 0 ? "negative-credit-value" : ""}>{balance.daycare}</strong>
                       </div>
                       <div>
                         <span>Banho</span>
-                        <strong>{balance.bath}</strong>
+                        <strong className={balance.bath < 0 ? "negative-credit-value" : ""}>{balance.bath}</strong>
                       </div>
                       <div>
                         <span>Taxi-dog</span>
-                        <strong>{balance.transport}</strong>
+                        <strong className={balance.transport < 0 ? "negative-credit-value" : ""}>{balance.transport}</strong>
                       </div>
                     </div>
                   </article>
@@ -10833,6 +10949,56 @@ function BillingView({
           </div>
         </Dialog>
       )}
+      {creditOnAccountService && (() => {
+        const serviceType = creditOnAccountService.serviceType as CreditServiceType;
+        const units = creditOnAccountService.creditUnits ?? 0;
+        const currentBalance =
+          creditBalances[creditOnAccountService.customerId]?.[serviceType] ?? 0;
+        const nextBalance = currentBalance - units;
+        return (
+          <Dialog
+            title="Usar crédito a prazo?"
+            description="Confirme apenas quando este cliente costuma regularizar os créditos posteriormente."
+            onClose={() => setCreditOnAccountService(null)}
+            size="small"
+          >
+            <div className="credit-on-account-dialog">
+              <p>
+                <strong>{creditOnAccountService.customerName}</strong> · {creditOnAccountService.dogName}<br />
+                {creditOnAccountService.service}
+              </p>
+              <div>
+                <span>Saldo atual <strong>{currentBalance}</strong></span>
+                <span>Após este serviço <strong>{nextBalance}</strong></span>
+              </div>
+              <small>
+                O atendimento será quitado com {units} {units === 1 ? "crédito" : "créditos"} e
+                o saldo negativo ficará visível até a compra e o pagamento de um novo pacote.
+              </small>
+              <div className="dialog-actions">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => setCreditOnAccountService(null)}
+                >
+                  Voltar
+                </button>
+                <button
+                  className="danger-button"
+                  type="button"
+                  onClick={() => {
+                    const service = creditOnAccountService;
+                    setCreditOnAccountService(null);
+                    void onUseCredits(service, true);
+                  }}
+                >
+                  Confirmar crédito a prazo
+                </button>
+              </div>
+            </div>
+          </Dialog>
+        );
+      })()}
     </div>
   );
 }
@@ -12052,22 +12218,33 @@ function RegularBillingDialog({
 function CreditPackageDialog({
   customers,
   initialCustomerId,
+  initialServiceType,
+  initialUnits,
+  balances,
   creditPricing,
   onClose,
   onSubmit,
 }: {
   customers: Customer[];
   initialCustomerId: string;
+  initialServiceType?: ActiveCreditServiceType;
+  initialUnits?: number;
+  balances: CreditBalances;
   creditPricing: CreditPricingSettings;
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const firstCustomerId = initialCustomerId || customers[0]?.id || "";
   const initialCustomer = customers.find((item) => item.id === firstCustomerId);
+  const startingServiceType = initialServiceType ?? "daycare";
+  const startingUnits = Math.max(
+    1,
+    Math.min(100, Math.trunc(initialUnits ?? 4)),
+  );
   const [customerId, setCustomerId] = useState(firstCustomerId);
   const [serviceType, setServiceType] =
-    useState<ActiveCreditServiceType>("daycare");
-  const [units, setUnits] = useState(4);
+    useState<ActiveCreditServiceType>(startingServiceType);
+  const [units, setUnits] = useState(startingUnits);
   const [multiDog, setMultiDog] = useState(
     (initialCustomer?.dogIds.length ?? 0) >= 2,
   );
@@ -12081,8 +12258,8 @@ function CreditPackageDialog({
   const [packagePrice, setPackagePrice] = useState(
     (suggestedCreditTotalCents(
       creditPricing,
-      "daycare",
-      4,
+      startingServiceType,
+      startingUnits,
       initialContext,
     ) / 100).toFixed(2),
   );
@@ -12108,6 +12285,8 @@ function CreditPackageDialog({
     Math.round(Number(packagePrice || 0) * 100),
   );
   const differenceCents = standardValueCents - packageValueCents;
+  const currentCreditBalance = balances[customerId]?.[serviceType] ?? 0;
+  const resultingCreditBalance = currentCreditBalance + units;
 
   function updateSuggestedPrice(
     nextServiceType: ActiveCreditServiceType,
@@ -12318,6 +12497,10 @@ function CreditPackageDialog({
             <span>{differenceCents >= 0 ? "Economia do cliente" : "Acréscimo"}</span>
             <strong>{formatCurrency(Math.abs(differenceCents))}</strong>
           </div>
+          <div className={resultingCreditBalance < 0 ? "credit-due" : ""}>
+            <span>Saldo após o pagamento</span>
+            <strong>{currentCreditBalance} + {units} = {resultingCreditBalance}</strong>
+          </div>
         </div>
         <div className="credit-safety-note full">
           <strong>Regra de segurança</strong>
@@ -12361,7 +12544,7 @@ function CreditAdjustmentDialog({
   return (
     <Dialog
       title="Ajustar créditos"
-      description="Defina o saldo correto. O ajuste ficará registrado no histórico deste cliente."
+      description="Defina o saldo correto. Valores negativos representam créditos usados a prazo; todo ajuste fica registrado no histórico."
       onClose={onClose}
       size="small"
     >
@@ -12395,7 +12578,7 @@ function CreditAdjustmentDialog({
           <input
             name="targetUnits"
             type="number"
-            min="0"
+            min="-10000"
             max="10000"
             step="1"
             value={targetUnits}
@@ -12445,7 +12628,7 @@ function ReceiptDialog({
   return (
     <Dialog
       title={`Recibo ${receipt.number}`}
-      description="Comprovante de serviço quitado com crédito pré-pago."
+      description="Comprovante de serviço quitado com crédito."
       onClose={onClose}
       size="small"
     >

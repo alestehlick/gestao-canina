@@ -242,7 +242,7 @@ export async function GET(request: Request) {
           serviceName: row.serviceName,
           units: Number(row.units),
         }))
-        .filter((row) => row.units > 0),
+        .filter((row) => row.units !== 0),
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {

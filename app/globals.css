@@ -3594,7 +3594,7 @@ h3 {
   --service-soft: var(--other-soft);
   display: grid;
   min-height: 58px;
-  grid-template-columns: 24px 92px minmax(170px, 1.1fr) 1fr auto minmax(180px, auto);
+  grid-template-columns: 24px 92px minmax(170px, 1.1fr) 1fr minmax(180px, auto);
   align-items: center;
   gap: 12px;
   border-top: 1px solid var(--line-soft);
@@ -3638,6 +3638,97 @@ h3 {
   white-space: nowrap;
 }
 
+.billable-credit-action.on-account,
+.negative-credit-value {
+  color: var(--danger);
+}
+
+.negative-credit-panel {
+  border-color: color-mix(in srgb, var(--danger) 20%, var(--line-soft));
+}
+
+.negative-credit-count {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  color: var(--danger);
+  font-weight: 760;
+}
+
+.negative-credit-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.negative-credit-list > article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 11px;
+  background: var(--surface);
+  padding: 11px 13px;
+}
+
+.negative-credit-list > article > span,
+.negative-credit-list > article > span > strong,
+.negative-credit-list > article > span > small {
+  display: block;
+  min-width: 0;
+}
+
+.negative-credit-list > article > span > small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.credit-on-account-dialog {
+  display: grid;
+  gap: 15px;
+}
+
+.credit-on-account-dialog > p,
+.credit-on-account-dialog > small {
+  margin: 0;
+}
+
+.credit-on-account-dialog > div:not(.dialog-actions) {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.credit-on-account-dialog > div:not(.dialog-actions) > span {
+  display: grid;
+  gap: 3px;
+  border-radius: 10px;
+  background: var(--surface-muted);
+  padding: 11px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.credit-on-account-dialog > div:not(.dialog-actions) strong:last-child {
+  color: var(--danger);
+  font-size: 1rem;
+}
+
+.portal-credit-summary-list > .credit-due {
+  border-color: color-mix(in srgb, var(--danger) 22%, var(--line-soft));
+  background: color-mix(in srgb, var(--danger) 5%, var(--surface));
+}
+
+.portal-credit-summary-list > .credit-due strong,
+.portal-credit-summary-list > .credit-due small {
+  color: var(--danger);
+}
+
 .regular-billing-summary {
   display: grid;
   gap: 4px;
@@ -3674,11 +3765,6 @@ h3 {
 
 .billable-description > strong {
   font-weight: 680;
-}
-
-.billable-amount {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 .invoice-delivery-state {
@@ -4602,6 +4688,11 @@ h3 {
 
 .package-summary .saving {
   color: var(--success);
+}
+
+.package-summary .credit-due,
+.package-summary .credit-due span {
+  color: var(--danger);
 }
 
 .credit-safety-note {
@@ -6468,13 +6559,6 @@ h3 {
     line-height: 1.4;
   }
 
-  .billable-amount {
-    grid-column: 3;
-    grid-row: 2;
-    align-self: start;
-    font-size: 0.87rem;
-  }
-
   .billable-payment-actions {
     grid-column: 2 / -1;
     grid-row: 4;
@@ -6485,6 +6569,24 @@ h3 {
 
   .billable-credit-action {
     min-width: 0;
+  }
+
+  .negative-credit-list {
+    grid-template-columns: 1fr;
+  }
+
+  .negative-credit-list > article {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 12px;
+  }
+
+  .negative-credit-list > article > button {
+    grid-column: 1 / -1;
+    width: fit-content;
+  }
+
+  .credit-on-account-dialog > div:not(.dialog-actions) {
+    grid-template-columns: 1fr;
   }
 
   .selection-bar {

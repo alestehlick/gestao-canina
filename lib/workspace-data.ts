@@ -498,9 +498,8 @@ export function mapWorkspaceCreditBalances(
 
     const accountBalance =
       balances[balance.accountId] ?? emptyCreditBalance();
-    accountBalance[serviceType] = Math.max(
-      0,
-      Math.trunc(Number(balance.availableUnits) || 0),
+    accountBalance[serviceType] = Math.trunc(
+      Number(balance.availableUnits) || 0,
     );
     balances[balance.accountId] = accountBalance;
   }
@@ -546,9 +545,7 @@ export function mapWorkspaceCustomers(
       const hasOverdueInvoice = openInvoices.some(
         (invoice) => invoice.dueDate < referenceDate,
       );
-      const availableCredits = totalAvailableCredits(
-        creditBalances[account.id],
-      );
+      const customerCredits = creditBalances[account.id];
 
       return {
         id: account.id,
@@ -566,7 +563,7 @@ export function mapWorkspaceCustomers(
         birthDate: account.birthDate ?? undefined,
         dogIds: activeDogIdsByAccount.get(account.id) ?? [],
         balanceCents,
-        creditsLabel: creditLabel(availableCredits),
+        creditsLabel: creditLabel(customerCredits),
         status: hasOverdueInvoice
           ? "overdue"
           : openInvoices.length > 0
@@ -1592,9 +1589,23 @@ function totalAvailableCredits(
   );
 }
 
-function creditLabel(total: number) {
-  if (total <= 0) return "Sem créditos";
-  return `${total} ${total === 1 ? "crédito disponível" : "créditos disponíveis"}`;
+function creditLabel(
+  balance: Record<CreditServiceType, number> | undefined,
+) {
+  if (!balance) return "Sem créditos";
+  const available = totalAvailableCredits(balance);
+  const due = creditServiceTypes.reduce(
+    (total, serviceType) => total + Math.max(0, -(balance[serviceType] ?? 0)),
+    0,
+  );
+  if (due > 0 && available > 0) {
+    return `${due} ${due === 1 ? "crédito a regularizar" : "créditos a regularizar"} · ${available} disponíveis`;
+  }
+  if (due > 0) {
+    return `${due} ${due === 1 ? "crédito a regularizar" : "créditos a regularizar"}`;
+  }
+  if (available <= 0) return "Sem créditos";
+  return `${available} ${available === 1 ? "crédito disponível" : "créditos disponíveis"}`;
 }
 
 function taskDueLabel(task: WorkspaceTask, referenceDate: string) {

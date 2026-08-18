@@ -1087,3 +1087,40 @@ test("separa clientes ativos, inativos e excluídos sem perder o histórico", as
   assert.match(appointments, /Reative o cliente antes de criar um novo serviço/);
   assert.match(batchAppointments, /Reative o cliente antes de criar novos serviços/);
 });
+
+test("mantém créditos negativos na mesma carteira até a regularização", async () => {
+  const [app, consume, credits, workspaceData, statements, statementPdf, portal, css] =
+    await Promise.all([
+      readFile(new URL("../app/components/management-app.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/credits/consume/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/credits/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../lib/workspace-data.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/statements/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../lib/statement-pdf.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/components/customer-portal.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    ]);
+
+  assert.doesNotMatch(app, /className="billable-amount"/);
+  assert.doesNotMatch(app, />Sem saldo</);
+  assert.match(app, /Usar crédito a prazo/);
+  assert.match(app, /negativeCreditAccounts/);
+  assert.match(app, /Saldos a regularizar/);
+  assert.match(app, /Confirmar crédito a prazo/);
+  assert.match(app, /initialUnits=\{creditPackagePreset\.units\}/);
+  assert.match(app, /currentCreditBalance \+ units/);
+  assert.match(app, /Saldo após o pagamento/);
+  assert.match(consume, /body\.allowNegative === true/);
+  assert.match(consume, /Serviço concluído com crédito a prazo/);
+  assert.match(consume, /\? = 1 OR/);
+  assert.match(consume, /usedOnAccount/);
+  assert.match(credits, /min: -10_000/);
+  assert.doesNotMatch(workspaceData, /accountBalance\[serviceType\] = Math\.max/);
+  assert.match(workspaceData, /créditos a regularizar/);
+  assert.match(statements, /row\.units !== 0/);
+  assert.match(statementPdf, /Saldos de créditos/);
+  assert.match(statementPdf, /Math\.abs\(item\.units\).*a regularizar/s);
+  assert.match(portal, /credit\.availableUnits < 0/);
+  assert.match(css, /\.negative-credit-list/);
+  assert.match(css, /\.portal-credit-summary-list > \.credit-due/);
+});

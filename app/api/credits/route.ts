@@ -121,7 +121,7 @@ export async function POST(request: Request) {
     const accountId = requiredString(body, "accountId", 80);
     const serviceCode = requiredString(body, "serviceCode", 40);
     const targetUnits = requiredInteger(body, "targetUnits", {
-      min: 0,
+      min: -10_000,
       max: 10_000,
     });
     const reason = requiredString(body, "reason", 500).trim();
